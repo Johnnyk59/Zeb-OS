@@ -164,7 +164,7 @@ def build_turn_context(
     except Exception:
         pass
 
-    # Tag log records on this thread with the session ID for ``hermes logs``.
+    # Tag log records on this thread with the session ID for ``zeb logs``.
     set_session_context(agent.session_id)
 
     # Bind the skill write-origin ContextVar for this thread.
@@ -370,7 +370,7 @@ def build_turn_context(
         )
         _preflight_deferred = _defer_preflight(_preflight_tokens)
         # Codex app-server threads are compacted by the codex agent itself;
-        # Hermes only initiates compaction in "hermes" mode (#36801).
+        # Zeb only initiates compaction in "zeb" mode (#36801).
         _codex_native_auto = (
             getattr(agent, "api_mode", None) == "codex_app_server"
             and str(
@@ -413,8 +413,8 @@ def build_turn_context(
             )
         elif _codex_native_auto:
             logger.info(
-                "Skipping Hermes preflight compression for codex app-server "
-                "(mode=%s); Hermes will not start thread compaction here.",
+                "Skipping Zeb preflight compression for codex app-server "
+                "(mode=%s); Zeb will not start thread compaction here.",
                 getattr(agent, "codex_app_server_auto_compaction", "native"),
             )
         elif _compressor.should_compress(_preflight_tokens):
@@ -464,7 +464,7 @@ def build_turn_context(
     # Plugin hook: pre_llm_call (context injected into user message, not system prompt).
     plugin_user_context = ""
     try:
-        from hermes_cli.plugins import invoke_hook as _invoke_hook
+        from zeb_cli.plugins import invoke_hook as _invoke_hook
         _pre_results = _invoke_hook(
             "pre_llm_call",
             session_id=agent.session_id,

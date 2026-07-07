@@ -6,7 +6,7 @@
  * factor = 1.2 ^ level.
  */
 
-const ZOOM_STORAGE_KEY = 'hermes:desktop:zoomLevel'
+const ZOOM_STORAGE_KEY = 'zeb:desktop:zoomLevel'
 
 const ZOOM_FACTOR_BASE = 1.2
 const MIN_ZOOM_LEVEL = -9

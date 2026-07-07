@@ -36,9 +36,9 @@ moa:
 
 
 def _facade(monkeypatch, tmp_path, on_call=None):
-    home = tmp_path / ".hermes"
+    home = tmp_path / ".zeb"
     _write_cfg(home)
-    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("ZEB_HOME", str(home))
     calls = []
 
     def fake_call_llm(**kwargs):

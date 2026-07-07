@@ -96,6 +96,6 @@ let
         pythonPackageOverrides
       ]);
 in
-pythonSet.mkVirtualEnv "hermes-agent-env" {
-  hermes-agent = dependency-groups;
+pythonSet.mkVirtualEnv "zeb-agent-env" {
+  zeb-agent = dependency-groups;
 }

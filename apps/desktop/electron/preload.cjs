@@ -1,60 +1,60 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
-contextBridge.exposeInMainWorld('hermesDesktop', {
-  getConnection: profile => ipcRenderer.invoke('hermes:connection', profile),
-  revalidateConnection: () => ipcRenderer.invoke('hermes:connection:revalidate'),
-  touchBackend: profile => ipcRenderer.invoke('hermes:backend:touch', profile),
-  getGatewayWsUrl: profile => ipcRenderer.invoke('hermes:gateway:ws-url', profile),
-  openSessionWindow: (sessionId, opts) => ipcRenderer.invoke('hermes:window:openSession', sessionId, opts),
-  openNewSessionWindow: () => ipcRenderer.invoke('hermes:window:openNewSession'),
+contextBridge.exposeInMainWorld('zebDesktop', {
+  getConnection: profile => ipcRenderer.invoke('zeb:connection', profile),
+  revalidateConnection: () => ipcRenderer.invoke('zeb:connection:revalidate'),
+  touchBackend: profile => ipcRenderer.invoke('zeb:backend:touch', profile),
+  getGatewayWsUrl: profile => ipcRenderer.invoke('zeb:gateway:ws-url', profile),
+  openSessionWindow: (sessionId, opts) => ipcRenderer.invoke('zeb:window:openSession', sessionId, opts),
+  openNewSessionWindow: () => ipcRenderer.invoke('zeb:window:openNewSession'),
   petOverlay: {
     // Main renderer → main process: window lifecycle + drag. `request` is
     // `{ bounds, screen }`; resolves with the screen bounds it actually used.
-    open: request => ipcRenderer.invoke('hermes:pet-overlay:open', request),
-    close: () => ipcRenderer.invoke('hermes:pet-overlay:close'),
-    setBounds: bounds => ipcRenderer.send('hermes:pet-overlay:set-bounds', bounds),
-    setIgnoreMouse: ignore => ipcRenderer.send('hermes:pet-overlay:ignore-mouse', ignore),
+    open: request => ipcRenderer.invoke('zeb:pet-overlay:open', request),
+    close: () => ipcRenderer.invoke('zeb:pet-overlay:close'),
+    setBounds: bounds => ipcRenderer.send('zeb:pet-overlay:set-bounds', bounds),
+    setIgnoreMouse: ignore => ipcRenderer.send('zeb:pet-overlay:ignore-mouse', ignore),
     // Flip the overlay focusable (and focus it) while the composer needs keys.
-    setFocusable: focusable => ipcRenderer.send('hermes:pet-overlay:set-focusable', focusable),
+    setFocusable: focusable => ipcRenderer.send('zeb:pet-overlay:set-focusable', focusable),
     // Main renderer → overlay (forwarded by main): push the latest pet state.
-    pushState: payload => ipcRenderer.send('hermes:pet-overlay:state', payload),
+    pushState: payload => ipcRenderer.send('zeb:pet-overlay:state', payload),
     // Overlay → main renderer (forwarded by main): pop back in / composer submit.
-    control: payload => ipcRenderer.send('hermes:pet-overlay:control', payload),
+    control: payload => ipcRenderer.send('zeb:pet-overlay:control', payload),
     // Overlay subscribes to state pushes.
     onState: callback => {
       const listener = (_event, payload) => callback(payload)
-      ipcRenderer.on('hermes:pet-overlay:state', listener)
-      return () => ipcRenderer.removeListener('hermes:pet-overlay:state', listener)
+      ipcRenderer.on('zeb:pet-overlay:state', listener)
+      return () => ipcRenderer.removeListener('zeb:pet-overlay:state', listener)
     },
     // Main renderer subscribes to overlay control messages.
     onControl: callback => {
       const listener = (_event, payload) => callback(payload)
-      ipcRenderer.on('hermes:pet-overlay:control', listener)
-      return () => ipcRenderer.removeListener('hermes:pet-overlay:control', listener)
+      ipcRenderer.on('zeb:pet-overlay:control', listener)
+      return () => ipcRenderer.removeListener('zeb:pet-overlay:control', listener)
     }
   },
-  getBootProgress: () => ipcRenderer.invoke('hermes:boot-progress:get'),
-  getConnectionConfig: profile => ipcRenderer.invoke('hermes:connection-config:get', profile),
-  saveConnectionConfig: payload => ipcRenderer.invoke('hermes:connection-config:save', payload),
-  applyConnectionConfig: payload => ipcRenderer.invoke('hermes:connection-config:apply', payload),
-  testConnectionConfig: payload => ipcRenderer.invoke('hermes:connection-config:test', payload),
-  probeConnectionConfig: remoteUrl => ipcRenderer.invoke('hermes:connection-config:probe', remoteUrl),
-  oauthLoginConnectionConfig: remoteUrl => ipcRenderer.invoke('hermes:connection-config:oauth-login', remoteUrl),
-  oauthLogoutConnectionConfig: remoteUrl => ipcRenderer.invoke('hermes:connection-config:oauth-logout', remoteUrl),
+  getBootProgress: () => ipcRenderer.invoke('zeb:boot-progress:get'),
+  getConnectionConfig: profile => ipcRenderer.invoke('zeb:connection-config:get', profile),
+  saveConnectionConfig: payload => ipcRenderer.invoke('zeb:connection-config:save', payload),
+  applyConnectionConfig: payload => ipcRenderer.invoke('zeb:connection-config:apply', payload),
+  testConnectionConfig: payload => ipcRenderer.invoke('zeb:connection-config:test', payload),
+  probeConnectionConfig: remoteUrl => ipcRenderer.invoke('zeb:connection-config:probe', remoteUrl),
+  oauthLoginConnectionConfig: remoteUrl => ipcRenderer.invoke('zeb:connection-config:oauth-login', remoteUrl),
+  oauthLogoutConnectionConfig: remoteUrl => ipcRenderer.invoke('zeb:connection-config:oauth-logout', remoteUrl),
   profile: {
-    get: () => ipcRenderer.invoke('hermes:profile:get'),
-    set: name => ipcRenderer.invoke('hermes:profile:set', name)
+    get: () => ipcRenderer.invoke('zeb:profile:get'),
+    set: name => ipcRenderer.invoke('zeb:profile:set', name)
   },
-  api: request => ipcRenderer.invoke('hermes:api', request),
-  notify: payload => ipcRenderer.invoke('hermes:notify', payload),
-  requestMicrophoneAccess: () => ipcRenderer.invoke('hermes:requestMicrophoneAccess'),
-  readFileDataUrl: filePath => ipcRenderer.invoke('hermes:readFileDataUrl', filePath),
-  readFileText: filePath => ipcRenderer.invoke('hermes:readFileText', filePath),
-  selectPaths: options => ipcRenderer.invoke('hermes:selectPaths', options),
-  writeClipboard: text => ipcRenderer.invoke('hermes:writeClipboard', text),
-  saveImageFromUrl: url => ipcRenderer.invoke('hermes:saveImageFromUrl', url),
-  saveImageBuffer: (data, ext) => ipcRenderer.invoke('hermes:saveImageBuffer', { data, ext }),
-  saveClipboardImage: () => ipcRenderer.invoke('hermes:saveClipboardImage'),
+  api: request => ipcRenderer.invoke('zeb:api', request),
+  notify: payload => ipcRenderer.invoke('zeb:notify', payload),
+  requestMicrophoneAccess: () => ipcRenderer.invoke('zeb:requestMicrophoneAccess'),
+  readFileDataUrl: filePath => ipcRenderer.invoke('zeb:readFileDataUrl', filePath),
+  readFileText: filePath => ipcRenderer.invoke('zeb:readFileText', filePath),
+  selectPaths: options => ipcRenderer.invoke('zeb:selectPaths', options),
+  writeClipboard: text => ipcRenderer.invoke('zeb:writeClipboard', text),
+  saveImageFromUrl: url => ipcRenderer.invoke('zeb:saveImageFromUrl', url),
+  saveImageBuffer: (data, ext) => ipcRenderer.invoke('zeb:saveImageBuffer', { data, ext }),
+  saveClipboardImage: () => ipcRenderer.invoke('zeb:saveClipboardImage'),
   getPathForFile: file => {
     try {
       return webUtils.getPathForFile(file) || ''
@@ -62,80 +62,80 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
       return ''
     }
   },
-  normalizePreviewTarget: (target, baseDir) => ipcRenderer.invoke('hermes:normalizePreviewTarget', target, baseDir),
-  watchPreviewFile: url => ipcRenderer.invoke('hermes:watchPreviewFile', url),
-  stopPreviewFileWatch: id => ipcRenderer.invoke('hermes:stopPreviewFileWatch', id),
-  setTitleBarTheme: payload => ipcRenderer.send('hermes:titlebar-theme', payload),
-  setNativeTheme: mode => ipcRenderer.send('hermes:native-theme', mode),
-  setTranslucency: payload => ipcRenderer.send('hermes:translucency', payload),
-  setPreviewShortcutActive: active => ipcRenderer.send('hermes:previewShortcutActive', Boolean(active)),
-  openExternal: url => ipcRenderer.invoke('hermes:openExternal', url),
-  openPreviewInBrowser: url => ipcRenderer.invoke('hermes:openPreviewInBrowser', url),
-  fetchLinkTitle: url => ipcRenderer.invoke('hermes:fetchLinkTitle', url),
-  sanitizeWorkspaceCwd: cwd => ipcRenderer.invoke('hermes:workspace:sanitize', cwd),
+  normalizePreviewTarget: (target, baseDir) => ipcRenderer.invoke('zeb:normalizePreviewTarget', target, baseDir),
+  watchPreviewFile: url => ipcRenderer.invoke('zeb:watchPreviewFile', url),
+  stopPreviewFileWatch: id => ipcRenderer.invoke('zeb:stopPreviewFileWatch', id),
+  setTitleBarTheme: payload => ipcRenderer.send('zeb:titlebar-theme', payload),
+  setNativeTheme: mode => ipcRenderer.send('zeb:native-theme', mode),
+  setTranslucency: payload => ipcRenderer.send('zeb:translucency', payload),
+  setPreviewShortcutActive: active => ipcRenderer.send('zeb:previewShortcutActive', Boolean(active)),
+  openExternal: url => ipcRenderer.invoke('zeb:openExternal', url),
+  openPreviewInBrowser: url => ipcRenderer.invoke('zeb:openPreviewInBrowser', url),
+  fetchLinkTitle: url => ipcRenderer.invoke('zeb:fetchLinkTitle', url),
+  sanitizeWorkspaceCwd: cwd => ipcRenderer.invoke('zeb:workspace:sanitize', cwd),
   settings: {
-    getDefaultProjectDir: () => ipcRenderer.invoke('hermes:setting:defaultProjectDir:get'),
-    setDefaultProjectDir: dir => ipcRenderer.invoke('hermes:setting:defaultProjectDir:set', dir),
-    pickDefaultProjectDir: () => ipcRenderer.invoke('hermes:setting:defaultProjectDir:pick')
+    getDefaultProjectDir: () => ipcRenderer.invoke('zeb:setting:defaultProjectDir:get'),
+    setDefaultProjectDir: dir => ipcRenderer.invoke('zeb:setting:defaultProjectDir:set', dir),
+    pickDefaultProjectDir: () => ipcRenderer.invoke('zeb:setting:defaultProjectDir:pick')
   },
   zoom: {
     // Current zoom of this window, as { level, percent }.
-    get: () => ipcRenderer.invoke('hermes:zoom:get'),
-    setPercent: percent => ipcRenderer.send('hermes:zoom:set-percent', percent),
+    get: () => ipcRenderer.invoke('zeb:zoom:get'),
+    setPercent: percent => ipcRenderer.send('zeb:zoom:set-percent', percent),
     // Fires on every zoom change, including the Ctrl/Cmd +/-/0 shortcuts,
     // so the settings UI can stay in sync with the keyboard.
     onChanged: callback => {
       const listener = (_event, payload) => callback(payload)
-      ipcRenderer.on('hermes:zoom:changed', listener)
-      return () => ipcRenderer.removeListener('hermes:zoom:changed', listener)
+      ipcRenderer.on('zeb:zoom:changed', listener)
+      return () => ipcRenderer.removeListener('zeb:zoom:changed', listener)
     }
   },
-  revealLogs: () => ipcRenderer.invoke('hermes:logs:reveal'),
-  getRecentLogs: () => ipcRenderer.invoke('hermes:logs:recent'),
-  readDir: dirPath => ipcRenderer.invoke('hermes:fs:readDir', dirPath),
-  gitRoot: startPath => ipcRenderer.invoke('hermes:fs:gitRoot', startPath),
-  revealPath: targetPath => ipcRenderer.invoke('hermes:fs:reveal', targetPath),
-  renamePath: (targetPath, newName) => ipcRenderer.invoke('hermes:fs:rename', targetPath, newName),
-  writeTextFile: (filePath, content) => ipcRenderer.invoke('hermes:fs:writeText', filePath, content),
-  trashPath: targetPath => ipcRenderer.invoke('hermes:fs:trash', targetPath),
+  revealLogs: () => ipcRenderer.invoke('zeb:logs:reveal'),
+  getRecentLogs: () => ipcRenderer.invoke('zeb:logs:recent'),
+  readDir: dirPath => ipcRenderer.invoke('zeb:fs:readDir', dirPath),
+  gitRoot: startPath => ipcRenderer.invoke('zeb:fs:gitRoot', startPath),
+  revealPath: targetPath => ipcRenderer.invoke('zeb:fs:reveal', targetPath),
+  renamePath: (targetPath, newName) => ipcRenderer.invoke('zeb:fs:rename', targetPath, newName),
+  writeTextFile: (filePath, content) => ipcRenderer.invoke('zeb:fs:writeText', filePath, content),
+  trashPath: targetPath => ipcRenderer.invoke('zeb:fs:trash', targetPath),
   git: {
-    worktreeList: repoPath => ipcRenderer.invoke('hermes:git:worktreeList', repoPath),
-    worktreeAdd: (repoPath, options) => ipcRenderer.invoke('hermes:git:worktreeAdd', repoPath, options),
+    worktreeList: repoPath => ipcRenderer.invoke('zeb:git:worktreeList', repoPath),
+    worktreeAdd: (repoPath, options) => ipcRenderer.invoke('zeb:git:worktreeAdd', repoPath, options),
     worktreeRemove: (repoPath, worktreePath, options) =>
-      ipcRenderer.invoke('hermes:git:worktreeRemove', repoPath, worktreePath, options),
-    branchSwitch: (repoPath, branch) => ipcRenderer.invoke('hermes:git:branchSwitch', repoPath, branch),
-    branchList: repoPath => ipcRenderer.invoke('hermes:git:branchList', repoPath),
-    repoStatus: repoPath => ipcRenderer.invoke('hermes:git:repoStatus', repoPath),
-    fileDiff: (repoPath, filePath) => ipcRenderer.invoke('hermes:git:fileDiff', repoPath, filePath),
-    scanRepos: (roots, options) => ipcRenderer.invoke('hermes:git:scanRepos', roots, options),
+      ipcRenderer.invoke('zeb:git:worktreeRemove', repoPath, worktreePath, options),
+    branchSwitch: (repoPath, branch) => ipcRenderer.invoke('zeb:git:branchSwitch', repoPath, branch),
+    branchList: repoPath => ipcRenderer.invoke('zeb:git:branchList', repoPath),
+    repoStatus: repoPath => ipcRenderer.invoke('zeb:git:repoStatus', repoPath),
+    fileDiff: (repoPath, filePath) => ipcRenderer.invoke('zeb:git:fileDiff', repoPath, filePath),
+    scanRepos: (roots, options) => ipcRenderer.invoke('zeb:git:scanRepos', roots, options),
     review: {
-      list: (repoPath, scope, baseRef) => ipcRenderer.invoke('hermes:git:review:list', repoPath, scope, baseRef),
+      list: (repoPath, scope, baseRef) => ipcRenderer.invoke('zeb:git:review:list', repoPath, scope, baseRef),
       diff: (repoPath, filePath, scope, baseRef, staged) =>
-        ipcRenderer.invoke('hermes:git:review:diff', repoPath, filePath, scope, baseRef, staged),
-      stage: (repoPath, filePath) => ipcRenderer.invoke('hermes:git:review:stage', repoPath, filePath),
-      unstage: (repoPath, filePath) => ipcRenderer.invoke('hermes:git:review:unstage', repoPath, filePath),
-      revert: (repoPath, filePath) => ipcRenderer.invoke('hermes:git:review:revert', repoPath, filePath),
-      revParse: (repoPath, ref) => ipcRenderer.invoke('hermes:git:review:revParse', repoPath, ref),
-      commit: (repoPath, message, push) => ipcRenderer.invoke('hermes:git:review:commit', repoPath, message, push),
-      commitContext: repoPath => ipcRenderer.invoke('hermes:git:review:commitContext', repoPath),
-      push: repoPath => ipcRenderer.invoke('hermes:git:review:push', repoPath),
-      shipInfo: repoPath => ipcRenderer.invoke('hermes:git:review:shipInfo', repoPath),
-      createPr: repoPath => ipcRenderer.invoke('hermes:git:review:createPr', repoPath)
+        ipcRenderer.invoke('zeb:git:review:diff', repoPath, filePath, scope, baseRef, staged),
+      stage: (repoPath, filePath) => ipcRenderer.invoke('zeb:git:review:stage', repoPath, filePath),
+      unstage: (repoPath, filePath) => ipcRenderer.invoke('zeb:git:review:unstage', repoPath, filePath),
+      revert: (repoPath, filePath) => ipcRenderer.invoke('zeb:git:review:revert', repoPath, filePath),
+      revParse: (repoPath, ref) => ipcRenderer.invoke('zeb:git:review:revParse', repoPath, ref),
+      commit: (repoPath, message, push) => ipcRenderer.invoke('zeb:git:review:commit', repoPath, message, push),
+      commitContext: repoPath => ipcRenderer.invoke('zeb:git:review:commitContext', repoPath),
+      push: repoPath => ipcRenderer.invoke('zeb:git:review:push', repoPath),
+      shipInfo: repoPath => ipcRenderer.invoke('zeb:git:review:shipInfo', repoPath),
+      createPr: repoPath => ipcRenderer.invoke('zeb:git:review:createPr', repoPath)
     }
   },
   terminal: {
-    dispose: id => ipcRenderer.invoke('hermes:terminal:dispose', id),
-    resize: (id, size) => ipcRenderer.invoke('hermes:terminal:resize', id, size),
-    start: options => ipcRenderer.invoke('hermes:terminal:start', options),
-    write: (id, data) => ipcRenderer.invoke('hermes:terminal:write', id, data),
+    dispose: id => ipcRenderer.invoke('zeb:terminal:dispose', id),
+    resize: (id, size) => ipcRenderer.invoke('zeb:terminal:resize', id, size),
+    start: options => ipcRenderer.invoke('zeb:terminal:start', options),
+    write: (id, data) => ipcRenderer.invoke('zeb:terminal:write', id, data),
     onData: (id, callback) => {
-      const channel = `hermes:terminal:${id}:data`
+      const channel = `zeb:terminal:${id}:data`
       const listener = (_event, payload) => callback(payload)
       ipcRenderer.on(channel, listener)
       return () => ipcRenderer.removeListener(channel, listener)
     },
     onExit: (id, callback) => {
-      const channel = `hermes:terminal:${id}:exit`
+      const channel = `zeb:terminal:${id}:exit`
       const listener = (_event, payload) => callback(payload)
       ipcRenderer.on(channel, listener)
       return () => ipcRenderer.removeListener(channel, listener)
@@ -143,88 +143,88 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   },
   onClosePreviewRequested: callback => {
     const listener = () => callback()
-    ipcRenderer.on('hermes:close-preview-requested', listener)
-    return () => ipcRenderer.removeListener('hermes:close-preview-requested', listener)
+    ipcRenderer.on('zeb:close-preview-requested', listener)
+    return () => ipcRenderer.removeListener('zeb:close-preview-requested', listener)
   },
   onOpenUpdatesRequested: callback => {
     const listener = () => callback()
-    ipcRenderer.on('hermes:open-updates', listener)
-    return () => ipcRenderer.removeListener('hermes:open-updates', listener)
+    ipcRenderer.on('zeb:open-updates', listener)
+    return () => ipcRenderer.removeListener('zeb:open-updates', listener)
   },
   onDeepLink: callback => {
     const listener = (_event, payload) => callback(payload)
-    ipcRenderer.on('hermes:deep-link', listener)
-    return () => ipcRenderer.removeListener('hermes:deep-link', listener)
+    ipcRenderer.on('zeb:deep-link', listener)
+    return () => ipcRenderer.removeListener('zeb:deep-link', listener)
   },
-  signalDeepLinkReady: () => ipcRenderer.invoke('hermes:deep-link-ready'),
+  signalDeepLinkReady: () => ipcRenderer.invoke('zeb:deep-link-ready'),
   onWindowStateChanged: callback => {
     const listener = (_event, payload) => callback(payload)
-    ipcRenderer.on('hermes:window-state-changed', listener)
-    return () => ipcRenderer.removeListener('hermes:window-state-changed', listener)
+    ipcRenderer.on('zeb:window-state-changed', listener)
+    return () => ipcRenderer.removeListener('zeb:window-state-changed', listener)
   },
   onFocusSession: callback => {
     const listener = (_event, sessionId) => callback(sessionId)
-    ipcRenderer.on('hermes:focus-session', listener)
-    return () => ipcRenderer.removeListener('hermes:focus-session', listener)
+    ipcRenderer.on('zeb:focus-session', listener)
+    return () => ipcRenderer.removeListener('zeb:focus-session', listener)
   },
   onNotificationAction: callback => {
     const listener = (_event, payload) => callback(payload)
-    ipcRenderer.on('hermes:notification-action', listener)
-    return () => ipcRenderer.removeListener('hermes:notification-action', listener)
+    ipcRenderer.on('zeb:notification-action', listener)
+    return () => ipcRenderer.removeListener('zeb:notification-action', listener)
   },
   onPreviewFileChanged: callback => {
     const listener = (_event, payload) => callback(payload)
-    ipcRenderer.on('hermes:preview-file-changed', listener)
-    return () => ipcRenderer.removeListener('hermes:preview-file-changed', listener)
+    ipcRenderer.on('zeb:preview-file-changed', listener)
+    return () => ipcRenderer.removeListener('zeb:preview-file-changed', listener)
   },
   onBackendExit: callback => {
     const listener = (_event, payload) => callback(payload)
-    ipcRenderer.on('hermes:backend-exit', listener)
-    return () => ipcRenderer.removeListener('hermes:backend-exit', listener)
+    ipcRenderer.on('zeb:backend-exit', listener)
+    return () => ipcRenderer.removeListener('zeb:backend-exit', listener)
   },
   onPowerResume: callback => {
     const listener = () => callback()
-    ipcRenderer.on('hermes:power-resume', listener)
-    return () => ipcRenderer.removeListener('hermes:power-resume', listener)
+    ipcRenderer.on('zeb:power-resume', listener)
+    return () => ipcRenderer.removeListener('zeb:power-resume', listener)
   },
   onBootProgress: callback => {
     const listener = (_event, payload) => callback(payload)
-    ipcRenderer.on('hermes:boot-progress', listener)
-    return () => ipcRenderer.removeListener('hermes:boot-progress', listener)
+    ipcRenderer.on('zeb:boot-progress', listener)
+    return () => ipcRenderer.removeListener('zeb:boot-progress', listener)
   },
   // First-launch bootstrap progress -- emitted by the install.ps1 stage
   // runner in main.cjs (apps/desktop/electron/bootstrap-runner.cjs).
   // Renderer's install overlay subscribes to live events and queries the
   // current snapshot via getBootstrapState() to recover after a devtools
   // reload mid-bootstrap.
-  getBootstrapState: () => ipcRenderer.invoke('hermes:bootstrap:get'),
-  resetBootstrap: () => ipcRenderer.invoke('hermes:bootstrap:reset'),
-  repairBootstrap: () => ipcRenderer.invoke('hermes:bootstrap:repair'),
-  cancelBootstrap: () => ipcRenderer.invoke('hermes:bootstrap:cancel'),
+  getBootstrapState: () => ipcRenderer.invoke('zeb:bootstrap:get'),
+  resetBootstrap: () => ipcRenderer.invoke('zeb:bootstrap:reset'),
+  repairBootstrap: () => ipcRenderer.invoke('zeb:bootstrap:repair'),
+  cancelBootstrap: () => ipcRenderer.invoke('zeb:bootstrap:cancel'),
   onBootstrapEvent: callback => {
     const listener = (_event, payload) => callback(payload)
-    ipcRenderer.on('hermes:bootstrap:event', listener)
-    return () => ipcRenderer.removeListener('hermes:bootstrap:event', listener)
+    ipcRenderer.on('zeb:bootstrap:event', listener)
+    return () => ipcRenderer.removeListener('zeb:bootstrap:event', listener)
   },
-  getVersion: () => ipcRenderer.invoke('hermes:version'),
-  getRemoteDisplayReason: () => ipcRenderer.invoke('hermes:get-remote-display-reason'),
+  getVersion: () => ipcRenderer.invoke('zeb:version'),
+  getRemoteDisplayReason: () => ipcRenderer.invoke('zeb:get-remote-display-reason'),
   uninstall: {
-    summary: () => ipcRenderer.invoke('hermes:uninstall:summary'),
-    run: mode => ipcRenderer.invoke('hermes:uninstall:run', { mode })
+    summary: () => ipcRenderer.invoke('zeb:uninstall:summary'),
+    run: mode => ipcRenderer.invoke('zeb:uninstall:run', { mode })
   },
   updates: {
-    check: () => ipcRenderer.invoke('hermes:updates:check'),
-    apply: opts => ipcRenderer.invoke('hermes:updates:apply', opts),
-    getBranch: () => ipcRenderer.invoke('hermes:updates:branch:get'),
-    setBranch: name => ipcRenderer.invoke('hermes:updates:branch:set', name),
+    check: () => ipcRenderer.invoke('zeb:updates:check'),
+    apply: opts => ipcRenderer.invoke('zeb:updates:apply', opts),
+    getBranch: () => ipcRenderer.invoke('zeb:updates:branch:get'),
+    setBranch: name => ipcRenderer.invoke('zeb:updates:branch:set', name),
     onProgress: callback => {
       const listener = (_event, payload) => callback(payload)
-      ipcRenderer.on('hermes:updates:progress', listener)
-      return () => ipcRenderer.removeListener('hermes:updates:progress', listener)
+      ipcRenderer.on('zeb:updates:progress', listener)
+      return () => ipcRenderer.removeListener('zeb:updates:progress', listener)
     }
   },
   themes: {
-    fetchMarketplace: id => ipcRenderer.invoke('hermes:vscode-theme:fetch', id),
-    searchMarketplace: query => ipcRenderer.invoke('hermes:vscode-theme:search', query)
+    fetchMarketplace: id => ipcRenderer.invoke('zeb:vscode-theme:fetch', id),
+    searchMarketplace: query => ipcRenderer.invoke('zeb:vscode-theme:search', query)
   }
 })

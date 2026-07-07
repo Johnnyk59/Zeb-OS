@@ -10,7 +10,7 @@ const assert = require('node:assert/strict')
 const { ZOOM_STORAGE_KEY, clampZoomLevel, percentToZoomLevel, zoomLevelToPercent } = require('./zoom.cjs')
 
 test('storage key stays stable so persisted zoom survives upgrades', () => {
-  assert.equal(ZOOM_STORAGE_KEY, 'hermes:desktop:zoomLevel')
+  assert.equal(ZOOM_STORAGE_KEY, 'zeb:desktop:zoomLevel')
 })
 
 test('clampZoomLevel rejects garbage and enforces bounds', () => {
