@@ -911,14 +911,13 @@ DEFAULT_CONFIG = {
     "toolsets": ["zeb-cli"],
     # Local GGUF backbone (agent/local_model_manager.py, agent/llama_cpp_adapter.py).
     # repo_id/quant pick the default download; path overrides with a GGUF file
-    # already on disk (skips the download entirely). disable_auto_fallback opts
-    # out of the local model being appended as the implicit last resort in the
-    # fallback chain (zeb_cli/fallback_config.py::append_local_model_safety_net).
+    # already on disk (skips the download entirely). Select it with
+    # `zeb model` (provider local-model) or add it to fallback_providers
+    # explicitly — it is never auto-injected into the fallback chain.
     "local_model": {
         "repo_id": "",
         "quant": "",
         "path": "",
-        "disable_auto_fallback": False,
     },
     # Background self-diagnosis/auto-repair loop for the always-on gateway
     # (gateway/self_healing.py). Runs on a timer; also exposed on-demand via

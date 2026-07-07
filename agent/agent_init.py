@@ -1169,21 +1169,14 @@ def init_agent(
         agent._fallback_chain = [fallback_model]
     else:
         agent._fallback_chain = []
-    # Append the local GGUF backbone as an implicit last resort, unless the
-    # user opted out (local_model.disable_auto_fallback) or already listed
-    # it explicitly. This is the "never a hard dependency on any single API
-    # provider" guarantee — done here (not in get_fallback_chain itself) so
-    # display/config-reading call sites (zeb fallback list, cron job
-    # summaries) keep showing exactly what the user configured.
-    try:
-        from zeb_cli.config import load_config as _load_fb_cfg
-        from zeb_cli.fallback_config import append_local_model_safety_net
-
-        agent._fallback_chain = append_local_model_safety_net(
-            agent._fallback_chain, _load_fb_cfg()
-        )
-    except Exception:
-        pass
+    # NOTE: the local GGUF backbone safety net is intentionally NOT spliced
+    # into agent._fallback_chain here. An empty chain is a load-bearing
+    # invariant read by many call sites (tests, `zeb fallback list`, cron
+    # job config, agent._fallback_model below) as "no fallback configured" —
+    # mutating it would be surprising well beyond the retry loop. The local
+    # model is instead attempted as a distinct final step, only once the
+    # configured chain is exhausted — see
+    # agent/chat_completion_helpers.py::try_activate_fallback.
     agent._fallback_index = 0
     agent._fallback_activated = getattr(agent, "_fallback_activated", False)
     # Legacy attribute kept for backward compat (tests, external callers)

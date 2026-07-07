@@ -56,13 +56,15 @@ def get_fallback_chain(config: dict[str, Any] | None) -> list[dict[str, Any]]:
     they target the same provider/model/base_url route as an earlier entry.
     The returned list always contains fresh dict copies.
 
-    This is the *configured* chain only — it does not include the implicit
-    local-model safety net. That's added at the point of use in
-    ``agent/chat_completion_helpers.py::_try_activate_fallback`` (see
-    ``append_local_model_safety_net``), not here, because this function is
-    also read for display/config purposes (``zeb fallback list``, cron job
-    config summaries) where injecting an entry the user never configured
-    would be surprising.
+    This is the configured chain only. It does not implicitly add the local
+    GGUF backbone (``provider: local-model``) — an empty/exhausted chain is
+    a load-bearing invariant read by many call sites (tests, `zeb fallback
+    list`, cron job config, the retry loop's cooldown logic) as "no
+    fallback configured", and silently injecting an entry the user never
+    configured broke that in practice. The local model is still available
+    as an explicit fallback target: `zeb fallback add` (or hand-editing
+    `fallback_providers` in config.yaml) with provider `local-model`,
+    model `zeb-local`.
     """
 
     config = config or {}
@@ -78,25 +80,3 @@ def get_fallback_chain(config: dict[str, Any] | None) -> list[dict[str, Any]]:
             chain.append(entry)
 
     return chain
-
-
-def append_local_model_safety_net(
-    chain: list[dict[str, Any]], config: dict[str, Any] | None
-) -> list[dict[str, Any]]:
-    """Return ``chain`` with the local GGUF backbone appended as a final entry.
-
-    Used only by the live retry path (``_try_activate_fallback``), not by
-    ``get_fallback_chain`` itself — see that function's docstring. Skips the
-    append when the user opted out (``local_model.disable_auto_fallback:
-    true``) or the chain already targets ``local-model`` explicitly.
-    """
-    config = config or {}
-    local_model_cfg = config.get("local_model")
-    if isinstance(local_model_cfg, dict) and local_model_cfg.get("disable_auto_fallback") is True:
-        return chain
-
-    seen = {_entry_identity(e) for e in chain}
-    local_entry = {"provider": "local-model", "model": "zeb-local"}
-    if _entry_identity(local_entry) in seen:
-        return chain
-    return [*chain, local_entry]
