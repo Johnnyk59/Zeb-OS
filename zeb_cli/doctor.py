@@ -2339,6 +2339,24 @@ def run_doctor(args):
         except Exception as _e:
             check_warn(f"{_active_memory_provider} check failed", str(_e))
 
+    _section("Self-Healing")
+    try:
+        from gateway.self_healing import run_health_checks
+
+        for _hc in run_health_checks():
+            _hc_detail = ("REPAIRED — " if _hc.repaired else "") + _hc.message
+            if _hc.status == "ok":
+                check_ok(f"{_hc.component}", _hc_detail)
+            elif _hc.status == "degraded":
+                check_warn(f"{_hc.component}", _hc_detail)
+            else:
+                _fail_and_issue(
+                    f"{_hc.component}", _hc_detail,
+                    f"{_hc.component}: {_hc.message}", issues,
+                )
+    except Exception as _e:
+        check_warn("Self-healing checks failed to run", str(_e))
+
     try:
         from zeb_cli.profiles import list_profiles, _get_wrapper_dir, profile_exists
         import re as _re

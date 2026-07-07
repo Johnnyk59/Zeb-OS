@@ -622,11 +622,38 @@ def dispatch_tool_search(args: Dict[str, Any],
     _, deferrable = classify_tools(current_tool_defs)
     catalog = build_catalog(deferrable)
     hits = search_catalog(catalog, query, limit=limit)
-    return json.dumps({
+
+    result: Dict[str, Any] = {
         "query": query,
         "total_available": len(catalog),
         "matches": [_format_search_hit(h) for h in hits],
-    }, ensure_ascii=False)
+    }
+
+    # Nothing in the currently-loaded toolset matches — before giving up,
+    # check whether a disabled-but-already-bundled skill covers this need
+    # and activate it automatically (agent/proactive_discovery.py). This is
+    # the "proactively discovers and integrates tools it needs without
+    # waiting for instruction" behavior; it never reaches outside the
+    # already-vetted skills shipped with this install.
+    if not hits:
+        try:
+            from agent.proactive_discovery import find_and_enable_matching_skill
+
+            enabled_skill = find_and_enable_matching_skill(query)
+            if enabled_skill:
+                result["activated_skill"] = {
+                    "name": enabled_skill.get("name", ""),
+                    "description": enabled_skill.get("description", ""),
+                    "note": (
+                        f"No loaded tool matched '{query}', but the bundled skill "
+                        f"'{enabled_skill.get('name', '')}' does and has been enabled. "
+                        "It will be available starting your next message."
+                    ),
+                }
+        except Exception:
+            logger.debug("proactive skill discovery failed", exc_info=True)
+
+    return json.dumps(result, ensure_ascii=False)
 
 
 def dispatch_tool_describe(args: Dict[str, Any],

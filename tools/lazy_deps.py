@@ -108,6 +108,20 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     # when model.auth_mode=entra_id is selected; key-based azure-foundry
     # users never pay this import.
     "provider.azure_identity": ("azure-identity==1.25.3",),
+    # In-process local GGUF backbone (providers/local_model.py +
+    # agent/llama_cpp_adapter.py). This is the only provider that is not
+    # opt-in in spirit — it's the always-available default backbone — but it
+    # still goes through the lazy-install path because llama-cpp-python
+    # ships a compiled extension (cmake/C++ build on install) that not every
+    # environment can or wants to build, and a user who only ever talks to
+    # hosted providers shouldn't pay that cost.
+    "provider.llama_cpp": ("llama-cpp-python==0.3.33",),
+    # huggingface_hub powers the one-time GGUF weight download into
+    # ~/.zeb/models/gguf/ (agent/local_model_manager.py). Kept as its own
+    # feature name (not bundled into provider.llama_cpp) because the
+    # download step and the inference step fail independently and should
+    # report independently.
+    "provider.local_model_download": ("huggingface_hub==1.22.0",),
 
     # ─── Web search backends ───────────────────────────────────────────────
     "search.exa": ("exa-py==2.10.2",),

@@ -4311,6 +4311,13 @@ def _to_async_client(sync_client, model: str, is_vision: bool = False):
             return sync_client, model
     except ImportError:
         pass
+    try:
+        from agent.llama_cpp_adapter import AsyncLlamaCppClient, LlamaCppClient
+
+        if isinstance(sync_client, LlamaCppClient):
+            return AsyncLlamaCppClient(sync_client), model
+    except ImportError:
+        pass
 
     async_kwargs = {
         "api_key": sync_client.api_key,
@@ -4392,6 +4399,8 @@ def resolve_provider_client(
             "openrouter", "nous", "openai-codex" (or "codex"),
             "zai", "kimi-coding", "minimax", "minimax-cn",
             "custom" (OPENAI_BASE_URL + OPENAI_API_KEY),
+            "local-model" (in-process GGUF backbone, no key/network — see
+            agent/llama_cpp_adapter.py),
             "auto" (full auto-detection chain).
         model: Model slug override.  If None, uses the provider's default
                auxiliary model.
@@ -4604,6 +4613,32 @@ def resolve_provider_client(
             )
             return None, None
         final_model = _normalize_resolved_model(model or default, provider)
+        return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
+                else (client, final_model))
+
+    # ── Local GGUF backbone (no key, no network) ──────────────────────
+    # This is the natural fallback-chain terminus: every other branch above
+    # can return None on missing/expired credentials or an unreachable
+    # network, but the local backbone doesn't depend on either, so it
+    # should very rarely itself return (None, None) here — see
+    # _fallback_entry_unavailable_without_network's docstring in
+    # chat_completion_helpers.py for the skip-reason this participates in.
+    if provider == "local-model":
+        from agent.llama_cpp_adapter import LlamaCppClient, LocalModelLoadError
+        from agent.local_model_manager import (
+            LocalModelUnavailable,
+            ensure_local_model_weights,
+        )
+
+        try:
+            from zeb_cli.config import load_config as _load_lm_cfg
+
+            model_path = ensure_local_model_weights(_load_lm_cfg())
+            client = LlamaCppClient(model_path=str(model_path))
+        except (LocalModelUnavailable, LocalModelLoadError) as exc:
+            logger.warning("resolve_provider_client: local-model unavailable: %s", exc)
+            return None, None
+        final_model = _normalize_resolved_model(model or "zeb-local", provider)
         return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
                 else (client, final_model))
 

@@ -909,6 +909,24 @@ DEFAULT_CONFIG = {
     "fallback_providers": [],
     "credential_pool_strategies": {},
     "toolsets": ["zeb-cli"],
+    # Local GGUF backbone (agent/local_model_manager.py, agent/llama_cpp_adapter.py).
+    # repo_id/quant pick the default download; path overrides with a GGUF file
+    # already on disk (skips the download entirely). disable_auto_fallback opts
+    # out of the local model being appended as the implicit last resort in the
+    # fallback chain (zeb_cli/fallback_config.py::append_local_model_safety_net).
+    "local_model": {
+        "repo_id": "",
+        "quant": "",
+        "path": "",
+        "disable_auto_fallback": False,
+    },
+    # Background self-diagnosis/auto-repair loop for the always-on gateway
+    # (gateway/self_healing.py). Runs on a timer; also exposed on-demand via
+    # `zeb doctor`. interval_seconds is clamped to a 60s floor.
+    "health_checker": {
+        "enabled": True,
+        "interval_seconds": 600,
+    },
     # Global active chat session cap across CLI, TUI/dashboard, and messaging.
     # None/0 = unbounded.
     "max_concurrent_sessions": None,

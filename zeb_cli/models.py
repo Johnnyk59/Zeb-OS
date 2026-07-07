@@ -1028,6 +1028,7 @@ class ProviderEntry(NamedTuple):
     tui_desc: str   # detailed description for `zeb model` TUI
 
 CANONICAL_PROVIDERS: list[ProviderEntry] = [
+    ProviderEntry("local-model",    "Zeb Local Model (offline)", "Zeb Local Model (Always-on local GGUF backbone — no API key, no network)"),
     ProviderEntry("nous",           "Nous Portal",              "Nous Portal (Everything your agent needs, 300+ models with bundled tool use)"),
     ProviderEntry("openrouter",     "OpenRouter",               "OpenRouter (Pay-per-use API aggregator)"),
     ProviderEntry("moa",            "Mixture of Agents",        "Mixture of Agents (named presets; aggregator acts after reference models)"),

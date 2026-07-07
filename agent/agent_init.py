@@ -862,6 +862,39 @@ def init_agent(
         agent.base_url = "moa://local"
         if not agent.quiet_mode:
             print(f"🤖 AI Agent initialized with MoA preset: {agent.model}")
+    elif agent.provider == "local-model":
+        # Always-on local GGUF backbone — no API key, no network. See
+        # agent/llama_cpp_adapter.py and agent/local_model_manager.py.
+        # Structurally identical to the "moa" branch above: an in-process
+        # client with no real base_url/api_key to resolve.
+        from agent.llama_cpp_adapter import LlamaCppClient, LocalModelLoadError
+        from agent.local_model_manager import (
+            LocalModelUnavailable,
+            ensure_local_model_weights,
+        )
+
+        agent.api_mode = "chat_completions"
+        try:
+            from zeb_cli.config import load_config as _load_lm_cfg
+
+            _lm_progress = (
+                (lambda msg: agent.tool_progress_callback("local_model.setup", msg, None, None))
+                if getattr(agent, "tool_progress_callback", None) and not agent.quiet_mode
+                else None
+            )
+            _model_path = ensure_local_model_weights(
+                _load_lm_cfg(), progress_callback=_lm_progress
+            )
+            agent.client = LlamaCppClient(model_path=str(_model_path))
+        except (LocalModelUnavailable, LocalModelLoadError) as _lm_exc:
+            raise RuntimeError(
+                f"Local model backbone unavailable: {_lm_exc}"
+            ) from _lm_exc
+        agent._client_kwargs = {}
+        agent.api_key = "local-no-key-required"
+        agent.base_url = "llama-cpp://local"
+        if not agent.quiet_mode:
+            print(f"🤖 AI Agent initialized with local backbone: {agent.model or 'zeb-local'} (offline)")
     elif agent.api_mode == "bedrock_converse":
         # AWS Bedrock — uses boto3 directly, no OpenAI client needed.
         # Region is extracted from the base_url or defaults to us-east-1.
@@ -1136,6 +1169,21 @@ def init_agent(
         agent._fallback_chain = [fallback_model]
     else:
         agent._fallback_chain = []
+    # Append the local GGUF backbone as an implicit last resort, unless the
+    # user opted out (local_model.disable_auto_fallback) or already listed
+    # it explicitly. This is the "never a hard dependency on any single API
+    # provider" guarantee — done here (not in get_fallback_chain itself) so
+    # display/config-reading call sites (zeb fallback list, cron job
+    # summaries) keep showing exactly what the user configured.
+    try:
+        from zeb_cli.config import load_config as _load_fb_cfg
+        from zeb_cli.fallback_config import append_local_model_safety_net
+
+        agent._fallback_chain = append_local_model_safety_net(
+            agent._fallback_chain, _load_fb_cfg()
+        )
+    except Exception:
+        pass
     agent._fallback_index = 0
     agent._fallback_activated = getattr(agent, "_fallback_activated", False)
     # Legacy attribute kept for backward compat (tests, external callers)

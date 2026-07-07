@@ -6600,6 +6600,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             self._gateway_loop = None
         logger.info("Session storage: %s", self.config.sessions_dir)
 
+        # Self-healing health checker — periodic background diagnosis/repair
+        # (local model liveness, disk space, state.db, config.yaml). See
+        # gateway/self_healing.py. Best-effort: a failure to start it must
+        # never block gateway startup.
+        try:
+            from gateway.self_healing import start_self_healing_monitor
+            from zeb_cli.config import load_config as _load_health_cfg
+
+            _health_cfg = _load_health_cfg().get("health_checker") or {}
+            if _health_cfg.get("enabled", True):
+                start_self_healing_monitor(
+                    interval_seconds=float(_health_cfg.get("interval_seconds", 600.0))
+                )
+        except Exception as _e:
+            logger.debug("start_self_healing_monitor failed: %s", _e)
+
         # Sanity-check that systemd's TimeoutStopSec covers our drain
         # window.  When the user upgraded zeb-agent without re-running
         # ``zeb setup``, their unit file may still encode the old
@@ -7973,6 +7989,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
             def _phase_elapsed() -> float:
                 return time.monotonic() - _stop_started_at
+
+            try:
+                from gateway.self_healing import stop_self_healing_monitor
+
+                stop_self_healing_monitor()
+            except Exception as _e:
+                logger.debug("stop_self_healing_monitor failed: %s", _e)
 
             self._running = False
             self._draining = True

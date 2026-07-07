@@ -281,6 +281,68 @@ def _model_flow_moa(config, current_model=""):
     _print_moa_preset(selected_name, preset)
 
 
+def _model_flow_local_model(config, current_model=""):
+    """Local GGUF backbone: no credential step, optional eager download.
+
+    Like MoA, this is a virtual/local provider with no key or base_url to
+    collect. The only real decision is whether to download the default
+    ~2GB model now (so the first real conversation isn't blocked on it) or
+    defer to first use.
+    """
+    from zeb_cli.auth import _save_model_choice, deactivate_provider
+    from zeb_cli.config import load_config, save_config
+
+    from agent.local_model_manager import (
+        DEFAULT_LOCAL_MODEL_QUANT,
+        DEFAULT_LOCAL_MODEL_REPO,
+        LocalModelUnavailable,
+        get_local_model_path,
+    )
+
+    cfg = load_config()
+    model = cfg.get("model")
+    if not isinstance(model, dict):
+        model = {"default": model} if model else {}
+        cfg["model"] = model
+    model["default"] = "zeb-local"
+    model["provider"] = "local-model"
+    # Local provider — drop any stale endpoint credentials/base_url the
+    # previously active provider left behind (mirrors _model_flow_moa).
+    clear_model_endpoint_credentials(model, clear_api_mode=True)
+    model.pop("base_url", None)
+    save_config(cfg)
+    _save_model_choice("zeb-local")
+    deactivate_provider()
+
+    print()
+    print("Default model set to: zeb-local (always-on local backbone, offline)")
+
+    lm_config = load_config().get("local_model") or {}
+    repo_id = lm_config.get("repo_id") or DEFAULT_LOCAL_MODEL_REPO
+    quant = lm_config.get("quant") or DEFAULT_LOCAL_MODEL_QUANT
+
+    if get_local_model_path(load_config()) is not None:
+        print(f"Weights already downloaded ({repo_id}, {quant}).")
+        return
+
+    print(f"Model weights ({repo_id}, {quant}, ~2GB) aren't downloaded yet.")
+    try:
+        answer = input("Download now? [Y/n]: ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        answer = "n"
+    if answer in ("", "y", "yes"):
+        from agent.local_model_manager import ensure_local_model_weights
+
+        try:
+            ensure_local_model_weights(load_config(), progress_callback=print)
+            print("Local model ready.")
+        except LocalModelUnavailable as exc:
+            print(f"Download failed: {exc}")
+            print("It will be retried automatically the next time you use Zeb.")
+    else:
+        print("Skipped — the weights download automatically on first use.")
+
+
 def _model_flow_nous(config, current_model="", args=None):
     """Nous Portal provider: ensure logged in, then pick model."""
     from zeb_cli.auth import (
