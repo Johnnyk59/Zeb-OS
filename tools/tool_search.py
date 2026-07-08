@@ -1,13 +1,13 @@
-"""Progressive tool disclosure ("tool search") for Hermes Agent.
+"""Progressive tool disclosure ("tool search") for Zeb Agent.
 
 When enabled, MCP and non-core plugin tools are replaced in the model-visible
 tools array by three bridge tools — ``tool_search``, ``tool_describe``,
-``tool_call`` — and surfaced on demand. Core Hermes tools never defer.
+``tool_call`` — and surfaced on demand. Core Zeb tools never defer.
 
 Design constraints this module is built around (see ``openclaw-tool-search-report``
 for the full rationale):
 
-* Core tools defined in ``toolsets._HERMES_CORE_TOOLS`` are *never* deferred.
+* Core tools defined in ``toolsets._ZEB_CORE_TOOLS`` are *never* deferred.
   Always-load means always-load. No exceptions.
 * The threshold gate runs every assembly: when deferrable tools would consume
   less than ``threshold_pct`` of the model's context window (default 10%),
@@ -131,7 +131,7 @@ def _safe_float(value: Any, fallback: float) -> float:
 def load_config() -> ToolSearchConfig:
     """Load tool-search config from the user config file."""
     try:
-        from hermes_cli.config import load_config as _load
+        from zeb_cli.config import load_config as _load
         cfg = _load() or {}
         tools_cfg = cfg.get("tools") if isinstance(cfg.get("tools"), dict) else {}
         if not isinstance(tools_cfg, dict):
@@ -154,8 +154,8 @@ def _core_tool_names() -> frozenset[str]:
     and we don't want a hard cycle.
     """
     try:
-        from toolsets import _HERMES_CORE_TOOLS
-        return frozenset(_HERMES_CORE_TOOLS)
+        from toolsets import _ZEB_CORE_TOOLS
+        return frozenset(_ZEB_CORE_TOOLS)
     except Exception:
         return frozenset()
 
@@ -164,7 +164,7 @@ def is_deferrable_tool_name(name: str) -> bool:
     """Return True if a tool with this name is *eligible* for deferral.
 
     A tool is deferrable iff it is registered with an MCP toolset prefix
-    OR it is not in ``_HERMES_CORE_TOOLS``. Core tools are never deferred
+    OR it is not in ``_ZEB_CORE_TOOLS``. Core tools are never deferred
     even when their toolset is technically plugin-provided (this protects
     against accidental shadowing).
     """
@@ -622,11 +622,38 @@ def dispatch_tool_search(args: Dict[str, Any],
     _, deferrable = classify_tools(current_tool_defs)
     catalog = build_catalog(deferrable)
     hits = search_catalog(catalog, query, limit=limit)
-    return json.dumps({
+
+    result: Dict[str, Any] = {
         "query": query,
         "total_available": len(catalog),
         "matches": [_format_search_hit(h) for h in hits],
-    }, ensure_ascii=False)
+    }
+
+    # Nothing in the currently-loaded toolset matches — before giving up,
+    # check whether a disabled-but-already-bundled skill covers this need
+    # and activate it automatically (agent/proactive_discovery.py). This is
+    # the "proactively discovers and integrates tools it needs without
+    # waiting for instruction" behavior; it never reaches outside the
+    # already-vetted skills shipped with this install.
+    if not hits:
+        try:
+            from agent.proactive_discovery import find_and_enable_matching_skill
+
+            enabled_skill = find_and_enable_matching_skill(query)
+            if enabled_skill:
+                result["activated_skill"] = {
+                    "name": enabled_skill.get("name", ""),
+                    "description": enabled_skill.get("description", ""),
+                    "note": (
+                        f"No loaded tool matched '{query}', but the bundled skill "
+                        f"'{enabled_skill.get('name', '')}' does and has been enabled. "
+                        "It will be available starting your next message."
+                    ),
+                }
+        except Exception:
+            logger.debug("proactive skill discovery failed", exc_info=True)
+
+    return json.dumps(result, ensure_ascii=False)
 
 
 def dispatch_tool_describe(args: Dict[str, Any],

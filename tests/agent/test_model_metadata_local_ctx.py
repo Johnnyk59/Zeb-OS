@@ -90,13 +90,13 @@ class TestQueryLocalContextLengthOllama:
         """When both num_ctx (Modelfile) and model_info (GGUF) are present,
         num_ctx wins because it's the *runtime* context Ollama actually
         allocates KV cache for. The GGUF model_info.context_length is the
-        training max — using it would let Hermes grow conversations past
+        training max — using it would let Zeb grow conversations past
         the runtime limit and Ollama would silently truncate.
 
-        Concrete example: hermes-brain:qwen3-14b-ctx32k is a Modelfile
+        Concrete example: zeb-brain:qwen3-14b-ctx32k is a Modelfile
         derived from qwen3:14b with `num_ctx 32768`, but the underlying
         GGUF reports `qwen3.context_length: 40960` (training max). If
-        Hermes used 40960 it would let the conversation grow past 32768
+        Zeb used 40960 it would let the conversation grow past 32768
         before compressing, and Ollama would truncate the prefix.
         """
         from agent.model_metadata import _query_local_context_length
@@ -116,12 +116,12 @@ class TestQueryLocalContextLengthOllama:
         with patch("agent.model_metadata.detect_local_server_type", return_value="ollama"), \
              patch("httpx.Client", return_value=client_mock):
             result = _query_local_context_length(
-                "hermes-brain:qwen3-14b-ctx32k", "http://100.77.243.5:11434/v1"
+                "zeb-brain:qwen3-14b-ctx32k", "http://100.77.243.5:11434/v1"
             )
 
         assert result == 32768, (
             f"Expected num_ctx (32768) to win over model_info (40960), got {result}. "
-            "If Hermes uses the GGUF training max, conversations will silently truncate."
+            "If Zeb uses the GGUF training max, conversations will silently truncate."
         )
 
     def test_ollama_show_404_falls_through(self):
@@ -637,7 +637,7 @@ class TestGetModelContextLengthLocalFallback:
         """Stale disk cache must yield to a live local max_model_len probe."""
         from agent.model_metadata import get_model_context_length
 
-        model = "NousResearch/Hermes-3-Llama-3.1-70B"
+        model = "NousResearch/Zeb-3-Llama-3.1-70B"
         base = "http://192.168.1.50:8000/v1"
 
         with patch("agent.model_metadata.get_cached_context_length", return_value=131072), \
@@ -659,7 +659,7 @@ class TestGetModelContextLengthLocalFallback:
         """Live probes at or above the 64K minimum are persisted."""
         from agent.model_metadata import get_model_context_length
 
-        model = "NousResearch/Hermes-3-Llama-3.1-70B"
+        model = "NousResearch/Zeb-3-Llama-3.1-70B"
         base = "http://192.168.1.50:8000/v1"
 
         with patch("agent.model_metadata.get_cached_context_length", return_value=131072), \
@@ -678,10 +678,10 @@ class TestGetModelContextLengthLocalFallback:
         mock_save.assert_called_once_with(model, base, 65536)
 
     def test_local_endpoint_bypasses_stale_persistent_cache(self):
-        """Hermes-3-Llama names must not inherit the generic llama 131072 default."""
+        """Zeb-3-Llama names must not inherit the generic llama 131072 default."""
         from agent.model_metadata import get_model_context_length
 
-        model = "NousResearch/Hermes-3-Llama-3.1-70B"
+        model = "NousResearch/Zeb-3-Llama-3.1-70B"
         base = "http://spark1:8000/v1"
 
         with patch("agent.model_metadata.get_cached_context_length", return_value=None), \

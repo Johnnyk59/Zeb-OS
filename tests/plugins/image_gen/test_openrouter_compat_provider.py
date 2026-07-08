@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-_RUNTIME = "hermes_cli.runtime_provider.resolve_runtime_provider"
+_RUNTIME = "zeb_cli.runtime_provider.resolve_runtime_provider"
 _PNG_DATA_URI = "data:image/png;base64,dGVzdC1pbWFnZS1kYXRh"  # "test-image-data"
 
 
@@ -172,11 +172,11 @@ class TestHelpers:
     def test_to_image_url_part_blocks_credential_store(self, tmp_path, monkeypatch):
         from plugins.image_gen.openrouter import _to_image_url_part
 
-        hermes_home = tmp_path / ".hermes"
-        hermes_home.mkdir()
-        auth_json = hermes_home / "auth.json"
+        zeb_home = tmp_path / ".zeb"
+        zeb_home.mkdir()
+        auth_json = zeb_home / "auth.json"
         auth_json.write_text('{"api_key":"sk-secret"}', encoding="utf-8")
-        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setenv("ZEB_HOME", str(zeb_home))
 
         with pytest.raises(ValueError, match="credential store"):
             _to_image_url_part(str(auth_json))
@@ -188,11 +188,11 @@ class TestHelpers:
 
         from plugins.image_gen.openrouter import _to_image_url_part
 
-        hermes_home = tmp_path / ".hermes"
-        hermes_home.mkdir()
-        auth_json = hermes_home / "auth.json"
+        zeb_home = tmp_path / ".zeb"
+        zeb_home.mkdir()
+        auth_json = zeb_home / "auth.json"
         auth_json.write_text('{"api_key":"sk-secret"}', encoding="utf-8")
-        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setenv("ZEB_HOME", str(zeb_home))
 
         real_read_bytes = _P.read_bytes
         read: list = []

@@ -1,0 +1,5 @@
+name: local-model-provider
+kind: model-provider
+version: 1.0.0
+description: Always-on local quantized GGUF backbone — no API key, no network
+author: ZebOS

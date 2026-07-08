@@ -26,9 +26,9 @@ const {
 // --- uninstallArgsForMode ---
 
 test('uninstallArgsForMode maps each mode to the module-runner argv', () => {
-  assert.deepEqual(uninstallArgsForMode('gui'), ['-m', 'hermes_cli.uninstall', '--mode', 'gui'])
-  assert.deepEqual(uninstallArgsForMode('lite'), ['-m', 'hermes_cli.uninstall', '--mode', 'lite'])
-  assert.deepEqual(uninstallArgsForMode('full'), ['-m', 'hermes_cli.uninstall', '--mode', 'full'])
+  assert.deepEqual(uninstallArgsForMode('gui'), ['-m', 'zeb_cli.uninstall', '--mode', 'gui'])
+  assert.deepEqual(uninstallArgsForMode('lite'), ['-m', 'zeb_cli.uninstall', '--mode', 'lite'])
+  assert.deepEqual(uninstallArgsForMode('full'), ['-m', 'zeb_cli.uninstall', '--mode', 'full'])
 })
 
 test('uninstallArgsForMode throws on an unknown mode (no silent full wipe)', () => {
@@ -56,12 +56,12 @@ test('mode predicates classify what each mode removes', () => {
 
 test('resolveRemovableAppPath finds the .app bundle on macOS', () => {
   assert.equal(
-    resolveRemovableAppPath('/Applications/Hermes.app/Contents/MacOS/Hermes', 'darwin'),
-    '/Applications/Hermes.app'
+    resolveRemovableAppPath('/Applications/Zeb.app/Contents/MacOS/Zeb', 'darwin'),
+    '/Applications/Zeb.app'
   )
   assert.equal(
-    resolveRemovableAppPath('/Users/x/Applications/Hermes.app/Contents/MacOS/Hermes', 'darwin'),
-    '/Users/x/Applications/Hermes.app'
+    resolveRemovableAppPath('/Users/x/Applications/Zeb.app/Contents/MacOS/Zeb', 'darwin'),
+    '/Users/x/Applications/Zeb.app'
   )
 })
 
@@ -80,30 +80,30 @@ test('resolveRemovableAppPath: dev-run .app resolves (safety is shouldRemoveAppB
 
 test('resolveRemovableAppPath finds the install dir on Windows', () => {
   assert.equal(
-    resolveRemovableAppPath('C:\\Users\\x\\AppData\\Local\\Programs\\Hermes\\Hermes.exe', 'win32'),
-    'C:\\Users\\x\\AppData\\Local\\Programs\\Hermes'
+    resolveRemovableAppPath('C:\\Users\\x\\AppData\\Local\\Programs\\Zeb\\Zeb.exe', 'win32'),
+    'C:\\Users\\x\\AppData\\Local\\Programs\\Zeb'
   )
   assert.equal(
-    resolveRemovableAppPath('C:\\Users\\x\\AppData\\Local\\hermes-desktop\\Hermes.exe', 'win32'),
-    'C:\\Users\\x\\AppData\\Local\\hermes-desktop'
+    resolveRemovableAppPath('C:\\Users\\x\\AppData\\Local\\zeb-desktop\\Zeb.exe', 'win32'),
+    'C:\\Users\\x\\AppData\\Local\\zeb-desktop'
   )
 })
 
 test('resolveRemovableAppPath returns null for an unrecognized Windows dir', () => {
-  assert.equal(resolveRemovableAppPath('C:\\Temp\\foo\\Hermes.exe', 'win32'), null)
+  assert.equal(resolveRemovableAppPath('C:\\Temp\\foo\\Zeb.exe', 'win32'), null)
 })
 
 test('resolveRemovableAppPath uses APPIMAGE on Linux when set', () => {
   assert.equal(
-    resolveRemovableAppPath('/tmp/.mount_HermesXXXX/hermes', 'linux', { APPIMAGE: '/home/x/Apps/Hermes.AppImage' }),
-    '/home/x/Apps/Hermes.AppImage'
+    resolveRemovableAppPath('/tmp/.mount_ZebXXXX/zeb', 'linux', { APPIMAGE: '/home/x/Apps/Zeb.AppImage' }),
+    '/home/x/Apps/Zeb.AppImage'
   )
 })
 
 test('resolveRemovableAppPath finds the unpacked dir on Linux', () => {
-  assert.equal(resolveRemovableAppPath('/opt/hermes/linux-unpacked/hermes', 'linux', {}), '/opt/hermes/linux-unpacked')
+  assert.equal(resolveRemovableAppPath('/opt/zeb/linux-unpacked/zeb', 'linux', {}), '/opt/zeb/linux-unpacked')
   // A system-package install (/usr/bin) → null, left to apt/dnf.
-  assert.equal(resolveRemovableAppPath('/usr/bin/hermes', 'linux', {}), null)
+  assert.equal(resolveRemovableAppPath('/usr/bin/zeb', 'linux', {}), null)
 })
 
 test('resolveRemovableAppPath returns null for an empty exe path', () => {
@@ -114,8 +114,8 @@ test('resolveRemovableAppPath returns null for an empty exe path', () => {
 // --- shouldRemoveAppBundle ---
 
 test('shouldRemoveAppBundle requires packaged AND a resolved path', () => {
-  assert.equal(shouldRemoveAppBundle(true, '/Applications/Hermes.app'), true)
-  assert.equal(shouldRemoveAppBundle(false, '/Applications/Hermes.app'), false)
+  assert.equal(shouldRemoveAppBundle(true, '/Applications/Zeb.app'), true)
+  assert.equal(shouldRemoveAppBundle(false, '/Applications/Zeb.app'), false)
   assert.equal(shouldRemoveAppBundle(true, null), false)
   assert.equal(shouldRemoveAppBundle(false, null), false)
 })
@@ -125,37 +125,37 @@ test('shouldRemoveAppBundle requires packaged AND a resolved path', () => {
 test('buildPosixCleanupScript waits for the PID, runs the uninstall module, removes bundle', () => {
   const script = buildPosixCleanupScript({
     desktopPid: 4321,
-    pythonExe: '/home/x/.hermes/hermes-agent/venv/bin/python',
+    pythonExe: '/home/x/.zeb/zeb-agent/venv/bin/python',
     pythonPath: null,
-    agentRoot: '/home/x/.hermes/hermes-agent',
-    uninstallArgs: ['-m', 'hermes_cli.uninstall', '--mode', 'gui'],
-    appPath: '/opt/hermes/linux-unpacked',
-    hermesHome: '/home/x/.hermes'
+    agentRoot: '/home/x/.zeb/zeb-agent',
+    uninstallArgs: ['-m', 'zeb_cli.uninstall', '--mode', 'gui'],
+    appPath: '/opt/zeb/linux-unpacked',
+    zebHome: '/home/x/.zeb'
   })
   assert.match(script, /^#!\/bin\/bash/)
   assert.match(script, /pid=4321/)
   assert.match(script, /kill -0 "\$pid"/)
   // bounded wait (~30s), not unbounded
   assert.match(script, /seq 1 60/)
-  assert.match(script, /'-m' 'hermes_cli\.uninstall' '--mode' 'gui'/)
-  assert.match(script, /rm -rf '\/opt\/hermes\/linux-unpacked'/)
-  assert.match(script, /export HERMES_HOME='\/home\/x\/\.hermes'/)
+  assert.match(script, /'-m' 'zeb_cli\.uninstall' '--mode' 'gui'/)
+  assert.match(script, /rm -rf '\/opt\/zeb\/linux-unpacked'/)
+  assert.match(script, /export ZEB_HOME='\/home\/x\/\.zeb'/)
 })
 
 test('buildPosixCleanupScript exports PYTHONPATH when pythonPath is set (lite/full)', () => {
   const script = buildPosixCleanupScript({
     desktopPid: 1,
     pythonExe: '/usr/bin/python3',
-    pythonPath: '/home/x/.hermes/hermes-agent',
-    agentRoot: '/home/x/.hermes/hermes-agent',
-    uninstallArgs: ['-m', 'hermes_cli.uninstall', '--mode', 'full'],
+    pythonPath: '/home/x/.zeb/zeb-agent',
+    agentRoot: '/home/x/.zeb/zeb-agent',
+    uninstallArgs: ['-m', 'zeb_cli.uninstall', '--mode', 'full'],
     appPath: null,
-    hermesHome: '/home/x/.hermes'
+    zebHome: '/home/x/.zeb'
   })
-  // System python + source on PYTHONPATH so import hermes_cli works while the
+  // System python + source on PYTHONPATH so import zeb_cli works while the
   // venv is torn down.
-  assert.match(script, /export PYTHONPATH='\/home\/x\/\.hermes\/hermes-agent'/)
-  assert.match(script, /'\/usr\/bin\/python3' '-m' 'hermes_cli\.uninstall' '--mode' 'full'/)
+  assert.match(script, /export PYTHONPATH='\/home\/x\/\.zeb\/zeb-agent'/)
+  assert.match(script, /'\/usr\/bin\/python3' '-m' 'zeb_cli\.uninstall' '--mode' 'full'/)
 })
 
 test('buildPosixCleanupScript omits PYTHONPATH when pythonPath is null (gui)', () => {
@@ -164,9 +164,9 @@ test('buildPosixCleanupScript omits PYTHONPATH when pythonPath is null (gui)', (
     pythonExe: '/p/python',
     pythonPath: null,
     agentRoot: '/a',
-    uninstallArgs: ['-m', 'hermes_cli.uninstall', '--mode', 'gui'],
+    uninstallArgs: ['-m', 'zeb_cli.uninstall', '--mode', 'gui'],
     appPath: null,
-    hermesHome: '/h'
+    zebHome: '/h'
   })
   assert.doesNotMatch(script, /export PYTHONPATH/)
 })
@@ -177,13 +177,13 @@ test('buildPosixCleanupScript omits the bundle rm when appPath is null', () => {
     pythonExe: '/p/python',
     pythonPath: null,
     agentRoot: '/a',
-    uninstallArgs: ['-m', 'hermes_cli.uninstall', '--mode', 'lite'],
+    uninstallArgs: ['-m', 'zeb_cli.uninstall', '--mode', 'lite'],
     appPath: null,
-    hermesHome: '/h'
+    zebHome: '/h'
   })
   assert.doesNotMatch(script, /rm -rf '\//)
   // Still runs the uninstall.
-  assert.match(script, /'-m' 'hermes_cli\.uninstall' '--mode' 'lite'/)
+  assert.match(script, /'-m' 'zeb_cli\.uninstall' '--mode' 'lite'/)
 })
 
 test('buildPosixCleanupScript single-quote-escapes paths with apostrophes', () => {
@@ -192,9 +192,9 @@ test('buildPosixCleanupScript single-quote-escapes paths with apostrophes', () =
     pythonExe: "/home/o'brien/python",
     pythonPath: null,
     agentRoot: '/a',
-    uninstallArgs: ['-m', 'hermes_cli.uninstall', '--mode', 'gui'],
+    uninstallArgs: ['-m', 'zeb_cli.uninstall', '--mode', 'gui'],
     appPath: null,
-    hermesHome: '/h'
+    zebHome: '/h'
   })
   // The apostrophe is closed-escaped-reopened so the shell sees the literal.
   assert.match(script, /'\/home\/o'\\''brien\/python'/)
@@ -206,24 +206,24 @@ test('buildWindowsCleanupScript waits (bounded) for PID, runs uninstall, rmdir b
   const script = buildWindowsCleanupScript({
     desktopPid: 9988,
     pythonExe: 'C:\\Python313\\python.exe',
-    pythonPath: 'C:\\hermes',
-    agentRoot: 'C:\\hermes',
-    uninstallArgs: ['-m', 'hermes_cli.uninstall', '--mode', 'full'],
-    appPath: 'C:\\Users\\x\\AppData\\Local\\Programs\\Hermes',
-    hermesHome: 'C:\\Users\\x\\AppData\\Local\\hermes'
+    pythonPath: 'C:\\zeb',
+    agentRoot: 'C:\\zeb',
+    uninstallArgs: ['-m', 'zeb_cli.uninstall', '--mode', 'full'],
+    appPath: 'C:\\Users\\x\\AppData\\Local\\Programs\\Zeb',
+    zebHome: 'C:\\Users\\x\\AppData\\Local\\zeb'
   })
   assert.match(script, /@echo off/)
   assert.match(script, /set "PID=9988"/)
-  // PYTHONPATH set so a system python can import hermes_cli from source.
-  assert.match(script, /set "PYTHONPATH=C:\\hermes;%PYTHONPATH%"/)
-  assert.match(script, /"C:\\Python313\\python.exe" "-m" "hermes_cli\.uninstall" "--mode" "full"/)
+  // PYTHONPATH set so a system python can import zeb_cli from source.
+  assert.match(script, /set "PYTHONPATH=C:\\zeb;%PYTHONPATH%"/)
+  assert.match(script, /"C:\\Python313\\python.exe" "-m" "zeb_cli\.uninstall" "--mode" "full"/)
   // Bounded wait-loop (no infinite loop), whole-token PID match (no substring).
   assert.match(script, /if %waited% geq 60 goto waited_done/)
   assert.match(script, /findstr \/r \/c:" %PID% "/)
   assert.doesNotMatch(script, /find "%PID%"/) // the old substring-prone form is gone
   // Removal is a retry loop (Windows releases dir handles lazily).
   assert.match(script, /:rmloop/)
-  assert.match(script, /rmdir \/s \/q "C:\\Users\\x\\AppData\\Local\\Programs\\Hermes" >nul 2>&1/)
+  assert.match(script, /rmdir \/s \/q "C:\\Users\\x\\AppData\\Local\\Programs\\Zeb" >nul 2>&1/)
   assert.match(script, /if %tries% geq 10 goto rmdone/)
   assert.match(script, /del "%~f0"/)
 })
@@ -234,9 +234,9 @@ test('buildWindowsCleanupScript omits PYTHONPATH + rmdir when not needed (gui, n
     pythonExe: 'C:\\h\\venv\\Scripts\\python.exe',
     pythonPath: null,
     agentRoot: 'C:\\h',
-    uninstallArgs: ['-m', 'hermes_cli.uninstall', '--mode', 'gui'],
+    uninstallArgs: ['-m', 'zeb_cli.uninstall', '--mode', 'gui'],
     appPath: null,
-    hermesHome: 'C:\\h'
+    zebHome: 'C:\\h'
   })
   assert.doesNotMatch(script, /rmdir/)
   assert.doesNotMatch(script, /set "PYTHONPATH=/)

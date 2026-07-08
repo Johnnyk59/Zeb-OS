@@ -15,13 +15,13 @@
 
 import {
   JsonRpcGatewayClient,
-  buildHermesWebSocketUrl,
+  buildZebWebSocketUrl,
   type ConnectionState,
   type GatewayEvent,
   type GatewayEventName,
-} from "@hermes/shared";
+} from "@zeb/shared";
 
-import { HERMES_BASE_PATH, buildWsAuthParam } from "@/lib/api";
+import { ZEB_BASE_PATH, buildWsAuthParam } from "@/lib/api";
 
 export type { ConnectionState, GatewayEvent, GatewayEventName };
 
@@ -46,14 +46,14 @@ export class GatewayClient extends JsonRpcGatewayClient {
     const authParam = token ? (["token", token] as const) : await buildWsAuthParam();
     if (!authParam[1]) {
       throw new Error(
-        "Session token not available — page must be served by the Hermes dashboard server",
+        "Session token not available — page must be served by the Zeb dashboard server",
       );
     }
 
     await super.connect(
-      buildHermesWebSocketUrl({
+      buildZebWebSocketUrl({
         authParam,
-        basePath: HERMES_BASE_PATH,
+        basePath: ZEB_BASE_PATH,
         path: "/api/ws",
       }),
     );

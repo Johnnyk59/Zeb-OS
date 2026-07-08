@@ -3,7 +3,7 @@
 /**
  * bootstrap-runner.cjs
  *
- * Drives apps/desktop's first-launch install of Hermes Agent by spawning
+ * Drives apps/desktop's first-launch install of Zeb Agent by spawning
  * scripts/install.ps1 stage-by-stage and streaming progress events back to
  * the renderer.
  *
@@ -11,10 +11,10 @@
  *   const { runBootstrap } = require('./bootstrap-runner.cjs')
  *   const result = await runBootstrap({
  *     installStamp,        // INSTALL_STAMP from main.cjs (may be null in dev)
- *     activeRoot,          // ACTIVE_HERMES_ROOT
+ *     activeRoot,          // ACTIVE_ZEB_ROOT
  *     sourceRepoRoot,      // SOURCE_REPO_ROOT (for dev install.ps1 lookup)
- *     hermesHome,          // HERMES_HOME
- *     logRoot,             // HERMES_HOME/logs
+ *     zebHome,          // ZEB_HOME
+ *     logRoot,             // ZEB_HOME/logs
  *     emit: ev => {...}    // event sink (sender.send or similar)
  *   })
  *
@@ -81,17 +81,17 @@ function resolveLocalInstallScript(sourceRepoRoot) {
   }
 }
 
-function bootstrapCacheDir(hermesHome) {
-  return path.join(hermesHome, 'bootstrap-cache')
+function bootstrapCacheDir(zebHome) {
+  return path.join(zebHome, 'bootstrap-cache')
 }
 
 // The install.sh / install.ps1 that ships inside the already-installed agent
-// checkout under ~/.hermes/hermes-agent. Used as a last-resort fallback when
+// checkout under ~/.zeb/zeb-agent. Used as a last-resort fallback when
 // the pinned commit can't be fetched from GitHub (e.g. a locally-built desktop
 // app stamped to an unpushed HEAD).
-function installedAgentInstallScript(hermesHome) {
-  if (!hermesHome) return null
-  const candidate = path.join(hermesHome, 'hermes-agent', 'scripts', installScriptName())
+function installedAgentInstallScript(zebHome) {
+  if (!zebHome) return null
+  const candidate = path.join(zebHome, 'zeb-agent', 'scripts', installScriptName())
   try {
     fs.accessSync(candidate, fs.constants.R_OK)
     return candidate
@@ -100,8 +100,8 @@ function installedAgentInstallScript(hermesHome) {
   }
 }
 
-function cachedScriptPath(hermesHome, commit) {
-  return path.join(bootstrapCacheDir(hermesHome), `install-${commit}.${process.platform === 'win32' ? 'ps1' : 'sh'}`)
+function cachedScriptPath(zebHome, commit) {
+  return path.join(bootstrapCacheDir(zebHome), `install-${commit}.${process.platform === 'win32' ? 'ps1' : 'sh'}`)
 }
 
 function downloadInstallScript(commit, destPath) {
@@ -109,7 +109,7 @@ function downloadInstallScript(commit, destPath) {
   // is immutable (unlike a branch ref), so we don't need integrity
   // verification beyond "did the file we wrote pass a syntax probe."
   const scriptName = installScriptName()
-  const url = `https://raw.githubusercontent.com/NousResearch/hermes-agent/${commit}/scripts/${scriptName}`
+  const url = `https://raw.githubusercontent.com/NousResearch/zeb-agent/${commit}/scripts/${scriptName}`
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(destPath), { recursive: true })
     const tmpPath = destPath + '.tmp'
@@ -182,7 +182,7 @@ function downloadInstallScript(commit, destPath) {
 async function resolveInstallScript({
   installStamp,
   sourceRepoRoot,
-  hermesHome,
+  zebHome,
   emit,
   _download = downloadInstallScript
 }) {
@@ -203,7 +203,7 @@ async function resolveInstallScript({
     )
   }
 
-  const cached = cachedScriptPath(hermesHome, installStamp.commit)
+  const cached = cachedScriptPath(zebHome, installStamp.commit)
   try {
     await fsp.access(cached, fs.constants.R_OK)
     emit({
@@ -229,7 +229,7 @@ async function resolveInstallScript({
     // write-build-stamp.cjs fromLocalGit). Fall back to the installer that
     // ships inside the already-installed agent checkout so dev/self-builds can
     // still bootstrap instead of dying with a fatal 404.
-    const installed = installedAgentInstallScript(hermesHome)
+    const installed = installedAgentInstallScript(zebHome)
     if (installed) {
       emit({
         type: 'log',
@@ -294,7 +294,7 @@ function resolveWindowsPowerShell() {
   return 'powershell.exe'
 }
 
-function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, hermesHome } = {}) {
+function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, zebHome } = {}) {
   return new Promise((resolve, reject) => {
     const ps = process.platform === 'win32' ? resolveWindowsPowerShell() : 'pwsh'
     const fullArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, ...args]
@@ -306,9 +306,9 @@ function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, herme
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           ...process.env,
-          // Pass HERMES_HOME through so install.ps1 respects the caller's
+          // Pass ZEB_HOME through so install.ps1 respects the caller's
           // choice rather than re-computing the default.
-          HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
+          ZEB_HOME: zebHome || process.env.ZEB_HOME || ''
         }
       })
     )
@@ -376,13 +376,13 @@ function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, herme
   })
 }
 
-function spawnBash(scriptPath, args, { emit, stageName, abortSignal, hermesHome } = {}) {
+function spawnBash(scriptPath, args, { emit, stageName, abortSignal, zebHome } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn('bash', [scriptPath, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
+        ZEB_HOME: zebHome || process.env.ZEB_HOME || ''
       }
     })
 
@@ -465,8 +465,8 @@ function buildPinArgs(installStamp) {
   return args
 }
 
-function buildPosixPinArgs({ installStamp, activeRoot, hermesHome }) {
-  const args = ['--dir', activeRoot, '--hermes-home', hermesHome]
+function buildPosixPinArgs({ installStamp, activeRoot, zebHome }) {
+  const args = ['--dir', activeRoot, '--zeb-home', zebHome]
   if (installStamp && installStamp.branch) {
     args.push('--branch', installStamp.branch)
   }
@@ -476,15 +476,15 @@ function buildPosixPinArgs({ installStamp, activeRoot, hermesHome }) {
   return args
 }
 
-async function fetchManifest({ scriptPath, installerKind, emit, hermesHome, activeRoot, installStamp }) {
+async function fetchManifest({ scriptPath, installerKind, emit, zebHome, activeRoot, installStamp }) {
   const isPosix = installerKind === 'posix'
   const args = isPosix
-    ? ['--manifest', ...buildPosixPinArgs({ installStamp, activeRoot, hermesHome })]
+    ? ['--manifest', ...buildPosixPinArgs({ installStamp, activeRoot, zebHome })]
     : ['-Manifest', ...buildPinArgs(installStamp)]
   const result = await (isPosix ? spawnBash : spawnPowerShell)(scriptPath, args, {
     emit,
     stageName: '__manifest__',
-    hermesHome
+    zebHome
   })
   if (result.code !== 0) {
     throw new Error(
@@ -528,7 +528,7 @@ function parseStageResult(stdout) {
   return null
 }
 
-async function runStage({ scriptPath, installerKind, stage, emit, hermesHome, activeRoot, abortSignal, installStamp }) {
+async function runStage({ scriptPath, installerKind, stage, emit, zebHome, activeRoot, abortSignal, installStamp }) {
   const startedAt = Date.now()
   emit({ type: 'stage', name: stage.name, state: 'running' })
 
@@ -539,14 +539,14 @@ async function runStage({ scriptPath, installerKind, stage, emit, hermesHome, ac
         stage.name,
         '--non-interactive',
         '--json',
-        ...buildPosixPinArgs({ installStamp, activeRoot, hermesHome })
+        ...buildPosixPinArgs({ installStamp, activeRoot, zebHome })
       ]
     : ['-Stage', stage.name, '-NonInteractive', '-Json', ...buildPinArgs(installStamp)]
   const result = await (isPosix ? spawnBash : spawnPowerShell)(scriptPath, args, {
     emit,
     stageName: stage.name,
     abortSignal,
-    hermesHome
+    zebHome
   })
 
   const durationMs = Date.now() - startedAt
@@ -615,7 +615,7 @@ async function runBootstrap(opts) {
     installStamp,
     activeRoot,
     sourceRepoRoot,
-    hermesHome,
+    zebHome,
     logRoot,
     onEvent,
     abortSignal,
@@ -636,7 +636,7 @@ async function runBootstrap(opts) {
     return { ok: false, cancelled: true }
   }
 
-  const runLog = openRunLog(logRoot || path.join(hermesHome, 'logs'))
+  const runLog = openRunLog(logRoot || path.join(zebHome, 'logs'))
 
   // Tee every event to the runLog AND the caller's onEvent. This gives us a
   // forensic trail per bootstrap run AND lets the renderer subscribe live.
@@ -665,7 +665,7 @@ async function runBootstrap(opts) {
 
   try {
     // 1. Resolve the platform installer.
-    const scriptInfo = await resolveInstallScript({ installStamp, sourceRepoRoot, hermesHome, emit })
+    const scriptInfo = await resolveInstallScript({ installStamp, sourceRepoRoot, zebHome, emit })
     const installerKind = scriptInfo.kind || 'powershell'
 
     // 2. Fetch manifest
@@ -673,7 +673,7 @@ async function runBootstrap(opts) {
       scriptPath: scriptInfo.path,
       installerKind,
       emit,
-      hermesHome,
+      zebHome,
       activeRoot,
       installStamp
     })
@@ -697,7 +697,7 @@ async function runBootstrap(opts) {
         installerKind,
         stage,
         emit,
-        hermesHome,
+        zebHome,
         activeRoot,
         abortSignal,
         installStamp

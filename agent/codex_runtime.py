@@ -26,12 +26,12 @@ logger = logging.getLogger(__name__)
 
 
 def _codex_note_to_tool_progress(note: dict) -> tuple[str, str, dict] | None:
-    """Map a Codex app-server ``item/started`` notification to a Hermes
+    """Map a Codex app-server ``item/started`` notification to a Zeb
     tool-progress event ``(tool_name, preview, args)``.
 
     The Codex app-server runtime processes ``item/started`` notifications for
     command execution, file changes, and MCP/dynamic tool calls, but never
-    surfaced them as Hermes tool-progress events — so gateways (Telegram, etc.)
+    surfaced them as Zeb tool-progress events — so gateways (Telegram, etc.)
     showed no verbose "running X" breadcrumbs on this route while every other
     provider did (#38835). Returns None for items that aren't tool-shaped.
     """
@@ -96,17 +96,17 @@ def _coerce_usage_int(value: Any) -> int:
 
 
 def _record_codex_app_server_usage(agent, turn) -> dict[str, Any]:
-    """Translate Codex app-server token usage into Hermes accounting.
+    """Translate Codex app-server token usage into Zeb accounting.
 
     Codex app-server reports usage via thread/tokenUsage/updated as:
     inputTokens, cachedInputTokens, outputTokens, reasoningOutputTokens,
     totalTokens.
 
-    Hermes' canonical prompt bucket includes uncached input + cached input.
+    Zeb' canonical prompt bucket includes uncached input + cached input.
     The Codex app-server protocol does not currently expose cache-write tokens,
     so that bucket remains zero on this runtime.
 
-    Even when Codex omits usage for a turn, Hermes should still count that turn
+    Even when Codex omits usage for a turn, Zeb should still count that turn
     as one API call for session/status accounting.
     """
     agent.session_api_calls += 1
@@ -235,9 +235,9 @@ def _record_codex_app_server_compaction(
     approx_tokens: int | None = None,
     force: bool = False,
 ) -> bool:
-    """Record a Codex-native context compaction boundary in Hermes state.
+    """Record a Codex-native context compaction boundary in Zeb state.
 
-    The app-server owns the compacted thread context, so Hermes should not
+    The app-server owns the compacted thread context, so Zeb should not
     rewrite local transcript rows here; state.db records the boundary via the
     session event/usage counters while preserving the visible transcript.
     """
@@ -308,7 +308,7 @@ def run_codex_app_server_turn(
     should_review_memory: bool = False,
 ) -> Dict[str, Any]:
     """Codex app-server runtime path. Hands the entire turn to a `codex
-    app-server` subprocess and projects its events back into Hermes'
+    app-server` subprocess and projects its events back into Zeb'
     messages list so memory/skill review keep working.
 
     Called from run_conversation() when agent.api_mode == "codex_app_server".
@@ -326,7 +326,7 @@ def run_codex_app_server_turn(
         from agent.runtime_cwd import resolve_agent_cwd
 
         cwd = getattr(agent, "session_cwd", None) or str(resolve_agent_cwd())
-        # Approval callback: defer to Hermes' standard prompt flow if a
+        # Approval callback: defer to Zeb' standard prompt flow if a
         # CLI thread has installed one. Gateway / cron contexts get the
         # codex-side fail-closed default.
         try:
@@ -338,11 +338,11 @@ def run_codex_app_server_turn(
         # Gateway / cron contexts have no UI to surface codex's approval
         # requests through, so codex app-server exec / apply_patch requests
         # fail closed (silently decline) by default. When the user has
-        # explicitly opted out of Hermes approvals — via `approvals.mode: off`
-        # in config, the /yolo session toggle, or --yolo / HERMES_YOLO_MODE —
+        # explicitly opted out of Zeb approvals — via `approvals.mode: off`
+        # in config, the /yolo session toggle, or --yolo / ZEB_YOLO_MODE —
         # honor that and let codex's own sandbox permission profile
         # (~/.codex/config.toml) be the policy gate instead of double-gating
-        # with a missing Hermes UI. Defaults (manual/smart/unset) preserve the
+        # with a missing Zeb UI. Defaults (manual/smart/unset) preserve the
         # current fail-closed behavior — this is a no-op for those users.
         auto_approve_requests = False
         try:
@@ -357,7 +357,7 @@ def run_codex_app_server_turn(
             )
 
         def _on_codex_event(note: dict) -> None:
-            # Bridge Codex app-server item/started notifications to Hermes
+            # Bridge Codex app-server item/started notifications to Zeb
             # tool-progress so gateways show verbose "running X" breadcrumbs
             # on this route too (#38835).
             progress_callback = getattr(agent, "tool_progress_callback", None)

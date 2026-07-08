@@ -1,7 +1,7 @@
-import { getGlobalModelOptions, type HermesGateway, type ModelOptionsResponse } from '@/hermes'
+import { getGlobalModelOptions, type ZebGateway, type ModelOptionsResponse } from '@/zeb'
 
 interface ModelOptionsRequest {
-  gateway?: HermesGateway
+  gateway?: ZebGateway
   refresh?: boolean
   sessionId?: null | string
 }
