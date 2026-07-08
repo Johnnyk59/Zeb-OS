@@ -48,6 +48,16 @@ def _models_dir() -> Path:
 
 
 def _get_hf_hub_sdk():
+    # Import-first: if huggingface_hub is already importable, return it
+    # immediately and never touch lazy_deps.ensure() — ensure() can hang
+    # trying to pip-install in CI where it isn't available.
+    try:
+        import huggingface_hub
+
+        return huggingface_hub
+    except ImportError:
+        pass
+
     try:
         from tools.lazy_deps import ensure as _lazy_ensure
 
@@ -56,6 +66,7 @@ def _get_hf_hub_sdk():
         pass
     except Exception:
         pass
+
     try:
         import huggingface_hub
 

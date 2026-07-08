@@ -37,6 +37,17 @@ _loaded_model_path: Optional[str] = None
 
 
 def _get_llama_cpp_sdk():
+    # Import-first: if llama_cpp is already importable (installed, or a fake
+    # injected into sys.modules by tests), return it immediately and never
+    # touch lazy_deps.ensure() — ensure() would try to pip-compile the C++
+    # package, which hangs for minutes in CI where it isn't installed.
+    try:
+        import llama_cpp
+
+        return llama_cpp
+    except ImportError:
+        pass
+
     try:
         from tools.lazy_deps import ensure as _lazy_ensure
 
@@ -45,6 +56,7 @@ def _get_llama_cpp_sdk():
         pass
     except Exception:
         pass
+
     try:
         import llama_cpp
 

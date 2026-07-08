@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
+import sys
 
 from zeb_cli.config import clear_model_endpoint_credentials
 
@@ -326,6 +327,12 @@ def _model_flow_local_model(config, current_model=""):
         return
 
     print(f"Model weights ({repo_id}, {quant}, ~2GB) aren't downloaded yet.")
+    # Only prompt interactively when attached to a real terminal — under
+    # pytest / piped stdin, input() raises OSError, so defer to first-use
+    # download instead of blocking or crashing.
+    if not sys.stdin.isatty():
+        print("The weights will download automatically on first use.")
+        return
     try:
         answer = input("Download now? [Y/n]: ").strip().lower()
     except (KeyboardInterrupt, EOFError):

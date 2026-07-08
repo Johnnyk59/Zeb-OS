@@ -29,7 +29,7 @@ class TestGatewayLifecyclePattern:
         "zeb gateway restart",
         "zeb gateway stop",
         "zeb  gateway  restart",         # double spaces
-        "Hermez Gateway Restart".lower().replace("z", "s"),  # case handled
+        "ZeB GaTeWaY ReStArT".lower(),   # case handled
         "ZEB GATEWAY RESTART",           # uppercase
     ])
     def test_zeb_gateway_commands(self, text):
