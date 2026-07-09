@@ -12198,14 +12198,24 @@ class ZebCLI(CLIAgentSetupMixin, CLICommandsMixin):
                     if text_queue is not None:
                         text_queue.put(delta)
 
-            # When voice mode is active, prepend a brief instruction so the
-            # model responds concisely. The prefix is API-call-local only —
-            # run_conversation persists the original clean user message.
+            # When voice mode is active, prepend a brief instruction. The prefix
+            # is API-call-local only — run_conversation persists the original
+            # clean user message. It grants FULL agent capability (voice has the
+            # same tools + permissions as typed input — see cli.py:3865 /
+            # _init_agent) and only shapes the SPOKEN style: take the action,
+            # don't just narrate it, and keep the reply short. The earlier
+            # "2-3 sentences, no code/markdown" wording biased the model into
+            # chit-chat and away from tool use, which made voice feel read-only
+            # even though it never was.
             _voice_prefix = ""
             if self._voice_mode and isinstance(message, str):
                 _voice_prefix = (
-                    "[Voice input — respond concisely and conversationally, "
-                    "2-3 sentences max. No code blocks or markdown.] "
+                    "[Voice input — you have your full toolset and complete "
+                    "workspace access, exactly as with typed input: read, write, "
+                    "edit files, run commands, and take any action requested. Do "
+                    "the work, don't just describe it. Keep the SPOKEN reply short "
+                    "and conversational; after acting, say briefly what you did "
+                    "rather than reading code or file contents aloud.] "
                 )
 
             def run_agent():

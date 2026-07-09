@@ -292,6 +292,7 @@ from zeb_cli.subcommands.version import build_version_parser
 from zeb_cli.subcommands.update import build_update_parser
 from zeb_cli.subcommands.uninstall import build_uninstall_parser
 from zeb_cli.subcommands.dashboard import build_dashboard_parser
+from zeb_cli.subcommands.chatui import build_chatui_parser
 from zeb_cli.subcommands.gui import build_gui_parser
 from zeb_cli.subcommands.logs import build_logs_parser
 from zeb_cli.subcommands.prompt_size import build_prompt_size_parser
@@ -11901,6 +11902,22 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
     print()
 
 
+def cmd_chatui(args):
+    """Start the clean chat-only web UI (zeb_chat/) — key-gated, no terminal."""
+    host = getattr(args, "host", "0.0.0.0") or "0.0.0.0"
+    port = int(getattr(args, "port", 8000) or 8000)
+    try:
+        from zeb_chat.server import run_server
+    except Exception as exc:
+        print(
+            "Chat UI requires fastapi and uvicorn.\n"
+            f"Install with: {sys.executable} -m pip install 'fastapi' 'uvicorn[standard]'\n"
+            f"({exc})"
+        )
+        sys.exit(1)
+    run_server(host=host, port=port)
+
+
 def cmd_dashboard(args):
     """Start the web UI server, or (with --stop/--status) manage running ones."""
     # --status: report running dashboards and exit, no deps needed.
@@ -14328,6 +14345,7 @@ def main():
         cmd_dashboard=cmd_dashboard,
         cmd_dashboard_register=cmd_dashboard_register,
     )
+    build_chatui_parser(subparsers, cmd_chatui=cmd_chatui)
 
 
     # =========================================================================
