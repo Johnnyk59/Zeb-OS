@@ -74,3 +74,26 @@ services:
       - ZEB_GID=${ZEB_GID:-10000}
     # Localhost-only. For remote access, tunnel via `ssh -L 9119:localhost:9119`.
     command: ["dashboard", "--host", "127.0.0.1", "--no-open"]
+
+  # Clean chat-only web UI (zeb_chat/) — "paste a key and chat like standard
+  # Hermes", no terminal, no multi-panel dashboard. On first start it generates
+  # an API key, persists it under ~/.zeb (the /opt/data volume), and PRINTS IT
+  # TO THIS SERVICE'S LOGS. Open http://localhost:8000, paste that key, and chat
+  # with full agent access. To pin a fixed key, set ZEB_CHAT_API_KEY.
+  #   See the key:  docker compose logs chat | grep -i "chat api key"
+  chat:
+    image: zeb-agent
+    container_name: zeb-chat
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - gateway
+    volumes:
+      - ~/.zeb:/opt/data
+    environment:
+      - ZEB_UID=${ZEB_UID:-10000}
+      - ZEB_GID=${ZEB_GID:-10000}
+      # Optional: pin a fixed key instead of the auto-generated one.
+      # - ZEB_CHAT_API_KEY=${ZEB_CHAT_API_KEY}
+    # Localhost-only bind; the API key is always required (no loopback bypass).
+    command: ["chatui", "--host", "127.0.0.1", "--port", "8000"]

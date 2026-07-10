@@ -6616,6 +6616,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception as _e:
             logger.debug("start_self_healing_monitor failed: %s", _e)
 
+        # Autonomy subsystem — the always-on background bots (decision engine,
+        # memory learning, state sync, knowledge firehose, self-improvement,
+        # nightly file organizer). See zeb_autonomy/. Same best-effort
+        # contract as the health checker: a failure here never blocks startup.
+        try:
+            from zeb_autonomy.registry import start_autonomy
+
+            start_autonomy()
+        except Exception as _e:
+            logger.debug("start_autonomy failed: %s", _e)
+
         # Sanity-check that systemd's TimeoutStopSec covers our drain
         # window.  When the user upgraded zeb-agent without re-running
         # ``zeb setup``, their unit file may still encode the old
@@ -7996,6 +8007,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 stop_self_healing_monitor()
             except Exception as _e:
                 logger.debug("stop_self_healing_monitor failed: %s", _e)
+
+            try:
+                from zeb_autonomy.registry import stop_autonomy
+
+                stop_autonomy()
+            except Exception as _e:
+                logger.debug("stop_autonomy failed: %s", _e)
 
             self._running = False
             self._draining = True

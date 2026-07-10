@@ -357,5 +357,11 @@ VOLUME [ "/opt/data" ]
 # and exec's the final program so its exit code becomes the container
 # exit code. Without the wrapper-as-ENTRYPOINT, leading-dash args
 # like `--version` would be intercepted by /init's POSIX shell.
+# Chat-only web UI (zeb_chat/, `zeb chatui`) default port. Documents the port
+# for `docker run -p 8000:8000`; with network_mode: host it's a no-op. The
+# supervised zeb-chat service runs only when ZEB_CHAT_UI is truthy, or you can
+# run `chatui` as the container command directly.
+EXPOSE 8000
+
 ENTRYPOINT [ "/init", "/opt/zeb/docker/main-wrapper.sh" ]
 CMD [ ]

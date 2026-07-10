@@ -1,0 +1,41 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Chat-only web UI service (zeb_chat/). Always declared so s6 has a
+# supervised slot; if ZEB_CHAT_UI isn't truthy the run script exits cleanly
+# and the companion finish script returns 125 (s6's "permanent failure, do
+# not restart" marker), so s6-svstat reports the slot as down. Mirrors the
+# dashboard service.
+#
+# This is the "paste a key and chat like standard Hermes" surface. When
+# enabled, `zeb chatui` (zeb_chat/server.py::run_server) resolves or generates
+# the API key and prints it to THESE logs on startup, then serves the clean
+# chat UI on :8000. No terminal, no multi-panel dashboard.
+
+case "${ZEB_CHAT_UI:-}" in
+    1|true|TRUE|True|yes|YES|Yes) ;;
+    *)
+        # Exit 0; the finish script exits 125 so s6 won't restart us and the
+        # slot reports down when ZEB_CHAT_UI is unset.
+        exit 0
+        ;;
+esac
+
+# with-contenv repopulates HOME from /init as /root. Reset it before
+# dropping privileges so HOME-anchored state lands under /opt/data.
+export HOME=/opt/data
+
+cd /opt/data
+# shellcheck disable=SC1091
+. /opt/zeb/.venv/bin/activate
+
+chat_host="${ZEB_CHAT_HOST:-0.0.0.0}"
+chat_port="${ZEB_CHAT_PORT:-8000}"
+
+# The API key is ALWAYS required by this surface (unlike the dashboard, there
+# is no loopback bypass — the whole point is paste-key access). Set
+# ZEB_CHAT_API_KEY to pin a key; otherwise run_server generates one on first
+# boot, persists it under /opt/data, and prints it to the container logs.
+
+# Skip the setuidgid drop when already non-root.
+[ "$(id -u)" = 0 ] || exec zeb chatui --host "$chat_host" --port "$chat_port"
+exec s6-setuidgid zeb zeb chatui --host "$chat_host" --port "$chat_port"

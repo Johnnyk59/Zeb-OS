@@ -926,6 +926,34 @@ DEFAULT_CONFIG = {
         "enabled": True,
         "interval_seconds": 600,
     },
+    # Autonomy subsystem (zeb_autonomy/) — the always-on background bots run
+    # by the AutonomyScheduler daemon (started/stopped with the gateway, like
+    # the health checker). All local-only: local-model backbone + local
+    # filesystem/SQLite under <zeb_home>/autonomy/, no external dependency.
+    # Every bot fails open; disable the whole subsystem with enabled: false.
+    "autonomy": {
+        "enabled": True,
+        "check_interval_seconds": 60,  # how often the scheduler wakes to run due bots
+        # Autonomous decision engine (feature 1) — polls sensors, escalates.
+        "decision": {"interval_minutes": 15, "clutter_threshold": 200},
+        # Memory learning distillation (feature 3).
+        "memory_learning": {"interval_hours": 6},
+        # State sync across instances (feature 5). shared_dir="" = disabled.
+        "state_sync": {"interval_minutes": 30, "shared_dir": "", "instance_id": ""},
+        # Knowledge firehose (feature 6) — web scan every 2h. notify off by default.
+        "knowledge": {
+            "interval_hours": 2,
+            "topics": ["artificial intelligence", "technology news"],
+            "notify": False,
+        },
+        # Self-improvement loop (feature 7) — persona/style evolution every 12h.
+        "self_improvement": {"interval_hours": 12, "notify": False},
+        # Nightly file organizer (feature 9). target="" = disabled (safe default;
+        # reorganizing an unspecified tree is never done automatically).
+        "file_organizer": {"daily_hour": 3, "target": "", "protect": [], "dry_run": False},
+        # File index roots (features 4/8). Empty = index the current working dir.
+        "file_index": {"roots": []},
+    },
     # Global active chat session cap across CLI, TUI/dashboard, and messaging.
     # None/0 = unbounded.
     "max_concurrent_sessions": None,

@@ -1,0 +1,10 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Chat UI finish script. Companion to ./run. When ZEB_CHAT_UI is unset,
+# ./run exits 0 immediately; exiting 125 here tells s6-supervise the service
+# has permanently failed (do not restart), so the slot reports down. When
+# enabled, exit non-125 so s6 restarts the run script on crash.
+case "${ZEB_CHAT_UI:-}" in
+    1|true|TRUE|True|yes|YES|Yes) exit 0 ;;
+    *) exit 125 ;;
+esac

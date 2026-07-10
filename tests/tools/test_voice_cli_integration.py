@@ -311,8 +311,12 @@ class TestVoiceMessagePrefix:
         agent_message = message
         if voice_mode and isinstance(message, str):
             agent_message = (
-                "[Voice input — respond concisely and conversationally, "
-                "2-3 sentences max. No code blocks or markdown.] "
+                "[Voice input — you have your full toolset and complete "
+                "workspace access, exactly as with typed input: read, write, "
+                "edit files, run commands, and take any action requested. Do "
+                "the work, don't just describe it. Keep the SPOKEN reply short "
+                "and conversational; after acting, say briefly what you did "
+                "rather than reading code or file contents aloud.] "
                 + message
             )
 
@@ -327,8 +331,12 @@ class TestVoiceMessagePrefix:
         agent_message = message
         if voice_mode and isinstance(message, str):
             agent_message = (
-                "[Voice input — respond concisely and conversationally, "
-                "2-3 sentences max. No code blocks or markdown.] "
+                "[Voice input — you have your full toolset and complete "
+                "workspace access, exactly as with typed input: read, write, "
+                "edit files, run commands, and take any action requested. Do "
+                "the work, don't just describe it. Keep the SPOKEN reply short "
+                "and conversational; after acting, say briefly what you did "
+                "rather than reading code or file contents aloud.] "
                 + message
             )
 
@@ -342,8 +350,12 @@ class TestVoiceMessagePrefix:
         agent_message = message
         if voice_mode and isinstance(message, str):
             agent_message = (
-                "[Voice input — respond concisely and conversationally, "
-                "2-3 sentences max. No code blocks or markdown.] "
+                "[Voice input — you have your full toolset and complete "
+                "workspace access, exactly as with typed input: read, write, "
+                "edit files, run commands, and take any action requested. Do "
+                "the work, don't just describe it. Keep the SPOKEN reply short "
+                "and conversational; after acting, say briefly what you did "
+                "rather than reading code or file contents aloud.] "
                 + message
             )
 
@@ -361,8 +373,12 @@ class TestVoiceMessagePrefix:
         agent_message = message
         if voice_mode and isinstance(message, str):
             agent_message = (
-                "[Voice input — respond concisely and conversationally, "
-                "2-3 sentences max. No code blocks or markdown.] "
+                "[Voice input — you have your full toolset and complete "
+                "workspace access, exactly as with typed input: read, write, "
+                "edit files, run commands, and take any action requested. Do "
+                "the work, don't just describe it. Keep the SPOKEN reply short "
+                "and conversational; after acting, say briefly what you did "
+                "rather than reading code or file contents aloud.] "
                 + message
             )
 

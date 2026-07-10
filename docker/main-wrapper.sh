@@ -70,7 +70,43 @@ cd /opt/data
 cd "$_zeb_orig_cwd"
 
 if [ $# -eq 0 ]; then
-    drop zeb
+    # No command was given to `docker run`.
+    #
+    # Interactive (a TTY is attached — `docker run -it`): launch the
+    # interactive agent, exactly as before.
+    #
+    # Detached (no TTY — `docker run -d`): the interactive agent would read
+    # EOF from the closed stdin and exit immediately. Because this wrapper is
+    # /init's "main program", its exit tears the whole container down (taking
+    # the supervised services with it) — the "chat UI exits on startup /
+    # container shuts down" symptom. So a detached container must run a
+    # long-lived, TTY-free program instead. Default: the chat-only web UI
+    # (serves :8000 and prints its API key to the logs) — the intended
+    # headless ZebOS surface. Override with ZEB_DETACHED_CMD=gateway|idle.
+    if [ -t 0 ]; then
+        drop zeb
+    fi
+    case "${ZEB_DETACHED_CMD:-chatui}" in
+        chatui)
+            drop zeb chatui \
+                --host "${ZEB_CHAT_HOST:-0.0.0.0}" \
+                --port "${ZEB_CHAT_PORT:-8000}"
+            ;;
+        gateway)
+            drop zeb gateway run
+            ;;
+        idle)
+            # Keep the container alive doing nothing; the s6 supervision tree
+            # (dashboard, and zeb-chat when ZEB_CHAT_UI=1) runs alongside.
+            drop sleep infinity
+            ;;
+        *)
+            echo "[zeb] Unknown ZEB_DETACHED_CMD='${ZEB_DETACHED_CMD:-}'; using chatui." >&2
+            drop zeb chatui \
+                --host "${ZEB_CHAT_HOST:-0.0.0.0}" \
+                --port "${ZEB_CHAT_PORT:-8000}"
+            ;;
+    esac
 fi
 
 if command -v "$1" >/dev/null 2>&1; then

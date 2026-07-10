@@ -34,14 +34,23 @@ class TestToolResolution:
     """Verify get_tool_definitions returns all expected tools for eval."""
 
     def test_terminal_and_file_toolsets_resolve_all_tools(self):
-        """enabled_toolsets=['terminal', 'file'] should produce 6 tools."""
+        """enabled_toolsets=['terminal', 'file'] should produce 8 tools.
+
+        The ``file`` toolset carries the four core file tools plus the two
+        autonomy file-index tools (find_files, rename_file — see
+        tools/file_finder_tool.py) which register under the same toolset.
+        """
         from model_tools import get_tool_definitions
         tools = get_tool_definitions(
             enabled_toolsets=["terminal", "file"],
             quiet_mode=True,
         )
         names = {t["function"]["name"] for t in tools}
-        expected = {"terminal", "process", "read_file", "write_file", "search_files", "patch"}
+        expected = {
+            "terminal", "process",
+            "read_file", "write_file", "search_files", "patch",
+            "find_files", "rename_file",
+        }
         assert expected == names, f"Expected {expected}, got {names}"
 
     def test_terminal_tool_present(self):
