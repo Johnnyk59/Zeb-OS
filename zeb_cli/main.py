@@ -11908,13 +11908,23 @@ def cmd_chatui(args):
     port = int(getattr(args, "port", 8000) or 8000)
     try:
         from zeb_chat.server import run_server
-    except Exception as exc:
-        print(
-            "Chat UI requires fastapi and uvicorn.\n"
-            f"Install with: {sys.executable} -m pip install 'fastapi' 'uvicorn[standard]'\n"
-            f"({exc})"
-        )
-        sys.exit(1)
+    except ImportError:
+        # fastapi/uvicorn not present — lazy-install the web extra (the same
+        # deps the dashboard uses) and retry, mirroring zeb_cli/web_server.py.
+        # In the Docker image these are baked via the [web] extra, so this is a
+        # no-op there; it's the fallback for slimmer installs.
+        try:
+            from tools.lazy_deps import ensure as _lazy_ensure
+
+            _lazy_ensure("tool.dashboard", prompt=False)
+            from zeb_chat.server import run_server
+        except Exception as exc:
+            print(
+                "Chat UI requires fastapi and uvicorn.\n"
+                f"Install with: {sys.executable} -m pip install 'fastapi' 'uvicorn[standard]'\n"
+                f"({exc})"
+            )
+            sys.exit(1)
     run_server(host=host, port=port)
 
 
