@@ -152,7 +152,54 @@ def test_plugins_shape(client):
 def test_channels_shape(client):
     res = client.get("/api/channels", headers=AUTH)
     assert res.status_code == 200
-    tg = res.json()["telegram"]
+    body = res.json()
+    tg = body["telegram"]
     assert "configured" in tg
     assert isinstance(tg["configured"], bool)
     assert "detail" in tg
+    assert isinstance(body["channels"], list)
+
+
+def test_channels_lifecycle(client):
+    # Missing name/token -> 400
+    res = client.post("/api/channels", headers=AUTH, json={"name": "", "token": ""})
+    assert res.status_code == 400
+
+    res = client.post(
+        "/api/channels",
+        headers=AUTH,
+        json={"name": "My Bot", "token": "123456:AAAAtokenvaluehere"},
+    )
+    assert res.status_code == 200
+    created = res.json()
+    assert "token" not in created
+    assert created["name"] == "My Bot"
+    cid = created["id"]
+
+    res = client.get("/api/channels", headers=AUTH)
+    channels = res.json()["channels"]
+    assert len(channels) == 1
+    assert "token" not in channels[0]
+
+    res = client.delete(f"/api/channels/{cid}", headers=AUTH)
+    assert res.json() == {"ok": True}
+    assert client.get("/api/channels", headers=AUTH).json()["channels"] == []
+
+
+def test_files_write_roundtrip(client, tmp_path):
+    f = tmp_path / "note.txt"
+    f.write_text("original", encoding="utf-8")
+
+    res = client.post(
+        "/api/files/write",
+        headers=AUTH,
+        json={"path": str(f), "content": "updated content"},
+    )
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+    assert f.read_text(encoding="utf-8") == "updated content"
+
+
+def test_files_write_missing_path(client):
+    res = client.post("/api/files/write", headers=AUTH, json={"content": "x"})
+    assert res.status_code == 400

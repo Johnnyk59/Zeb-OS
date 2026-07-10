@@ -1,4 +1,4 @@
-<title>ZebOS Dashboard</title>
+<title>Zeb Dashboard</title>
 <style>
   :root{
     --bg:#0a0a0b; --g1:#111114; --g2:#17171b; --g3:#202026; --g4:#2a2a32;
@@ -73,12 +73,16 @@
 
   /* MAIN */
   .main{flex:1;position:relative;height:100%;overflow:hidden;background:radial-gradient(900px 500px at 90% -5%,#101018,#0a0a0b 55%)}
-  #brainWrap{position:fixed;top:14px;right:16px;width:180px;height:180px;z-index:40;pointer-events:none}
+  #brainWrap{position:fixed;top:52px;right:16px;width:180px;height:180px;z-index:40;pointer-events:none}
   #brainCanvas{width:100%;height:100%;display:block}
-  .brain-fallback{position:absolute;inset:0;border-radius:50%;
-    background:radial-gradient(circle at 50% 45%,rgba(160,107,255,.5),rgba(34,224,208,.25) 40%,transparent 70%);
-    animation:breathe 3s ease-in-out infinite}
-  @keyframes breathe{0%,100%{opacity:.5;transform:scale(.92)}50%{opacity:1;transform:scale(1.02)}}
+  .brain-fallback{position:absolute;inset:0;width:100%;height:100%}
+  .brain-fallback .fedge{stroke:rgba(160,107,255,.3);stroke-width:.6;fill:none}
+  .brain-fallback .fedge.pulse{stroke:rgba(34,224,208,.85);stroke-width:.8;
+    stroke-dasharray:5 11;animation:fdash 2.4s linear infinite}
+  .brain-fallback .fnode{fill:#22e0d0;filter:drop-shadow(0 0 3px rgba(34,224,208,.85));
+    animation:fnode 2.6s ease-in-out infinite}
+  @keyframes fdash{to{stroke-dashoffset:-32}}
+  @keyframes fnode{0%,100%{opacity:.4;r:2}50%{opacity:1;r:3.1}}
   .brain-status{position:absolute;bottom:2px;width:100%;text-align:center;font-family:var(--mono);
     font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim)}
 
@@ -110,7 +114,6 @@
   .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
 
   /* CHAT */
-  #chatPane{display:flex}
   .chat-top{display:flex;align-items:center;gap:12px;padding:16px 26px;border-bottom:1px solid var(--line)}
   .chat-top h2{margin:0;font-size:15px;letter-spacing:-.2px}
   .seg{display:flex;background:var(--g1);border:1px solid var(--line);border-radius:9px;padding:3px;margin-left:auto;margin-right:200px}
@@ -119,10 +122,10 @@
   .seg button.on{background:var(--g3);color:var(--cyan)}
   .chat-scroll{flex:1;overflow-y:auto;padding:24px 26px;display:flex;flex-direction:column;gap:14px}
   .chat-scroll.centered{max-width:920px;width:100%;margin:0 auto}
-  .msg{max-width:74%;animation:fadein .25s ease}
+  .msg{max-width:66%;animation:fadein .25s ease}
   .msg .who{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim2);margin-bottom:5px}
   .bubble{padding:12px 15px;border-radius:14px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;font-size:14px}
-  .msg.user{align-self:flex-end;text-align:right}
+  .msg.user{align-self:flex-end;text-align:right;margin-right:8%}
   .msg.user .bubble{background:linear-gradient(135deg,rgba(34,224,208,.16),rgba(160,107,255,.14));
     border:1px solid rgba(34,224,208,.22);border-bottom-right-radius:4px;text-align:left}
   .msg.agent{align-self:flex-start}
@@ -147,7 +150,7 @@
   /* TERMINAL MODE */
   #chatPane.term{background:#050506}
   #chatPane.term .chat-scroll{max-width:none;font-family:var(--mono);gap:10px;font-size:13px;background:#050506}
-  #chatPane.term .msg{max-width:none;align-self:stretch!important;text-align:left!important}
+  #chatPane.term .msg{max-width:none;align-self:stretch!important;text-align:left!important;margin-right:0!important}
   #chatPane.term .msg .who{display:none}
   #chatPane.term .bubble{background:transparent!important;border:none!important;border-radius:0!important;padding:2px 0;
     white-space:pre-wrap;font-family:var(--mono);text-align:left!important}
@@ -174,7 +177,7 @@
 <div id="gate">
   <div class="gate-card">
     <div class="brandmark"></div>
-    <h1>Enter your ZebOS API key</h1>
+    <h1>Enter your Zeb API key</h1>
     <p>Your key is stored locally in this browser and sent with each request.</p>
     <input id="gateInput" class="field" type="password" placeholder="zeb_..." autocomplete="off" spellcheck="false"/>
     <div class="gate-err" id="gateErr"></div>
@@ -189,7 +192,7 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="dot"></div>
-      <div><b>ZebOS</b><span>DASHBOARD</span></div>
+      <div><b>Zeb</b><span>DASHBOARD</span></div>
     </div>
     <nav class="tabs" id="tabs"></nav>
     <div class="sidebar-foot">
@@ -216,7 +219,7 @@
       <div class="chat-scroll centered" id="chatScroll"></div>
       <div class="composer">
         <div class="composer-inner">
-          <textarea id="chatInput" placeholder="Message ZebOS…  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+          <textarea id="chatInput" placeholder="Message Zeb…  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
           <button class="btn btn-accent" id="sendBtn">Send</button>
         </div>
       </div>
@@ -315,7 +318,7 @@ function openTab(id){
   else if(id==='cron')renderSimple('Cron Jobs',loadCron);
   else if(id==='skills')renderSimple('Skills',loadSkills);
   else if(id==='plugins')renderSimple('Plugins',loadPlugins);
-  else if(id==='channels')renderSimple('Channels',loadChannels);
+  else if(id==='channels')renderChannels();
   else if(id==='keys')renderKeys();
 }
 
@@ -412,16 +415,59 @@ async function loadPlugins(){
     if(p.description)g.appendChild(el('div','meta',p.description));
     r.appendChild(g);if(p.kind||p.type)r.appendChild(el('span','badge',p.kind||p.type));return r;});
 }
-async function loadChannels(){
-  const d=await api('/api/channels');
-  const tg=d.telegram||d;const conf=!!(tg.configured||tg.enabled||tg.connected);
-  const r=el('div','row');const g=el('div','grow');
-  g.appendChild(el('div','title','Telegram'));
-  g.appendChild(el('div','meta',conf?'Connected and receiving messages.':'Not configured — set a bot token to enable Telegram delivery.'));
-  r.appendChild(g);r.appendChild(el('span','badge '+(conf?'on':'off'),conf?'configured':'not set'));
-  const note=el('div','empty');note.style.padding='24px 6px';note.style.textAlign='left';note.style.color='var(--dim)';
-  note.textContent='Channels bridge ZebOS conversations to external messaging. Telegram lets the agent send and receive messages through a bot.';
-  return [r,note];
+async function renderChannels(){
+  showData('Channels');const b=$('#dataBody');b.innerHTML='';
+  const status=el('div');status.id='channelStatus';status.style.marginBottom='16px';
+  status.appendChild(el('div','empty')).innerHTML='<span class="spin"></span>';
+  b.appendChild(status);
+  const form=el('div');
+  form.innerHTML='<div class="label" style="margin-bottom:8px">Add a Telegram channel</div>';
+  const kv=el('div','kv');
+  const ni=el('input','field');ni.placeholder='Name';ni.type='text';ni.autocomplete='off';
+  const ti=el('input','field');ti.placeholder='Bot token';ti.type='password';ti.autocomplete='off';
+  const add=el('button','btn btn-accent','Add');
+  kv.appendChild(ni);kv.appendChild(ti);kv.appendChild(add);
+  form.appendChild(kv);b.appendChild(form);
+  const doAdd=async()=>{
+    const name=ni.value.trim(),token=ti.value.trim();
+    if(!name||!token){(!name?ni:ti).focus();return;}
+    add.disabled=true;
+    try{await api('/api/channels',{method:'POST',body:JSON.stringify({name,token,kind:'telegram'})});
+      ni.value='';ti.value='';loadChannelData();}
+    catch(e){alert(e.message);}finally{add.disabled=false;}
+  };
+  add.onclick=doAdd;
+  [ni,ti].forEach(inp=>inp.addEventListener('keydown',e=>{if(e.key==='Enter')doAdd();}));
+  const holder=el('div');holder.id='channelsList';holder.style.marginTop='18px';b.appendChild(holder);
+  loadChannelData();
+}
+async function loadChannelData(){
+  const status=$('#channelStatus'),holder=$('#channelsList');
+  try{
+    const d=await api('/api/channels');
+    const tg=d.telegram||{};const conf=!!tg.configured;
+    if(status){
+      status.innerHTML='';
+      const r=el('div','row');const g=el('div','grow');
+      g.appendChild(el('div','title','Telegram'));
+      g.appendChild(el('div','meta',conf?(tg.detail||'Connected and receiving messages.'):'Not configured — add a bot token below to enable Telegram delivery.'));
+      r.appendChild(g);r.appendChild(el('span','badge '+(conf?'on':'off'),conf?'configured':'not set'));
+      status.appendChild(r);
+    }
+    if(holder){
+      const list=toArr(d,['channels']);
+      holder.innerHTML='';holder.appendChild(el('div','label','Added channels'));
+      if(!list.length){holder.appendChild(emptyState('&#9758;','No channels added yet.'));return;}
+      list.forEach(c=>{
+        const r=el('div','row');const g=el('div','grow');g.style.cursor='default';
+        g.appendChild(el('div','title',c.name||'(unnamed)'));
+        g.appendChild(el('div','meta',(c.kind||'telegram')+' · '+mask(c.masked||'')));
+        const del=el('button','iconbtn','×');
+        del.onclick=async()=>{try{await api('/api/channels/'+c.id,{method:'DELETE'});loadChannelData();}catch(e){alert(e.message);}};
+        r.appendChild(g);r.appendChild(del);holder.appendChild(r);
+      });
+    }
+  }catch(e){if(status){status.innerHTML='';status.appendChild(inlineErr(e.message));}}
 }
 
 /* ============ FILES ============ */
@@ -453,12 +499,27 @@ function isDir(it){if(typeof it==='string')return it.endsWith('/');return it.typ
 function fname(it){if(typeof it==='string')return it.replace(/\/$/,'');return it.name||it.path||'';}
 async function openFile(full){
   showData('Files');const b=$('#dataBody');b.innerHTML='';
-  const back=el('button','btn','&larr; Back to files');back.innerHTML='&larr; Back';back.onclick=()=>renderFiles(filePath);
-  const bar=el('div','toolbar');bar.appendChild(back);bar.appendChild(el('div','crumb','/'+full));b.appendChild(bar);
-  const v=el('div','mono-view');v.innerHTML='<span class="spin"></span>';b.appendChild(v);
-  try{const d=await api('/api/files/read?path='+encodeURIComponent(full));
-    v.textContent=typeof d==='string'?d:(d.content||d.text||JSON.stringify(d,null,2));
-  }catch(e){v.innerHTML='';b.appendChild(inlineErr(e.message));v.remove();}
+  const back=el('button','btn');back.innerHTML='&larr; Back';back.onclick=()=>renderFiles(filePath);
+  const save=el('button','btn btn-accent','Save');save.style.marginLeft='auto';save.disabled=true;
+  const bar=el('div','toolbar');bar.appendChild(back);bar.appendChild(el('div','crumb','/'+full));bar.appendChild(save);b.appendChild(bar);
+  const status=el('div','meta');status.style.margin='0 0 8px';b.appendChild(status);
+  const ta=el('textarea','mono-view');
+  ta.style.width='100%';ta.style.minHeight='60vh';ta.style.resize='vertical';ta.style.outline='none';
+  ta.spellcheck=false;ta.value='Loading…';ta.disabled=true;
+  b.appendChild(ta);
+  try{
+    const d=await api('/api/files/read?path='+encodeURIComponent(full));
+    if(d&&typeof d==='object'&&d.binary){ta.value='(binary file — cannot edit here)';return;}
+    ta.value=typeof d==='string'?d:(d.content!=null?d.content:(d.text||JSON.stringify(d,null,2)));
+    ta.disabled=false;save.disabled=false;
+    if(d&&d.truncated)status.textContent='Note: file is large and was truncated for viewing — saving will overwrite the file with only the shown content.';
+  }catch(e){ta.value='';ta.disabled=true;b.appendChild(inlineErr(e.message));return;}
+  save.onclick=async()=>{
+    save.disabled=true;const old=save.textContent;save.textContent='Saving…';
+    try{await api('/api/files/write',{method:'POST',body:JSON.stringify({path:full,content:ta.value})});save.textContent='Saved';}
+    catch(e){alert(e.message);save.textContent=old;}
+    finally{setTimeout(()=>{save.disabled=false;save.textContent=old;},1200);}
+  };
 }
 
 /* ============ API KEYS ============ */
@@ -504,7 +565,7 @@ function mask(v){v=String(v);if(v.includes('•')||v.includes('*'))return v;if(v
 
 /* ============ RESTART GATEWAY ============ */
 $('#restartBtn').onclick=async()=>{
-  if(!confirm('Restart the ZebOS gateway? Active connections may briefly drop.'))return;
+  if(!confirm('Restart the Zeb gateway? Active connections may briefly drop.'))return;
   const btn=$('#restartBtn');btn.disabled=true;const old=btn.innerHTML;btn.textContent='Restarting…';
   try{await api('/api/gateway/restart',{method:'POST'});btn.textContent='Restart sent';}
   catch(e){alert(e.message);btn.innerHTML=old;}
@@ -527,7 +588,7 @@ function timeNow(){const d=new Date();return d.getHours().toString().padStart(2,
 function renderMessages(){
   const sc=$('#chatScroll');sc.innerHTML='';
   if(!history.length){
-    const e=el('div','empty');e.innerHTML='<div class="big">&#9670;</div>Start the conversation. ZebOS is listening.';
+    const e=el('div','empty');e.innerHTML='<div class="big">&#9670;</div>Start the conversation. Zeb is listening.';
     sc.appendChild(e);return;
   }
   history.forEach(m=>addMsgNode(m.role,m.content,false));
@@ -538,7 +599,7 @@ function addMsgNode(role,content,anim){
   if(sc.querySelector('.empty'))sc.innerHTML='';
   const who=role==='user'?'user':'agent';
   const m=el('div','msg '+who);
-  m.appendChild(el('div','who',who==='user'?'You':'ZebOS'));
+  m.appendChild(el('div','who',who==='user'?'You':'Zeb'));
   const bub=el('div','bubble',content);m.appendChild(bub);
   m.appendChild(el('div','ts',timeNow()));
   sc.appendChild(m);if(anim!==false)scrollBottom();
@@ -643,9 +704,9 @@ const Brain=(function(){
       vec4 p=uMVP*vec4(pos,1.0);
       gl_Position=p;
       float pulse=0.5+0.5*sin(uTime*(1.5+uEnergy*5.0)+seed*6.28);
-      vBright=0.35+pulse*(0.25+uEnergy*0.9);
-      float sz=(2.5+uEnergy*4.5+pulse*uEnergy*4.0)/max(p.w,0.1)*90.0;
-      gl_PointSize=clamp(sz,1.5,14.0);
+      vBright=0.42+pulse*(0.28+uEnergy*0.9);
+      float sz=(3.2+uEnergy*5.0+pulse*uEnergy*4.5)/max(p.w,0.1)*90.0;
+      gl_PointSize=clamp(sz,2.2,16.0);
     }`;
   const PT_FS=`
     precision mediump float; varying float vBright;
@@ -783,10 +844,33 @@ const Brain=(function(){
   }
 
   function fallback(){
+    // No WebGL available: render a CSS/SVG neuron network (multiple firing
+    // nodes + pulsing connecting lines) instead of a single static blob.
     const wrap=document.getElementById('brainWrap');
     if(wrap.querySelector('.brain-fallback'))return;
-    canvas.style.display='none';
-    const f=document.createElement('div');f.className='brain-fallback';wrap.insertBefore(f,wrap.firstChild);
+    if(canvas)canvas.style.display='none';
+    const NS='http://www.w3.org/2000/svg';
+    const svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 100 100');
+    svg.classList.add('brain-fallback');
+    const pts=[[50,18],[30,30],[70,30],[18,48],[50,42],[82,48],[30,66],[70,66],[50,82],[40,54],[60,54]];
+    const edges=[[0,1],[0,2],[1,3],[2,5],[1,4],[2,4],[3,6],[5,7],[4,9],[4,10],[6,8],[7,8],[9,10],[3,9],[5,10],[1,9],[2,10]];
+    edges.forEach((e,i)=>{
+      const line=document.createElementNS(NS,'line');
+      line.setAttribute('x1',pts[e[0]][0]);line.setAttribute('y1',pts[e[0]][1]);
+      line.setAttribute('x2',pts[e[1]][0]);line.setAttribute('y2',pts[e[1]][1]);
+      line.setAttribute('class','fedge'+(i%2===0?' pulse':''));
+      line.style.animationDelay=(i*0.14)+'s';
+      svg.appendChild(line);
+    });
+    pts.forEach((p,i)=>{
+      const c=document.createElementNS(NS,'circle');
+      c.setAttribute('cx',p[0]);c.setAttribute('cy',p[1]);c.setAttribute('r',2.4);
+      c.setAttribute('class','fnode');
+      c.style.animationDelay=(i*0.17)+'s';
+      svg.appendChild(c);
+    });
+    wrap.insertBefore(svg,wrap.firstChild);
   }
 
   return {
