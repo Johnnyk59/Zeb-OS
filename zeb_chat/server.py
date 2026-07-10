@@ -343,8 +343,29 @@ def create_app() -> FastAPI:
     async def health():
         return {"ok": True}
 
+    # Mount the dashboard data endpoints (sessions, files, models, cron,
+    # skills, plugins, channels, api-key vault, gateway restart, status).
+    try:
+        from zeb_chat.dashboard_api import router as _dashboard_router
+
+        app.include_router(_dashboard_router)
+    except Exception as _exc:  # pragma: no cover - never let a bad import kill chat
+        logger.warning("dashboard API router not mounted: %s", _exc)
+
+    # Serve the full custom dashboard (zeb_chat/static/dashboard.html) when it
+    # exists; fall back to the minimal built-in chat page otherwise. The static
+    # file is the from-scratch ZebOS dashboard (20/80 layout, tabs, WebGL brain).
+    from pathlib import Path as _Path
+
+    _dashboard_html = _Path(__file__).parent / "static" / "dashboard.html"
+
     @app.get("/", response_class=HTMLResponse)
     async def index():
+        try:
+            if _dashboard_html.is_file():
+                return HTMLResponse(_dashboard_html.read_text(encoding="utf-8"))
+        except Exception as _exc:
+            logger.warning("failed to serve dashboard.html, using fallback: %s", _exc)
         return HTMLResponse(CHAT_HTML)
 
     @app.post("/api/chat")
@@ -383,7 +404,20 @@ def create_app() -> FastAPI:
 
         from zeb_chat.agent_runner import run_chat_turn
 
-        reply = await run_in_threadpool(run_chat_turn, message, history)
+        # Drive the dashboard's 3D brain: mark the agent active for the
+        # duration of the turn so GET /api/status reports "processing".
+        try:
+            from zeb_chat import activity as _activity
+        except Exception:
+            _activity = None
+
+        if _activity is not None:
+            _activity.begin("processing")
+        try:
+            reply = await run_in_threadpool(run_chat_turn, message, history)
+        finally:
+            if _activity is not None:
+                _activity.end()
         return {"reply": reply}
 
     return app
