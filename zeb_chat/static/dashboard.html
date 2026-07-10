@@ -245,11 +245,21 @@ const gate=$('#gate'), app=$('#app');
 function showGate(){gate.style.display='flex';app.classList.remove('on');$('#gateInput').value='';setTimeout(()=>$('#gateInput').focus(),50);}
 function enterApp(){gate.style.display='none';app.classList.add('on');boot();}
 
+async function validateKey(v){
+  try{
+    const res=await fetch('/api/status',{headers:{'Authorization':'Bearer '+v}});
+    return res.ok;
+  }catch(e){return false;}
+}
+
 $('#gateBtn').onclick=submitKey;
 $('#gateInput').addEventListener('keydown',e=>{if(e.key==='Enter')submitKey();});
-function submitKey(){
+async function submitKey(){
   const v=$('#gateInput').value.trim();
   if(!v){$('#gateErr').textContent='Please enter a key.';return;}
+  $('#gateErr').textContent='Checking...';
+  const good=await validateKey(v);
+  if(!good){$('#gateErr').textContent='Invalid API key.';return;}
   KEY=v;localStorage.setItem(LS_KEY,v);$('#gateErr').textContent='';enterApp();
 }
 $('#changeKey').onclick=()=>{localStorage.removeItem(LS_KEY);KEY='';showGate();};
@@ -801,6 +811,11 @@ const Brain=(function(){
 })();
 
 /* start: gate or app */
-if(KEY){document.getElementById('gate').style.display='none';document.getElementById('app').classList.add('on');boot();}
+if(KEY){
+  validateKey(KEY).then(good=>{
+    if(good){document.getElementById('gate').style.display='none';document.getElementById('app').classList.add('on');boot();}
+    else{localStorage.removeItem(LS_KEY);KEY='';showGate();}
+  });
+}
 else{showGate();}
 </script>
