@@ -29,11 +29,13 @@ def test_health_no_auth(client):
 
 
 def test_index_returns_html_with_key_gate(client):
+    # `/` now serves the full ZebOS dashboard (zeb_chat/static/dashboard.html)
+    # when present; it carries its own key gate + localStorage key name.
     res = client.get("/")
     assert res.status_code == 200
     body = res.text
-    assert "Enter your API key" in body
-    assert "zeb_chat_key" in body
+    assert "API key" in body  # the key-gate prompt
+    assert "zeb_dash_key" in body  # dashboard's localStorage key
 
 
 def test_chat_with_valid_bearer_key(client):
