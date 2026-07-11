@@ -268,19 +268,34 @@ class _LocalChatCompletions:
         **_ignored: Any,
     ):
         llama = self._client._llama
+        max_tokens = max_tokens or 2048
+        n_ctx = 4096
+        try:
+            _n = llama.n_ctx()
+            if isinstance(_n, int) and _n > 0:
+                n_ctx = _n
+        except Exception:
+            pass
         kwargs: dict[str, Any] = {
             "messages": messages,
             "temperature": temperature if temperature is not None else 0.7,
-            "max_tokens": max_tokens or 2048,
+            "max_tokens": min(max_tokens, n_ctx // 2),
         }
-        # Not every GGUF chat template supports tool calling — llama-cpp-python
-        # raises on its own if the loaded model's template can't handle it,
-        # which surfaces to the caller as a normal exception (handled the
-        # same way a network error from any other provider would be).
+        # Only pass tools when the context window can absorb them. Each tool
+        # schema serialises to ~200-500 tokens; a full CLI toolset easily
+        # exceeds a 4K window before any user message fits.
         if tools:
-            kwargs["tools"] = tools
-            if tool_choice is not None:
-                kwargs["tool_choice"] = tool_choice
+            approx_tool_chars = sum(len(str(t)) for t in tools)
+            approx_tool_tokens = approx_tool_chars // 4
+            if approx_tool_tokens < n_ctx // 2:
+                kwargs["tools"] = tools
+                if tool_choice is not None:
+                    kwargs["tool_choice"] = tool_choice
+            else:
+                logger.info(
+                    "Stripping %d tools (~%d tokens) — exceeds half of n_ctx=%d",
+                    len(tools), approx_tool_tokens, n_ctx,
+                )
 
         if stream:
             return self._stream(llama, kwargs, model)

@@ -1919,6 +1919,25 @@ def get_model_context_length(
     if config_context_length is not None and isinstance(config_context_length, int) and config_context_length > 0:
         return config_context_length
 
+    # 0a-local. In-process local GGUF backbone — the model's n_ctx is set at
+    # load time (default 4096) and there is no server to probe. Every probe
+    # below would fail (the ``llama-cpp://`` scheme is not HTTP) and fall
+    # through to the 256K default, which wildly overstates the real window
+    # and prevents the pre-API compression guard from firing.  Return the
+    # actual n_ctx instead.
+    if (provider or "").strip().lower() == "local-model":
+        try:
+            from agent.llama_cpp_adapter import _loaded_model
+            if _loaded_model is not None:
+                ctx = getattr(_loaded_model, "n_ctx", None)
+                if callable(ctx):
+                    ctx = ctx()
+                if isinstance(ctx, int) and ctx > 0:
+                    return ctx
+        except Exception:
+            pass
+        return 4096
+
     # 0a. MoA virtual provider — ``model`` is a preset name, not a real model,
     # and ``base_url`` is the local virtual endpoint, so every probe below would
     # miss and fall through to the 256K default. The aggregator is the acting
