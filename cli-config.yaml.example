@@ -203,28 +203,27 @@ model:
 # chat, background bots, and autonomous tasks with no keys and no network.
 # Downloads once on first startup into <zeb_home>/models/gguf/ and is cached.
 #
-# The default is Phi-3.5-mini-instruct in a 4-bit quant (~2.4GB) with a 128K
-# context window — a light download that still holds the full agent system
-# prompt, tools, context files, and a long conversation (well above the 64K
-# minimum Zeb requires for tool-calling). n_ctx is set to the full 128K.
+# The default is Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB) with a full
+# 128K context window. It holds the full agent system prompt, tools, context
+# files, and long conversations (far above the 64K minimum Zeb requires for
+# tool-calling). n_ctx is set to the full 128K.
 #
-# MEMORY NOTE: Phi-3.5-mini has no grouped-query attention, so its KV cache is
-# large (~0.37 MB/token → ~50GB at 128K, ~13GB at 32K). On a RAM-limited host,
-# lower n_ctx, or switch to Qwen2.5-7B (GQA → only ~7.5GB at 128K, see below).
+# RUNS LIGHT: Qwen2.5 uses grouped-query attention, so even at 128K its KV
+# cache is only ~7.5GB (weights + cache ≈ 12GB total). On an 8 vCPU / 32GB VPS
+# it stays a comfortable background process — ~12GB RAM, ~half the cores —
+# leaving ~20GB free for the rest of the server.
+#
+# MEMORY NOTE: KV cache scales with n_ctx (64K ≈ 3.8GB). Lower n_ctx to save
+# RAM. Avoid non-GQA models (e.g. Phi-3.5-mini) at long context — their KV
+# cache is ~8x larger (~50GB at 128K) and won't fit on 32GB.
 #
 # All fields are optional; the defaults below are what Zeb uses out of the box.
 # local_model:
-#   repo_id: "bartowski/Phi-3.5-mini-instruct-GGUF"
-#   quant: "Q4_K_M"
-#   # path: "/abs/path/to/model.gguf"   # Use a GGUF already on disk (skips download)
-#   n_ctx: 131072                         # 128K. Lower (e.g. 32768) to save RAM.
-#   n_threads: 0                          # 0 => auto (~half the cores, capped)
-#
-# Stronger model with a far lighter long-context footprint (~4.7GB download,
-# but GQA keeps the 128K KV cache to ~7.5GB):
 #   repo_id: "bartowski/Qwen2.5-7B-Instruct-GGUF"
 #   quant: "Q4_K_M"
-#   n_ctx: 131072
+#   # path: "/abs/path/to/model.gguf"   # Use a GGUF already on disk (skips download)
+#   n_ctx: 131072                         # 128K. Lower (e.g. 65536) to save RAM.
+#   n_threads: 0                          # 0 => auto (~half the cores, capped)
 
 # =============================================================================
 # Terminal Tool Configuration
