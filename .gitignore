@@ -144,3 +144,9 @@ apps/desktop/demo/
 # PR body is the archive. See the zeb-agent-dev skill's
 # pr-infographic-workflow reference (storage rule + lapse #8 / #COMMIT-1).
 infographic/
+
+# Superpowers dev skills, fetched on demand for local Claude Code sessions.
+# They enhance the development workflow while building ZebOS but are external
+# tooling — never part of the ZebOS codebase itself.
+.claude/skills/
+.claude/.superpowers/
