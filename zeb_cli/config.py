@@ -913,15 +913,15 @@ DEFAULT_CONFIG = {
     # This is Zeb's PRIMARY brain: chat, background bots, and autonomous
     # tasks all run on this one model with zero API keys. repo_id/quant pick
     # the default download; path overrides with a GGUF already on disk. The
-    # default is Qwen2.5-7B-Instruct, a 4-bit quant (~4.7GB) with a full 128K
-    # context window — far above the 64K minimum Zeb requires for tool-calling.
-    # n_ctx is set to the full 128K. Qwen2.5 uses grouped-query attention, so
-    # even at 128K the KV cache is only ~7.5GB (weights + cache ≈ 12GB total)
+    # default is Qwen2.5-7B-Instruct, a 4-bit quant (~4.7GB) with a 64K
+    # context window — the lowest window Zeb's MINIMUM_CONTEXT_LENGTH gate
+    # (agent/model_metadata.py) allows. Qwen2.5 uses grouped-query attention,
+    # so at 64K the KV cache is only ~3.8GB (weights + cache ≈ 8.5GB total)
     # — it runs comfortably in the background of a modest VPS (e.g. 8 vCPU /
     # 32GB) using ~half the cores.
-    # Memory note: KV cache scales with n_ctx (64K ≈ 3.8GB). Lower n_ctx to
-    # save RAM. Avoid non-GQA models (e.g. Phi-3.5-mini) at long context —
-    # their KV cache is ~8x larger (~50GB at 128K) and won't fit on 32GB.
+    # Memory note: KV cache scales with n_ctx. Raise for longer context
+    # (128K ≈ 7.5GB). Cannot go below 64K — Zeb refuses to start a model
+    # under that floor. Avoid non-GQA models at long context.
     # (repo_id/quant/n_ctx mirror DEFAULT_LOCAL_MODEL_* in
     # local_model_manager.py; leave a field blank/0 to fall back to that
     # module-level default.)
@@ -929,7 +929,7 @@ DEFAULT_CONFIG = {
         "repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
         "quant": "Q4_K_M",
         "path": "",
-        "n_ctx": 131072,
+        "n_ctx": 65536,
         "n_threads": 0,  # 0 => auto (about half the cores, capped)
     },
     # Background self-diagnosis/auto-repair loop for the always-on gateway

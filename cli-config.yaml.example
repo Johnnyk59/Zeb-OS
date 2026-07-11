@@ -61,7 +61,7 @@ model:
   #   Set manually only when auto-detection is wrong (e.g. a local server with
   #   a custom num_ctx, or a proxy that doesn't expose /v1/models).
   #
-  # context_length: 131072
+  # context_length: 65536
   #
   # max_tokens: OUTPUT cap — maximum tokens the model may generate per response.
   #   Unrelated to how long your conversation history can be.
@@ -203,26 +203,28 @@ model:
 # chat, background bots, and autonomous tasks with no keys and no network.
 # Downloads once on first startup into <zeb_home>/models/gguf/ and is cached.
 #
-# The default is Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB) with a full
-# 128K context window. It holds the full agent system prompt, tools, context
-# files, and long conversations (far above the 64K minimum Zeb requires for
-# tool-calling). n_ctx is set to the full 128K.
+# The default is Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB) with a 64K
+# context window — the lowest window Zeb allows (see MEMORY NOTE below). It
+# holds the full agent system prompt, tools, context files, and
+# conversations comfortably.
 #
-# RUNS LIGHT: Qwen2.5 uses grouped-query attention, so even at 128K its KV
-# cache is only ~7.5GB (weights + cache ≈ 12GB total). On an 8 vCPU / 32GB VPS
-# it stays a comfortable background process — ~12GB RAM, ~half the cores —
-# leaving ~20GB free for the rest of the server.
+# RUNS LIGHT: Qwen2.5 uses grouped-query attention, so at 64K its KV
+# cache is only ~3.8GB (weights + cache ≈ 8.5GB total). On an 8 vCPU / 32GB VPS
+# it stays a comfortable background process — ~8.5GB RAM, ~half the cores —
+# leaving ~23GB free for the rest of the server.
 #
-# MEMORY NOTE: KV cache scales with n_ctx (64K ≈ 3.8GB). Lower n_ctx to save
-# RAM. Avoid non-GQA models (e.g. Phi-3.5-mini) at long context — their KV
-# cache is ~8x larger (~50GB at 128K) and won't fit on 32GB.
+# MEMORY NOTE: KV cache scales with n_ctx. Raise n_ctx for longer context
+# (128K ≈ 7.5GB). Zeb refuses to start any model — local or remote — with a
+# context window under 64K, so this is the floor, not just the default.
+# Avoid non-GQA models (e.g. Phi-3.5-mini) at long context — their KV cache
+# is ~8x larger and won't fit on 32GB.
 #
 # All fields are optional; the defaults below are what Zeb uses out of the box.
 # local_model:
 #   repo_id: "bartowski/Qwen2.5-7B-Instruct-GGUF"
 #   quant: "Q4_K_M"
 #   # path: "/abs/path/to/model.gguf"   # Use a GGUF already on disk (skips download)
-#   n_ctx: 131072                         # 128K. Lower (e.g. 65536) to save RAM.
+#   n_ctx: 65536                          # 64K (Zeb's minimum). Raise (e.g. 131072) for longer context.
 #   n_threads: 0                          # 0 => auto (~half the cores, capped)
 
 # =============================================================================
