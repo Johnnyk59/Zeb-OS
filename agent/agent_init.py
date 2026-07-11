@@ -1878,9 +1878,11 @@ def init_agent(
     agent.codex_app_server_auto_compaction = codex_app_server_auto_compaction
 
     # Reject models whose context window is below the minimum required
-    # for reliable tool-calling workflows (64K tokens).
+    # for reliable tool-calling workflows (64K tokens).  The local GGUF
+    # backbone is exempt: it runs chat-only (no tools) on a small context
+    # window by design and must never be blocked by this gate.
     _ctx = getattr(agent.context_compressor, "context_length", 0)
-    if _ctx and _ctx < MINIMUM_CONTEXT_LENGTH:
+    if _ctx and _ctx < MINIMUM_CONTEXT_LENGTH and agent.provider != "local-model":
         raise ValueError(
             f"Model {agent.model} has a context window of {_ctx:,} tokens, "
             f"which is below the minimum {MINIMUM_CONTEXT_LENGTH:,} required "
