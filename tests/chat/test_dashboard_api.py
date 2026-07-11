@@ -149,6 +149,74 @@ def test_skills_stacks(client):
         assert "name" in st and "count" in st
 
 
+def test_diagnose_shape(client):
+    res = client.get("/api/diagnose", headers=AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    assert isinstance(body["checks"], list)
+    assert body["offline"] is True
+    assert body["overall"] in ("ok", "degraded", "critical", "unknown")
+    # Every check is {component, status, message, repaired}.
+    for c in body["checks"]:
+        assert {"component", "status", "message", "repaired"} <= set(c)
+        assert c["status"] in ("ok", "degraded", "critical")
+
+
+def test_diagnose_requires_key(client):
+    assert client.get("/api/diagnose").status_code == 401
+    assert client.post("/api/diagnose/repair").status_code == 401
+
+
+def test_diagnose_repair_runs(client):
+    res = client.post("/api/diagnose/repair", headers=AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["offline"] is True
+    assert isinstance(body["summary"], dict)
+
+
+def test_localmodel_shape(client):
+    res = client.get("/api/localmodel", headers=AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    # Identity + live-stat fields the dashboard panel binds to.
+    for key in (
+        "name", "provider", "loaded", "ready", "cpu_percent",
+        "ram", "download", "events", "active",
+    ):
+        assert key in body
+    assert body["provider"] == "local-model"
+    assert isinstance(body["events"], list)
+    # Out of the box (no weights on disk) the model is not ready/loaded.
+    assert body["loaded"] is False
+    # Name is derived from the configured/default repo (Phi-3 by default).
+    assert isinstance(body["name"], str) and body["name"]
+
+
+def test_localmodel_requires_key(client):
+    assert client.get("/api/localmodel").status_code == 401
+
+
+def test_voice_status_shape(client):
+    res = client.get("/api/voice/status", headers=AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["engine"] in ("piper", "browser")
+    assert body["offline"] is True
+
+
+def test_voice_speak_falls_back_to_browser(client):
+    # With no Piper voice installed, the server returns 204 to signal the
+    # client should use its own speech engine.
+    res = client.post("/api/voice/speak", headers=AUTH, json={"text": "hello"})
+    assert res.status_code == 204
+
+
+def test_voice_speak_missing_text(client):
+    res = client.post("/api/voice/speak", headers=AUTH, json={})
+    assert res.status_code == 400
+
+
 def test_cron_shape(client):
     res = client.get("/api/cron", headers=AUTH)
     assert res.status_code == 200

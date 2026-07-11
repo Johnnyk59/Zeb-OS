@@ -7,19 +7,25 @@ the always-on local backbone, downloading it once into
 after (mirrors the ``cache/images``, ``cache/videos`` convention in
 zeb_constants.get_zeb_home()).
 
-The default model is a small Nous Research "Hermes" GGUF quant — same
-lineage as the rest of this fork — chosen for being small enough to run
-acceptably on CPU-only hardware while still being tool-call capable. Users
-can override every part of this via ``config.yaml``'s ``local_model:``
-section, or point ``local_model.path`` at any GGUF file already on disk to
-skip the download path entirely (air-gapped installs, custom fine-tunes).
+The default model is Microsoft's **Phi-3-mini** in a small 4-bit GGUF quant
+— chosen so a fresh container can download it quickly and run it acceptably
+on CPU-only hardware with no configuration at all: the user opens the chat
+UI, types "yo", and gets a reply from a model that fetched itself on first
+boot. Users can override every part of this via ``config.yaml``'s
+``local_model:`` section, or point ``local_model.path`` at any GGUF file
+already on disk to skip the download path entirely (air-gapped installs,
+custom fine-tunes).
 """
 
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+from agent import local_model_status as _status
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +34,15 @@ logger = logging.getLogger(__name__)
 # an advanced user can override at import time, and so config.yaml's
 # ``local_model.repo_id`` / ``local_model.quant`` documentation has a
 # single source of truth to point at.
-DEFAULT_LOCAL_MODEL_REPO = "NousResearch/Hermes-3-Llama-3.2-3B-GGUF"
-DEFAULT_LOCAL_MODEL_QUANT = "Q4_K_M"  # ~2GB — CPU-friendly quality/size tradeoff
-DEFAULT_LOCAL_MODEL_CTX = 8192
+#
+# Phi-3-mini-4k in a 4-bit quant is ~2.3GB — the sweet spot for a
+# zero-config default: small enough to download and load on a laptop/VM,
+# capable enough to hold a real conversation and follow simple tool calls.
+# (Set local_model.repo_id to "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF" +
+# quant "Q4_K_M" for an even smaller ~670MB fallback on tiny hosts.)
+DEFAULT_LOCAL_MODEL_REPO = "microsoft/Phi-3-mini-4k-instruct-gguf"
+DEFAULT_LOCAL_MODEL_QUANT = "q4"  # matches Phi-3-mini-4k-instruct-q4.gguf (~2.3GB)
+DEFAULT_LOCAL_MODEL_CTX = 4096  # Phi-3-mini-4k's trained context window
 
 ProgressCallback = Callable[[str], None]
 
@@ -78,6 +90,31 @@ def _get_hf_hub_sdk():
 def _local_model_config(config: dict[str, Any] | None) -> dict[str, Any]:
     config = config or {}
     return dict(config.get("local_model") or {})
+
+
+def resolved_repo_quant(config: dict[str, Any] | None = None) -> tuple[str, str]:
+    """Return the (repo_id, quant) that would be used, applying defaults."""
+    lm = _local_model_config(config)
+    repo = (lm.get("repo_id") or DEFAULT_LOCAL_MODEL_REPO).strip()
+    quant = (lm.get("quant") or DEFAULT_LOCAL_MODEL_QUANT).strip()
+    return repo, quant
+
+
+def local_model_display_name(config: dict[str, Any] | None = None) -> str:
+    """Human-friendly name for the active local backbone (for the dashboard).
+
+    Derives a clean label from ``local_model.path`` (its filename) or from
+    the configured/default repo id + quant, so the Local Model Status panel
+    can show e.g. "Phi-3-mini-4k-instruct · q4" without the caller needing
+    to know the resolution rules.
+    """
+    lm = _local_model_config(config)
+    explicit = (lm.get("path") or "").strip()
+    if explicit:
+        return Path(explicit).name
+    repo, quant = resolved_repo_quant(config)
+    short = repo.split("/")[-1] if "/" in repo else repo
+    return f"{short} · {quant}" if quant else short
 
 
 def get_local_model_path(config: dict[str, Any] | None = None) -> Optional[Path]:
@@ -160,10 +197,14 @@ def ensure_local_model_weights(
 
     cached = get_local_model_path(config)
     if cached is not None:
+        _status.record("weights.cached", cached.name)
         return cached
 
     hf_hub = _get_hf_hub_sdk()
     if hf_hub is None:
+        _status.record(
+            "weights.error", "huggingface_hub not installed", level="error"
+        )
         raise LocalModelUnavailable(
             "huggingface_hub is not installed and could not be lazy-installed. "
             "Install it manually with `pip install huggingface_hub`, or set "
@@ -190,6 +231,28 @@ def ensure_local_model_weights(
 
     if progress_callback:
         progress_callback(f"Downloading {filename} ({repo_id}) — this happens once…")
+
+    # Best-effort expected size so the dashboard's bandwidth meter has a
+    # denominator. Never fatal — if the metadata call fails we just report an
+    # unknown total and stream a live byte count instead.
+    expected_size = 0
+    try:
+        meta = hf_hub.get_hf_file_metadata(
+            hf_hub.hf_hub_url(repo_id=repo_id, filename=filename)
+        )
+        expected_size = int(getattr(meta, "size", 0) or 0)
+    except Exception:
+        expected_size = 0
+
+    _status.download_started(filename, expected_size)
+    _stop_poll = threading.Event()
+    poller = threading.Thread(
+        target=_poll_download_size,
+        args=(target_dir, filename, expected_size, _stop_poll),
+        name="local-model-dl-progress",
+        daemon=True,
+    )
+    poller.start()
     try:
         downloaded = hf_hub.hf_hub_download(
             repo_id=repo_id,
@@ -197,12 +260,46 @@ def ensure_local_model_weights(
             local_dir=str(target_dir),
         )
     except Exception as exc:
+        _stop_poll.set()
+        _status.download_finished(ok=False, detail=str(exc))
         raise LocalModelUnavailable(
             f"Download of {filename} from {repo_id!r} failed: {exc}. "
             f"Check network access, or set local_model.path in config.yaml "
             f"to a GGUF file you already have."
         ) from exc
 
+    _stop_poll.set()
+    _status.download_finished(ok=True, detail=f"{filename} ready")
     if progress_callback:
         progress_callback("Local model ready.")
     return Path(downloaded)
+
+
+def _poll_download_size(
+    target_dir: Path, filename: str, expected: int, stop: threading.Event
+) -> None:
+    """Watch the growing download on disk and report byte progress.
+
+    huggingface_hub streams to an ``*.incomplete`` blob (or the final file);
+    we don't need to know which — we sum the largest matching file's size on
+    a short timer so the dashboard shows live bandwidth without hooking into
+    hf_hub's internal tqdm. Entirely best-effort and fail-open.
+    """
+    stem = Path(filename).name
+    while not stop.wait(0.5):
+        try:
+            best = 0
+            for p in target_dir.rglob("*"):
+                try:
+                    if not p.is_file():
+                        continue
+                    nm = p.name
+                    if stem in nm or nm.endswith(".incomplete"):
+                        best = max(best, p.stat().st_size)
+                except Exception:
+                    continue
+            if best:
+                _status.download_progress(best, expected or None)
+        except Exception:
+            # Never let the progress poller disturb the actual download.
+            time.sleep(0.5)

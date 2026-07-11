@@ -140,6 +140,13 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "tts.mistral": ("mistralai==2.4.8",),
     "tts.edge": ("edge-tts==7.2.7",),
     "tts.elevenlabs": ("elevenlabs==1.59.0",),
+    # Piper — fast, fully-offline neural TTS (github.com/OHF-Voice/piper1-gpl,
+    # successor to rhasspy/piper). No API key, no network at synth time; runs
+    # on CPU. Powers the dashboard's optional server-side voice for the local
+    # backbone (zeb_chat/voice_agent.py). Voice model (.onnx) is fetched once
+    # via huggingface_hub. When absent, the dashboard degrades to the browser
+    # Web Speech API, so this is a pure enhancement, never a hard requirement.
+    "tts.piper": ("piper-tts==1.3.0",),
 
     # ─── Speech-to-text providers ──────────────────────────────────────────
     "stt.mistral": ("mistralai==2.4.8",),
