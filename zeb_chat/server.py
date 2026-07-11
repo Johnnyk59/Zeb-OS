@@ -306,7 +306,12 @@ CHAT_HTML = """<!DOCTYPE html>
       typing.classList.remove("typing");
       var reply = (data && data.reply) || (data && data.error) || "(no response)";
       typing.textContent = reply;
-      history.push({ role: "assistant", content: reply });
+      // Don't push system errors into conversation history — the model
+      // reads history as prior dialogue and would parrot the error back
+      // as if it were its own earlier advice.
+      if (reply.indexOf("[Zeb chat error:") !== 0) {
+        history.push({ role: "assistant", content: reply });
+      }
       transcript.scrollTop = transcript.scrollHeight;
     }).catch(function () {
       if (typing.parentNode) {
