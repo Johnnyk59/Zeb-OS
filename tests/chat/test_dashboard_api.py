@@ -368,3 +368,92 @@ def test_files_write_roundtrip(client, tmp_path):
 def test_files_write_missing_path(client):
     res = client.post("/api/files/write", headers=AUTH, json={"content": "x"})
     assert res.status_code == 400
+
+
+# --------------------------------------------------------------------------
+# Model info (/status command backing endpoint) + self-awareness
+# --------------------------------------------------------------------------
+def test_modelinfo_shape(client):
+    res = client.get("/api/modelinfo", headers=AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    for key in (
+        "name", "backbone", "provider", "context_window",
+        "context_window_human", "config_path",
+    ):
+        assert key in body
+    assert body["provider"] == "local-model"
+    assert isinstance(body["context_window"], int)
+    # Human label is derived from the token count (e.g. 65536 -> "64K tokens").
+    assert isinstance(body["context_window_human"], str) and body["context_window_human"]
+
+
+def test_modelinfo_requires_key(client):
+    assert client.get("/api/modelinfo").status_code == 401
+
+
+def test_human_ctx_labels():
+    from zeb_chat.dashboard_api import _human_ctx
+
+    assert _human_ctx(65536) == "64K tokens"
+    assert _human_ctx(131072) == "128K tokens"
+    assert _human_ctx(0) == "unknown"
+
+
+# --------------------------------------------------------------------------
+# Files default root prefers /opt, falls back to cwd
+# --------------------------------------------------------------------------
+def test_default_files_root_prefers_opt(monkeypatch):
+    from zeb_chat import dashboard_api
+
+    monkeypatch.setattr(dashboard_api.os.path, "isdir", lambda p: p == "/opt")
+    assert dashboard_api._default_files_root() == "/opt"
+
+
+def test_default_files_root_falls_back_to_cwd(monkeypatch):
+    from zeb_chat import dashboard_api
+
+    monkeypatch.setattr(dashboard_api.os.path, "isdir", lambda p: False)
+    monkeypatch.setattr(dashboard_api.os, "getcwd", lambda: "/somewhere")
+    assert dashboard_api._default_files_root() == "/somewhere"
+
+
+# --------------------------------------------------------------------------
+# Anthropic subscription connect / status / disconnect
+# --------------------------------------------------------------------------
+def test_anthropic_lifecycle(client, tmp_path, monkeypatch):
+    # Isolate env writes to the test home (save_env_value writes <home>/.env).
+    monkeypatch.setenv("ZEB_HOME", str(tmp_path))
+
+    # Not connected initially.
+    res = client.get("/api/anthropic/status", headers=AUTH)
+    assert res.status_code == 200
+    assert res.json()["connected"] is False
+
+    # Missing / too-short tokens are rejected.
+    assert client.post("/api/anthropic/connect", headers=AUTH, json={}).status_code == 400
+    assert (
+        client.post("/api/anthropic/connect", headers=AUTH, json={"token": "short"}).status_code
+        == 400
+    )
+
+    # A plausible OAuth token connects and is reported (masked).
+    token = "sk-ant-oat01-" + "x" * 40
+    res = client.post("/api/anthropic/connect", headers=AUTH, json={"token": token})
+    assert res.status_code == 200 and res.json()["connected"] is True
+    st = client.get("/api/anthropic/status", headers=AUTH).json()
+    assert st["connected"] is True and st["masked"]
+
+    # Once connected it is surfaced as a selectable model in the chat dropdown.
+    models = client.get("/api/models", headers=AUTH).json()
+    assert any(m.get("id") == "anthropic" for m in models["available"])
+
+    # Disconnect clears it.
+    assert client.post("/api/anthropic/disconnect", headers=AUTH).json()["connected"] is False
+    assert client.get("/api/anthropic/status", headers=AUTH).json()["connected"] is False
+
+
+def test_anthropic_requires_key(client):
+    assert client.get("/api/anthropic/status").status_code == 401
+    assert client.post("/api/anthropic/connect").status_code == 401
+    assert client.post("/api/anthropic/disconnect").status_code == 401

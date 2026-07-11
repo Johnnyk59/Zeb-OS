@@ -254,6 +254,62 @@
   @keyframes sp{to{transform:rotate(360deg)}}
   .cur-model{color:var(--cyan)}
   @media (max-width:1100px){.seg{margin-right:120px}}
+
+  /* When the sidebar is hidden, the floating hamburger sits at top-left over
+     the main area — nudge the chat/panel headers right so their titles don't
+     hide behind it. */
+  #app.sb-collapsed .chat-top{padding-left:56px;}
+  #app.sb-collapsed .pane-head{padding-left:56px;}
+
+  /* ===== SPLIT-SCREEN (sidebar hidden → chat left 50%, brain right 50%) ===== */
+  @media (min-width:900px){
+    #app.split .main .pane{right:50%;}
+    #app.split #brainWrap{
+      position:fixed;top:0;right:0;left:auto;width:50vw;height:100vh;
+      border-left:1px solid var(--line);
+      background:radial-gradient(60% 55% at 50% 45%,rgba(20,20,34,.55),rgba(10,10,11,0) 72%);
+    }
+    #app.split .seg{margin-right:12px;}
+    #app.split #brainStatus{bottom:26px;font-size:11px;letter-spacing:3px;}
+  }
+
+  /* ===== NEW CHAT + RECENT CHATS POPOVER ===== */
+  .chat-actions{position:relative;display:flex;align-items:center;gap:10px}
+  .newchat-btn{background:var(--g1);border:1px solid var(--line);color:var(--txt);border-radius:9px;
+    padding:7px 12px;font-size:12px;letter-spacing:.3px;transition:all .15s;display:flex;align-items:center;gap:6px}
+  .newchat-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+  .newchat-btn .cvt{font-size:9px;color:var(--dim2);transition:transform .18s}
+  .newchat-btn.open .cvt{transform:rotate(180deg)}
+  .recent-pop{position:absolute;top:calc(100% + 8px);left:0;width:290px;max-height:64vh;overflow-y:auto;
+    background:var(--g1);border:1px solid var(--line);border-radius:12px;padding:8px;z-index:70;
+    box-shadow:0 24px 60px rgba(0,0,0,.55);animation:pop .18s cubic-bezier(.2,.8,.2,1)}
+  .recent-pop .rp-new{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:linear-gradient(135deg,rgba(34,224,208,.14),rgba(160,107,255,.12));
+    border:1px solid rgba(34,224,208,.22);color:var(--txt);border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:6px}
+  .recent-pop .rp-new:hover{filter:brightness(1.15)}
+  .recent-pop .rp-label{font-family:var(--mono);text-transform:uppercase;letter-spacing:1.5px;font-size:9px;color:var(--dim2);padding:6px 8px 4px}
+  .recent-pop .rp-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;
+    border:1px solid transparent;color:var(--dim);border-radius:8px;padding:9px 10px;font-size:13px;transition:all .13s}
+  .recent-pop .rp-item:hover{background:var(--g2);color:var(--txt);border-color:var(--line)}
+  .recent-pop .rp-item.active{color:var(--cyan);border-color:rgba(34,224,208,.25);background:rgba(34,224,208,.06)}
+  .recent-pop .rp-item .rp-grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .recent-pop .rp-item .rp-sub{font-family:var(--mono);font-size:10px;color:var(--dim2)}
+  .recent-pop .rp-empty{color:var(--dim2);font-size:12px;text-align:center;padding:14px}
+
+  /* ===== ANTHROPIC SUBSCRIPTION CARD (Models tab) ===== */
+  .sub-card{background:linear-gradient(135deg,rgba(160,107,255,.08),rgba(34,224,208,.05));
+    border:1px solid rgba(160,107,255,.25);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+  .sub-card .sub-head{display:flex;align-items:center;gap:11px}
+  .sub-card .sub-logo{width:30px;height:30px;border-radius:8px;flex:none;
+    background:linear-gradient(135deg,#d97757,#a06bff);box-shadow:0 0 16px rgba(160,107,255,.4)}
+  .sub-card .sub-title{flex:1;min-width:0}
+  .sub-card .sub-title b{font-size:14px}
+  .sub-card .sub-title .sub-desc{color:var(--dim);font-size:12px;margin-top:2px}
+  .sub-card .sub-form{margin-top:14px;display:none}
+  .sub-card.expanded .sub-form{display:block;animation:fadein .2s ease}
+  .sub-card .sub-hint{font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.6;
+    background:#050506;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:10px}
+  .sub-card .sub-hint code{color:var(--cyan)}
+  .sub-card .sub-row{display:flex;gap:8px;align-items:center}
 </style>
 
 <!-- AUTH GATE -->
@@ -296,6 +352,12 @@
     <section class="pane show" id="chatPane">
       <div class="chat-top">
         <h2 id="chatTitle">New Chat</h2>
+        <div class="chat-actions">
+          <button class="newchat-btn" id="newChatBtn" title="Start a new chat or jump back to a recent one">
+            <span>&#43; New Chat</span><span class="cvt">&#9660;</span>
+          </button>
+          <div class="recent-pop" id="recentPop" style="display:none"></div>
+        </div>
         <select class="modelsel" id="modelSel" title="Model for this chat — Local is the default"></select>
         <div class="seg">
           <button id="modeSimple" class="on">Chat</button>
@@ -418,10 +480,12 @@ function stopPanelTimer(){if(panelTimer){clearInterval(panelTimer);panelTimer=nu
 function showChat(){
   stopPanelTimer();
   $('#chatPane').classList.add('show');$('#dataPane').classList.remove('show');
+  if(window.updateSplit)updateSplit();
 }
 function showData(title){
   $('#dataTitle').textContent=title;
   $('#dataPane').classList.add('show');$('#chatPane').classList.remove('show');
+  if(window.updateSplit)updateSplit();
 }
 $('#backBtn').onclick=()=>{setActive('sessions');showChat();};
 
@@ -496,21 +560,89 @@ async function renderSimple(title,loader){
 function toArr(d,keys){if(Array.isArray(d))return d;for(const k of keys)if(d&&Array.isArray(d[k]))return d[k];return [];}
 
 async function loadModels(){
-  const d=await api('/api/models');
+  const out=[];
+  // Connect-your-Anthropic-subscription card always leads the Models tab.
+  out.push(buildAnthropicCard());
+  let d={};
+  try{d=await api('/api/models');}catch(e){out.push(inlineErr(e.message));return out;}
   const cur=d.current||d.active||d.model||'';
   const list=toArr(d,['available','models','list']);
-  const out=[];
-  // Zero models until a provider is actually connected.
   if(!list.length){
     out.push(emptyState('&#9673;','No models connected. Add a provider key in the API Keys tab (or Zeb runs its local backbone by default).'));
     return out;
   }
-  list.forEach(m=>{const name=typeof m==='string'?m:(m.id||m.name||'');
+  list.forEach(m=>{const name=typeof m==='string'?m:(m.name||m.id||'');
     const prov=(typeof m==='object'&&m.provider)?m.provider:'';
     const r=el('div','row');const g=el('div','grow');g.appendChild(el('div','title',name));
     if(prov)g.appendChild(el('div','meta',prov));
-    r.appendChild(g);if(name===cur)r.appendChild(el('span','badge on','current'));out.push(r);});
+    r.appendChild(g);
+    if(typeof m==='object'&&m.subscription)r.appendChild(el('span','badge v','subscription'));
+    if((typeof m==='object'&&m.id===cur)||name===cur)r.appendChild(el('span','badge on','current'));
+    out.push(r);});
   return out;
+}
+
+/* Anthropic subscription connect card: paste the OAuth token from
+   `claude setup-token` so chat bills to Claude plan credits, not an API key. */
+function buildAnthropicCard(){
+  const card=el('div','sub-card');
+  card.innerHTML=
+    '<div class="sub-head">'+
+      '<div class="sub-logo"></div>'+
+      '<div class="sub-title"><b>Anthropic subscription</b><div class="sub-desc jsDesc">Checking connection…</div></div>'+
+      '<button class="btn jsToggle" style="display:none">Connect</button>'+
+    '</div>'+
+    '<div class="sub-form">'+
+      '<div class="sub-hint">Bill chat to your <b>Claude plan credits</b> instead of a metered API key. In a terminal, run <code>claude setup-token</code>, complete the login, then paste the OAuth token it prints below.</div>'+
+      '<div class="sub-row">'+
+        '<input class="field jsToken" type="password" placeholder="sk-ant-oat01-…" autocomplete="off" spellcheck="false"/>'+
+        '<button class="btn btn-accent jsConnect">Connect</button>'+
+      '</div>'+
+      '<div class="sub-desc jsErr" style="color:var(--danger);margin-top:8px;min-height:14px"></div>'+
+    '</div>';
+  const q=s=>card.querySelector(s);
+  const desc=q('.jsDesc'),toggle=q('.jsToggle'),tokenInput=q('.jsToken'),connectBtn=q('.jsConnect'),errEl=q('.jsErr');
+  let connected=false;
+  function paint(){
+    if(connected){
+      desc.textContent='Connected — chat can bill to your Claude subscription.';
+      toggle.textContent='Disconnect';toggle.className='btn btn-danger jsToggle';toggle.style.display='';
+      card.classList.remove('expanded');
+    }else{
+      desc.textContent='Not connected — Zeb uses its local model / API keys.';
+      toggle.textContent='Connect';toggle.className='btn jsToggle';toggle.style.display='';
+    }
+  }
+  async function refresh(){
+    try{const s=await api('/api/anthropic/status');connected=!!s.connected;if(connected&&s.masked)desc.title=s.masked;}
+    catch(e){}
+    paint();
+  }
+  toggle.onclick=async()=>{
+    if(connected){
+      if(!confirm('Disconnect the Anthropic subscription?'))return;
+      toggle.disabled=true;
+      try{await api('/api/anthropic/disconnect',{method:'POST'});}catch(e){alert(e.message);}
+      toggle.disabled=false;await refresh();loadModelSelector();
+    }else{
+      card.classList.toggle('expanded');
+      if(card.classList.contains('expanded'))setTimeout(()=>tokenInput.focus(),40);
+    }
+  };
+  const doConnect=async()=>{
+    const tok=tokenInput.value.trim();errEl.textContent='';
+    if(!tok){tokenInput.focus();return;}
+    connectBtn.disabled=true;const old=connectBtn.textContent;connectBtn.textContent='Connecting…';
+    try{
+      await api('/api/anthropic/connect',{method:'POST',body:JSON.stringify({token:tok})});
+      tokenInput.value='';connected=true;paint();loadModelSelector();
+    }catch(e){errEl.textContent=e.message;}
+    finally{connectBtn.disabled=false;connectBtn.textContent=old;}
+  };
+  connectBtn.onclick=doConnect;
+  tokenInput.addEventListener('keydown',e=>{if(e.key==='Enter')doConnect();});
+  refresh();
+  return card;
 }
 async function loadCron(){
   const list=toArr(await api('/api/cron'),['jobs','cron','crons']);
@@ -641,7 +773,7 @@ async function renderFiles(path){
       const r=el('div','row');const g=el('div','grow');
       g.innerHTML=(dir?'&#9636; ':'&#8226; ')+esc(name);
       const abs=fpath(it)||((here?here.replace(/\/$/,'')+'/':'')+name);
-      g.onclick=()=>dir?renderFiles(abs):openFile(abs);
+      g.onclick=()=>dir?renderFiles(abs):openFile(abs,here);
       r.appendChild(g);b.appendChild(r);
     });
   }catch(e){b.innerHTML='';b.appendChild(inlineErr(e.message));}
@@ -649,9 +781,12 @@ async function renderFiles(path){
 function isDir(it){if(typeof it==='string')return it.endsWith('/');return it.type==='dir'||it.type==='directory'||it.is_dir===true||it.dir===true;}
 function fname(it){if(typeof it==='string')return it.replace(/\/$/,'').split('/').pop();return it.name||(it.path?String(it.path).split('/').pop():'');}
 function fpath(it){if(typeof it==='string')return '';return it.path||'';}
-async function openFile(full){
+async function openFile(full,dir){
   showData('Files');const b=$('#dataBody');b.innerHTML='';
-  const back=el('button','btn');back.innerHTML='&larr; Back';back.onclick=()=>renderFiles(filePath);
+  // Remember the folder this file was opened from so "Back" always returns to
+  // that exact directory view, even after navigating several levels deep.
+  const parentDir=dir||filePath||full.replace(/\/[^/]*$/,'')||'';
+  const back=el('button','btn');back.innerHTML='&larr; Back to files';back.onclick=()=>renderFiles(parentDir);
   const save=el('button','btn btn-accent','Save');save.style.marginLeft='auto';save.disabled=true;
   const bar=el('div','toolbar');bar.appendChild(back);bar.appendChild(el('div','crumb',full));bar.appendChild(save);b.appendChild(bar);
   const status=el('div','meta');status.style.margin='0 0 8px';b.appendChild(status);
@@ -946,12 +1081,30 @@ async function saveOnboard(skip){
   if(k)k.onclick=()=>saveOnboard(true);
 })();
 
-/* ============ SIDEBAR COLLAPSE ============ */
+/* ============ SIDEBAR COLLAPSE + SPLIT LAYOUT ============ */
 const LS_SIDEBAR='zeb_dash_sidebar';
+function isSidebarCollapsed(){return localStorage.getItem(LS_SIDEBAR)==='1';}
+/* Split-screen: when the sidebar is hidden AND the chat pane is showing,
+   the chat holds the left half and the brain expands to fill the right half.
+   Any data pane (Files, Models, …) opts out so it gets the full width. */
+function updateSplit(){
+  const chatVisible=$('#chatPane').classList.contains('show');
+  const split=isSidebarCollapsed()&&chatVisible;
+  const on=$('#app').classList.contains('split');
+  $('#app').classList.toggle('split',split);
+  if(split!==on&&typeof Brain!=='undefined'&&Brain.relayout){
+    // The brain canvas just changed size (corner ↔ half-screen); re-measure
+    // after the CSS transition settles so it fills its new box crisply.
+    requestAnimationFrame(()=>Brain.relayout());
+    setTimeout(()=>Brain.relayout(),240);
+  }
+}
 function applySidebar(){
-  const collapsed=localStorage.getItem(LS_SIDEBAR)==='1';
+  const collapsed=isSidebarCollapsed();
   $('#sidebar').classList.toggle('collapsed',collapsed);
   $('#sidebarOpen').classList.toggle('show',collapsed);
+  $('#app').classList.toggle('sb-collapsed',collapsed);
+  updateSplit();
 }
 $('#sidebarCollapse').onclick=()=>{localStorage.setItem(LS_SIDEBAR,'1');applySidebar();};
 $('#sidebarOpen').onclick=()=>{localStorage.setItem(LS_SIDEBAR,'0');applySidebar();};
@@ -1047,10 +1200,41 @@ input.addEventListener('input',()=>{input.style.height='auto';input.style.height
 input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});
 sendBtn.onclick=sendMsg;
 
+/* Slash commands are handled client-side and never sent to the model, so
+   they don't pollute the conversation history (the model can't parrot them).
+   /status reports Zeb's real model + config from /api/modelinfo. */
+function formatModelInfo(d){
+  if(!d)return 'Model info unavailable.';
+  const L=[];
+  L.push('◆ Model: '+(d.backbone||d.name||'Zeb Local'));
+  L.push('◆ Context window: '+(d.context_window_human||((d.context_window||0)+' tokens')));
+  L.push('◆ Provider: '+(d.provider||'local-model'));
+  L.push('◆ Config file: '+(d.config_path||'~/.zeb/config.yaml'));
+  L.push('◆ Weights: '+(d.weights_path?(d.weights_path+(d.weights_ready?'':' (not downloaded yet)')):'not downloaded yet'));
+  L.push('◆ State: '+(d.loaded?'loaded in memory':(d.weights_ready?'weights cached on disk':'not yet loaded')));
+  if(d.remote_connected&&(d.remote_providers||[]).length)L.push('◆ Remote providers: '+d.remote_providers.join(', '));
+  return L.join('\n');
+}
+async function handleSlashCommand(text){
+  if(text[0]!=='/')return false;
+  const cmd=text.slice(1).trim().split(/\s+/)[0].toLowerCase();
+  if(!['status','model','config','help'].includes(cmd))return false;
+  addMsgNode('user',text);
+  if(cmd==='help'){
+    addMsgNode('assistant','Slash commands:\n/status — show the active model, context window & config path\n/help — this list');
+    input.focus();return true;
+  }
+  const node=addMsgNode('assistant','Fetching model status…');
+  try{const d=await api('/api/modelinfo');node.querySelector('.bubble').textContent=formatModelInfo(d);}
+  catch(e){node.querySelector('.bubble').textContent='⚠ '+e.message;}
+  input.focus();return true;
+}
+
 async function sendMsg(){
   const text=input.value.trim();
   if(!text||awaiting)return;
   input.value='';input.style.height='auto';
+  if(await handleSlashCommand(text))return;
   history.push({role:'user',content:text});addMsgNode('user',text);saveChatState();
   awaiting=true;sendBtn.disabled=true;Brain.setTarget(1.0);showTyping();
   try{
@@ -1064,6 +1248,44 @@ async function sendMsg(){
     if(Voice.active)Voice.speak(reply);
   }catch(e){hideTyping();addMsgNode('assistant','⚠ '+e.message);}
   finally{awaiting=false;sendBtn.disabled=false;Brain.setTarget(null);input.focus();}
+}
+
+/* ============ NEW CHAT + RECENT CHATS ============ */
+/* The "New Chat" button opens a small popover: start a fresh conversation, or
+   jump straight back into any recent saved chat without leaving the chat view. */
+const newChatBtn=$('#newChatBtn'), recentPop=$('#recentPop');
+let recentOpen=false;
+function closeRecent(){recentOpen=false;if(recentPop)recentPop.style.display='none';if(newChatBtn)newChatBtn.classList.remove('open');}
+function openRecent(){recentOpen=true;recentPop.style.display='block';newChatBtn.classList.add('open');renderRecentPop();}
+if(newChatBtn){
+  newChatBtn.onclick=(e)=>{e.stopPropagation();recentOpen?closeRecent():openRecent();};
+  document.addEventListener('click',(e)=>{
+    if(recentOpen&&!recentPop.contains(e.target)&&!newChatBtn.contains(e.target))closeRecent();
+  });
+  document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&recentOpen)closeRecent();});
+}
+async function renderRecentPop(){
+  recentPop.innerHTML='';
+  const nw=el('button','rp-new');nw.innerHTML='<span style="font-size:15px;line-height:1">&#43;</span><span>Start new chat</span>';
+  nw.onclick=async()=>{closeRecent();await newSession();};
+  recentPop.appendChild(nw);
+  recentPop.appendChild(el('div','rp-label','Recent chats'));
+  const holder=el('div');holder.innerHTML='<div class="rp-empty"><span class="spin"></span></div>';recentPop.appendChild(holder);
+  try{
+    const data=await api('/api/sessions');
+    const list=(Array.isArray(data)?data:(data.sessions||[])).slice(0,12);
+    holder.innerHTML='';
+    if(!list.length){holder.appendChild(el('div','rp-empty','No saved chats yet.'));return;}
+    list.forEach(s=>{
+      const active=String(s.id)===String(currentSession);
+      const it=el('button','rp-item'+(active?' active':''));
+      it.appendChild(el('div','rp-grow',s.title||s.name||('Session '+(s.id||''))));
+      const mc=(s.message_count!=null?s.message_count+' msgs':'');
+      if(mc)it.appendChild(el('div','rp-sub',mc));
+      it.onclick=async()=>{closeRecent();await loadSession(s.id,s.title);};
+      holder.appendChild(it);
+    });
+  }catch(e){holder.innerHTML='';holder.appendChild(el('div','rp-empty','⚠ '+e.message));}
 }
 
 /* ============ VOICE CHAT ============ */
@@ -1196,45 +1418,48 @@ function boot(){
 <script>
 /* ============ BRAIN — RAW WebGL ============ */
 const Brain=(function(){
-  // 2D-canvas neuron network: a handful of neurons that drift, connected by
-  // synapses, with signals that travel edge-to-edge and make nodes FIRE
-  // (flash) on arrival — chaining into neighbours. Energy (driven by agent
-  // activity) scales the firing rate, signal speed, and glow. Reads clearly
-  // as a living network at small size, where 260 WebGL points looked like a
-  // single fuzzy blob.
+  // A living 2.5D neural network. Neurons sit on a jittered, brain-shaped
+  // ellipsoid that slowly rotates in 3D; a perspective projection scales each
+  // neuron's size and brightness by depth so the cloud reads as real volume.
+  // Synapses carry firing signals node-to-node, chaining bursts through the
+  // network; layered radial glows give bloom, and transparent trail-fade
+  // leaves a comet smear behind travelling signals. Energy — driven by agent
+  // activity — scales firing rate, signal speed, rotation, glow and the core
+  // nucleus, so the brain visibly "thinks harder" when Zeb is working. Pure
+  // 2D canvas: runs everywhere and stays crisp from a 180px corner badge to a
+  // half-screen showpiece.
   let canvas,ctx,ok=false;
-  let W=0,H=0,dpr=1;
+  let W=0,H=0,dpr=1,CX=0,CY=0,scale=1;
   let energy=0.05, targetEnergy=0.05;
   let nodes=[], edges=[], signals=[];
-  let last=0, fireAcc=0;
+  let last=0, fireAcc=0, rot=0, tGlobal=0;
   const api={comm:false};
 
   function rnd(a,b){return a+Math.random()*(b-a);}
 
   function build(){
-    const N=14;nodes=[];
+    const N=30;nodes=[];
+    // Even coverage via a Fibonacci sphere, squashed into a brain-ish
+    // ellipsoid (wider than tall, a little flat front-to-back) + jitter.
+    const GA=Math.PI*(3-Math.sqrt(5));
     for(let i=0;i<N;i++){
-      const ang=(i/N)*Math.PI*2+rnd(-0.35,0.35);
-      const rad=rnd(0.30,0.86);
-      nodes.push({
-        x:0.5+Math.cos(ang)*rad*0.42,
-        y:0.5+Math.sin(ang)*rad*0.42,
-        vx:rnd(-1,1)*0.012, vy:rnd(-1,1)*0.012,
-        fire:0, seed:Math.random()
-      });
+      const y=1-(i/(N-1))*2, r=Math.sqrt(Math.max(0,1-y*y)), th=GA*i;
+      let x=Math.cos(th)*r, z=Math.sin(th)*r, yy=y;
+      const k=rnd(0.80,1.0);
+      x*=1.18*k; yy*=0.86*k; z*=0.92*k;
+      x+=rnd(-0.05,0.05);yy+=rnd(-0.05,0.05);z+=rnd(-0.05,0.05);
+      nodes.push({bx:x,by:yy,bz:z,x,y:yy,z,seed:Math.random(),drift:rnd(0,6.28),fire:0});
     }
     edges=[];
     const has=(i,j)=>edges.some(e=>(e[0]===i&&e[1]===j)||(e[0]===j&&e[1]===i));
+    const D3=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
     for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){
-      const d=Math.hypot(nodes[i].x-nodes[j].x,nodes[i].y-nodes[j].y);
-      if(d<0.30)edges.push([i,j]);
+      if(D3(nodes[i],nodes[j])<0.62)edges.push([i,j]);
     }
-    // guarantee no orphan nodes: link each to its nearest neighbour
+    // no orphans: link each node to its nearest neighbour
     for(let i=0;i<N;i++){
       let best=-1,bd=9;
-      for(let j=0;j<N;j++){if(j===i)continue;
-        const d=Math.hypot(nodes[i].x-nodes[j].x,nodes[i].y-nodes[j].y);
-        if(d<bd){bd=d;best=j;}}
+      for(let j=0;j<N;j++){if(j===i)continue;const d=D3(nodes[i],nodes[j]);if(d<bd){bd=d;best=j;}}
       if(best>=0&&!has(i,best))edges.push([Math.min(i,best),Math.max(i,best)]);
     }
   }
@@ -1244,76 +1469,110 @@ const Brain=(function(){
     edges.forEach(e=>{
       let to=-1;
       if(e[0]===idx)to=e[1];else if(e[1]===idx)to=e[0];else return;
-      if(signals.length<90&&Math.random()<0.85)signals.push({from:idx,to,t:0});
+      if(signals.length<170&&Math.random()<0.8)signals.push({from:idx,to,t:0});
     });
   }
 
-  function neuronColor(){return api.comm?[255,92,200]:[34,224,208];}
-  function signalColor(){return api.comm?[255,130,170]:[160,107,255];}
+  function neuronColor(){return api.comm?[255,90,200]:[54,232,214];}
+  function coreColor(){return api.comm?[150,50,150]:[70,120,225];}
+  function signalColor(){return api.comm?[255,150,195]:[172,120,255];}
+
+  const TILT=0.34, CT=Math.cos(TILT), ST=Math.sin(TILT);
+  function project(n){
+    // rotate around Y, apply a fixed X-tilt, perspective-divide on depth.
+    const cr=Math.cos(rot),sr=Math.sin(rot);
+    const x=n.x*cr - n.z*sr, z=n.x*sr + n.z*cr;
+    const y2=n.y*CT - z*ST, z2=n.y*ST + z*CT;
+    const persp=1/(2.0 - z2*0.6);
+    return {sx:CX + x*scale*persp, sy:CY + y2*scale*persp, depth:z2, persp};
+  }
 
   function step(dt){
     energy+=(targetEnergy-energy)*Math.min(1,dt*3.0);
+    rot+=dt*(0.10+energy*0.55);
+    tGlobal+=dt;
     nodes.forEach(n=>{
-      n.x+=n.vx*dt*(0.4+energy);n.y+=n.vy*dt*(0.4+energy);
-      if(n.x<0.12||n.x>0.88){n.vx*=-1;n.x=Math.max(0.12,Math.min(0.88,n.x));}
-      if(n.y<0.12||n.y>0.88){n.vy*=-1;n.y=Math.max(0.12,Math.min(0.88,n.y));}
-      n.fire=Math.max(0,n.fire-dt*2.4);
+      const w=tGlobal*0.6+n.drift;
+      n.x=n.bx+Math.sin(w)*0.03;n.y=n.by+Math.cos(w*0.9)*0.03;n.z=n.bz+Math.sin(w*1.1)*0.03;
+      n.fire=Math.max(0,n.fire-dt*2.2);
     });
-    fireAcc+=dt*(0.5+energy*7.0);
+    fireAcc+=dt*(0.6+energy*9.0);
     while(fireAcc>=1){fireAcc-=1;if(nodes.length)emitFrom((Math.random()*nodes.length)|0);}
-    const speed=0.55+energy*2.2;
+    const speed=0.5+energy*2.4;
     for(let i=signals.length-1;i>=0;i--){
       const s=signals[i];s.t+=dt*speed;
-      if(s.t>=1){
-        nodes[s.to].fire=1;
-        if(Math.random()<0.5+energy*0.4)emitFrom(s.to);
-        signals.splice(i,1);
-      }
+      if(s.t>=1){nodes[s.to].fire=1;if(Math.random()<0.45+energy*0.4)emitFrom(s.to);signals.splice(i,1);}
     }
   }
 
   function draw(){
-    ctx.clearRect(0,0,W,H);
+    // Transparent trail-fade: pull existing pixels toward alpha 0 so signals
+    // leave a comet smear WITHOUT painting a dark box over the chat behind it.
+    ctx.globalCompositeOperation='destination-out';
+    ctx.fillStyle='rgba(0,0,0,'+(0.30+0.14*(1-energy))+')';
+    ctx.fillRect(0,0,W,H);
     ctx.globalCompositeOperation='lighter';
-    const nc=neuronColor(),sc=signalColor();
-    // synapses
-    ctx.lineWidth=1;
+    const nc=neuronColor(),sc=signalColor(),cc=coreColor();
+
+    // central nucleus glow — swells with energy
+    const coreR=scale*(0.55+energy*0.30);
+    const cg=ctx.createRadialGradient(CX,CY,0,CX,CY,coreR);
+    cg.addColorStop(0,'rgba('+cc[0]+','+cc[1]+','+cc[2]+','+(0.10+energy*0.20)+')');
+    cg.addColorStop(1,'rgba('+cc[0]+','+cc[1]+','+cc[2]+',0)');
+    ctx.fillStyle=cg;ctx.beginPath();ctx.arc(CX,CY,coreR,0,7);ctx.fill();
+
+    // project every node once, depth-sort back→front
+    const P=nodes.map((n,i)=>{const p=project(n);p.i=i;p.fire=n.fire;p.seed=n.seed;return p;});
+    const order=P.slice().sort((a,b)=>a.depth-b.depth);
+
+    // synapses (depth fades far links, perspective thickens near ones)
     edges.forEach(e=>{
-      const a=nodes[e[0]],b=nodes[e[1]];
-      ctx.strokeStyle='rgba('+nc[0]+','+nc[1]+','+nc[2]+','+(0.05+energy*0.14)+')';
-      ctx.beginPath();ctx.moveTo(a.x*W,a.y*H);ctx.lineTo(b.x*W,b.y*H);ctx.stroke();
+      const a=P[e[0]],b=P[e[1]];const dep=(a.depth+b.depth)/2;
+      const al=(0.04+energy*0.16)*(0.45+0.55*((dep+1)/2));
+      ctx.strokeStyle='rgba('+nc[0]+','+nc[1]+','+nc[2]+','+al+')';
+      ctx.lineWidth=Math.max(0.4,scale*0.006*a.persp);
+      ctx.beginPath();ctx.moveTo(a.sx,a.sy);ctx.lineTo(b.sx,b.sy);ctx.stroke();
     });
-    // travelling signals
+
+    // travelling signals (smoothstep easing + soft bloom head)
     signals.forEach(s=>{
-      const a=nodes[s.from],b=nodes[s.to];
-      const x=(a.x+(b.x-a.x)*s.t)*W,y=(a.y+(b.y-a.y)*s.t)*H;
-      const r=2.0+energy*2.2;
-      const g=ctx.createRadialGradient(x,y,0,x,y,r*3);
+      const a=P[s.from],b=P[s.to];
+      const te=s.t*s.t*(3-2*s.t);
+      const x=a.sx+(b.sx-a.sx)*te,y=a.sy+(b.sy-a.sy)*te;
+      const persp=(a.persp+b.persp)/2;
+      const r=(scale*0.02+energy*scale*0.022)*persp;
+      const g=ctx.createRadialGradient(x,y,0,x,y,r*3.4);
       g.addColorStop(0,'rgba('+sc[0]+','+sc[1]+','+sc[2]+',0.95)');
+      g.addColorStop(0.4,'rgba('+sc[0]+','+sc[1]+','+sc[2]+',0.45)');
       g.addColorStop(1,'rgba('+sc[0]+','+sc[1]+','+sc[2]+',0)');
-      ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r*3,0,7);ctx.fill();
+      ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r*3.4,0,7);ctx.fill();
     });
-    // neurons
-    const time=performance.now()/1000;
-    nodes.forEach(n=>{
-      const x=n.x*W,y=n.y*H;
-      const pulse=0.5+0.5*Math.sin(time*(1.2+energy*3.0)+n.seed*6.28);
-      const rr=1.7+energy*1.6+pulse*(0.5+energy*1.0)+n.fire*3.4;
-      const bright=0.5+n.fire*0.5+energy*0.3;
-      const glow=ctx.createRadialGradient(x,y,0,x,y,rr*3.2);
+
+    // neurons — nearer ones drawn last (on top), bigger and brighter
+    order.forEach(p=>{
+      const pulse=0.5+0.5*Math.sin(tGlobal*(1.4+energy*3.0)+p.seed*6.28);
+      const depthN=(p.depth+1)/2;
+      const base=scale*(0.012+0.022*depthN)*p.persp;
+      const rr=base*(1+pulse*0.35+p.fire*2.4+energy*0.5);
+      const bright=Math.min(1,0.32+p.fire*0.6+energy*0.25+depthN*0.15);
+      const glow=ctx.createRadialGradient(p.sx,p.sy,0,p.sx,p.sy,rr*4.4);
       glow.addColorStop(0,'rgba('+nc[0]+','+nc[1]+','+nc[2]+','+bright+')');
+      glow.addColorStop(0.5,'rgba('+nc[0]+','+nc[1]+','+nc[2]+','+(bright*0.35)+')');
       glow.addColorStop(1,'rgba('+nc[0]+','+nc[1]+','+nc[2]+',0)');
-      ctx.fillStyle=glow;ctx.beginPath();ctx.arc(x,y,rr*3.2,0,7);ctx.fill();
-      ctx.fillStyle='rgba('+Math.min(255,nc[0]+140)+','+Math.min(255,nc[1]+30)+','+Math.min(255,nc[2]+50)+','+(0.75+n.fire*0.25)+')';
-      ctx.beginPath();ctx.arc(x,y,Math.max(1,rr*0.5),0,7);ctx.fill();
+      ctx.fillStyle=glow;ctx.beginPath();ctx.arc(p.sx,p.sy,rr*4.4,0,7);ctx.fill();
+      ctx.fillStyle='rgba('+Math.min(255,nc[0]+120)+','+Math.min(255,nc[1]+25)+','+Math.min(255,nc[2]+40)+','+Math.min(1,0.72+p.fire*0.28)+')';
+      ctx.beginPath();ctx.arc(p.sx,p.sy,Math.max(0.6,rr*0.85),0,7);ctx.fill();
     });
   }
 
   function resize(){
+    if(!canvas)return;
     dpr=Math.min(window.devicePixelRatio||1,2);
     W=canvas.clientWidth||180;H=canvas.clientHeight||180;
-    canvas.width=Math.max(1,W*dpr);canvas.height=Math.max(1,H*dpr);
+    canvas.width=Math.max(1,Math.round(W*dpr));canvas.height=Math.max(1,Math.round(H*dpr));
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    CX=W/2;CY=H/2;scale=Math.min(W,H)*0.42;
+    ctx.clearRect(0,0,W,H); // start clean (no stretched smear) after a resize
   }
 
   function frame(ts){
@@ -1354,7 +1613,6 @@ const Brain=(function(){
   }
 
   return {
-    comm:false,
     init(){
       try{
         canvas=document.getElementById('brainCanvas');
@@ -1362,11 +1620,16 @@ const Brain=(function(){
         if(!ctx){fallback();return;}
         resize();build();ok=true;
         window.addEventListener('resize',resize);
+        // The wrap resizes when the sidebar toggles split-screen, without any
+        // window resize event — observe the canvas directly so the brain
+        // always re-measures to fill its box.
+        if(window.ResizeObserver){try{new ResizeObserver(()=>resize()).observe(canvas);}catch(e){}}
         // seed a little initial activity so it's alive immediately
-        for(let i=0;i<3;i++)emitFrom((Math.random()*nodes.length)|0);
+        for(let i=0;i<5;i++)emitFrom((Math.random()*nodes.length)|0);
         last=performance.now();requestAnimationFrame(frame);
       }catch(e){ok=false;fallback();}
     },
+    relayout(){try{resize();}catch(e){}},
     setTarget(v){
       // v null => leave to status poll baseline; else force
       if(v==null){targetEnergy=Math.max(targetEnergy,0.05);}
