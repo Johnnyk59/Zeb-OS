@@ -49,6 +49,17 @@
   @keyframes pop{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
   @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
+  /* ONBOARDING (first-boot identity questions) */
+  #onboard{position:fixed;inset:0;background:radial-gradient(1200px 700px at 20% -10%,#141420,#0a0a0b 60%);
+    display:flex;align-items:center;justify-content:center;z-index:90}
+  .onboard-card{width:460px;max-width:92vw;background:var(--g1);border:1px solid var(--line);border-radius:16px;
+    padding:30px;box-shadow:0 30px 80px rgba(0,0,0,.6);animation:pop .4s cubic-bezier(.2,.8,.2,1)}
+  .onboard-card h1{font-size:20px;margin:0 0 4px;letter-spacing:-.5px}
+  .onboard-card p{color:var(--dim);margin:0 0 18px;font-size:13px}
+  .ob-q{display:block;font-size:13px;color:var(--txt);margin:14px 0 6px}
+  .ob-q span{color:var(--dim2);font-size:11px;font-family:var(--mono)}
+  .onboard-card textarea.field{min-height:64px;resize:vertical}
+
   /* APP LAYOUT */
   #app{display:none;height:100%}
   #app.on{display:flex}
@@ -179,7 +190,10 @@
   /* CHAT */
   .chat-top{display:flex;align-items:center;gap:12px;padding:16px 26px;border-bottom:1px solid var(--line)}
   .chat-top h2{margin:0;font-size:15px;letter-spacing:-.2px}
-  .seg{display:flex;background:var(--g1);border:1px solid var(--line);border-radius:9px;padding:3px;margin-left:auto;margin-right:200px}
+  .modelsel{margin-left:auto;background:var(--g1);border:1px solid var(--line);color:var(--txt);border-radius:9px;
+    padding:7px 10px;font-size:12px;font-family:var(--mono);letter-spacing:.3px;outline:none;max-width:240px;transition:border .15s}
+  .modelsel:focus{border-color:var(--cyan)}
+  .seg{display:flex;background:var(--g1);border:1px solid var(--line);border-radius:9px;padding:3px;margin-left:12px;margin-right:200px}
   .seg button{background:transparent;border:none;color:var(--dim);padding:6px 13px;border-radius:7px;font-size:12px;
     font-family:var(--mono);letter-spacing:.5px;transition:all .15s}
   .seg button.on{background:var(--g3);color:var(--cyan)}
@@ -282,6 +296,7 @@
     <section class="pane show" id="chatPane">
       <div class="chat-top">
         <h2 id="chatTitle">New Chat</h2>
+        <select class="modelsel" id="modelSel" title="Model for this chat — Local is the default"></select>
         <div class="seg">
           <button id="modeSimple" class="on">Chat</button>
           <button id="modeTerm">Terminal</button>
@@ -308,9 +323,28 @@
   </main>
 </div>
 
+<!-- ONBOARDING: first-boot identity questions -->
+<div id="onboard" style="display:none">
+  <div class="onboard-card">
+    <div class="brandmark"></div>
+    <h1>Let's get acquainted</h1>
+    <p>Three quick questions so Zeb knows who it works with and what it's for. You can change these anytime.</p>
+    <label class="ob-q">Who am I? <span>— you: your name / role</span></label>
+    <input id="obWhoAmI" class="field" type="text" autocomplete="off" placeholder="e.g. Johnny, indie builder"/>
+    <label class="ob-q">Who are you? <span>— Zeb: how it should show up</span></label>
+    <input id="obWhoAreYou" class="field" type="text" autocomplete="off" placeholder="e.g. My autonomous engineer &amp; researcher"/>
+    <label class="ob-q">What's the mission?</label>
+    <textarea id="obMission" class="field" placeholder="What are we here to do?"></textarea>
+    <div style="margin-top:18px;display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn" id="obSkip">Skip for now</button>
+      <button class="btn btn-accent" id="obSave">Save &amp; start</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ============ CORE / AUTH / FETCH ============ */
-const LS_KEY='zeb_dash_key', LS_MODE='zeb_dash_mode';
+const LS_KEY='zeb_dash_key', LS_MODE='zeb_dash_mode', LS_CHAT='zeb_dash_chat', LS_MODEL='zeb_dash_model';
 let KEY=localStorage.getItem(LS_KEY)||'';
 const $=s=>document.querySelector(s);
 const el=(t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e;};
@@ -362,6 +396,7 @@ const TABS=[
   {id:'skills',label:'Skills',ic:'&#10022;'},
   {id:'plugins',label:'Plugins',ic:'&#9638;'},
   {id:'channels',label:'Channels',ic:'&#9758;'},
+  {id:'repos',label:'GitHub Repos',ic:'&#8862;'},
   {id:'diagnose',label:'Zeb Diagnose',ic:'&#10010;'},
   {id:'keys',label:'API Keys',ic:'&#9919;'},
 ];
@@ -401,6 +436,7 @@ function openTab(id){
   else if(id==='skills')renderSimple('Skills',loadSkills);
   else if(id==='plugins')renderSimple('Plugins',loadPlugins);
   else if(id==='channels')renderChannels();
+  else if(id==='repos')renderRepos();
   else if(id==='diagnose')renderDiagnose();
   else if(id==='keys')renderKeys();
 }
@@ -437,7 +473,7 @@ async function renderSessions(){
 async function newSession(){
   try{const s=await api('/api/sessions',{method:'POST',body:JSON.stringify({title:'New Chat'})});
     history=[];const id=s&&(s.id!=null?s.id:s.session_id);currentSession=id;$('#chatTitle').textContent=(s&&s.title)||'New Chat';
-    renderMessages();setActive('sessions');showChat();
+    renderMessages();saveChatState();setActive('sessions');showChat();
   }catch(e){alert(e.message);}
 }
 async function loadSession(id,title){
@@ -446,7 +482,7 @@ async function loadSession(id,title){
     const msgs=s.messages||s.history||[];
     history=msgs.map(m=>({role:m.role,content:m.content}));
     currentSession=id;$('#chatTitle').textContent=title||s.title||('Session '+id);
-    renderMessages();setActive('sessions');showChat();
+    renderMessages();saveChatState();setActive('sessions');showChat();
   }catch(e){showChat();alert(e.message);}
 }
 
@@ -821,6 +857,95 @@ function fillLocalModel(d){
   }
 }
 
+/* ============ GITHUB REPOS ============ */
+async function renderRepos(){
+  showData('GitHub Repos');const b=$('#dataBody');b.innerHTML='';
+  const intro=el('div','diag-note');
+  intro.innerHTML='<b>Saved open-source repos.</b> Search your saved list, or describe what you need and let Zeb scan GitHub for matching projects to integrate.';
+  b.appendChild(intro);
+  // Search saved repos
+  const sbar=el('div','toolbar');
+  const si=el('input','field');si.placeholder='Search saved repos by name…';si.style.maxWidth='280px';si.type='text';si.autocomplete='off';
+  const sb=el('button','btn');sb.textContent='Search';
+  const clr=el('button','btn');clr.textContent='All';
+  sbar.appendChild(si);sbar.appendChild(sb);sbar.appendChild(clr);b.appendChild(sbar);
+  // Scan GitHub
+  const scanWrap=el('div','kv');
+  const qi=el('input','field');qi.placeholder='Describe what you need — e.g. "offline speech to text in python"';qi.type='text';qi.autocomplete='off';
+  const scan=el('button','btn btn-accent');scan.textContent='Scan GitHub';
+  scanWrap.appendChild(qi);scanWrap.appendChild(scan);b.appendChild(scanWrap);
+  const status=el('div','meta');status.id='repoStatus';status.style.margin='2px 0 12px';b.appendChild(status);
+  const holder=el('div');holder.id='reposList';b.appendChild(holder);
+  const load=async(q)=>{
+    holder.innerHTML='<div class="empty"><span class="spin"></span></div>';
+    try{
+      const list=toArr(await api('/api/repos'+(q?('?q='+encodeURIComponent(q)):'')),['repos']);
+      holder.innerHTML='';
+      if(!list.length){holder.appendChild(emptyState('&#8862;',q?'No saved repos match “'+esc(q)+'”.':'No saved repos yet. Use “Scan GitHub” to find open-source projects.'));return;}
+      list.forEach(r=>holder.appendChild(repoRow(r,load)));
+    }catch(e){holder.innerHTML='';holder.appendChild(inlineErr(e.message));}
+  };
+  sb.onclick=()=>load(si.value.trim());
+  clr.onclick=()=>{si.value='';load('');};
+  si.addEventListener('keydown',e=>{if(e.key==='Enter')load(si.value.trim());});
+  const doScan=async()=>{
+    const q=qi.value.trim();if(!q){qi.focus();return;}
+    scan.disabled=true;status.textContent='Scanning GitHub for “'+q+'”…';
+    try{
+      const d=await api('/api/repos/scan',{method:'POST',body:JSON.stringify({query:q})});
+      const found=(d.results||[]).length,added=(d.added||[]).length;
+      status.textContent=d.error?('Scan error: '+d.error):('Found '+found+' repos · saved '+added+' to your list.');
+      if(!d.error){qi.value='';}
+      load('');
+    }catch(e){status.textContent='Scan failed: '+e.message;}
+    finally{scan.disabled=false;}
+  };
+  scan.onclick=doScan;
+  qi.addEventListener('keydown',e=>{if(e.key==='Enter')doScan();});
+  load('');
+}
+function repoRow(r,reload){
+  const row=el('div','row');const g=el('div','grow');
+  g.appendChild(el('div','title',r.full_name||'(repo)'));
+  const meta=(r.language?('['+r.language+'] '):'')+(r.stars?('★ '+r.stars+' · '):'')+(r.description||'');
+  g.appendChild(el('div','meta',meta));
+  g.onclick=()=>window.open(r.url||('https://github.com/'+(r.full_name||'')),'_blank','noopener');
+  row.appendChild(g);
+  if(r.source==='scan')row.appendChild(el('span','badge v','scanned'));
+  const del=el('button','iconbtn','×');
+  del.onclick=async(e)=>{e.stopPropagation();try{await api('/api/repos/'+r.id,{method:'DELETE'});reload('');}catch(err){alert(err.message);}};
+  row.appendChild(del);
+  return row;
+}
+
+/* ============ ONBOARDING (first-boot identity) ============ */
+async function maybeOnboard(){
+  try{
+    const idn=await api('/api/identity');
+    if(idn&&idn.onboarded)return;
+  }catch(e){return;}
+  const ob=$('#onboard');if(!ob)return;
+  ob.style.display='flex';
+  setTimeout(()=>{const f=$('#obWhoAmI');if(f)f.focus();},60);
+}
+async function saveOnboard(skip){
+  const ob=$('#onboard');
+  try{
+    const body=skip?{onboarded:true}:{
+      who_am_i:$('#obWhoAmI').value.trim(),
+      who_are_you:$('#obWhoAreYou').value.trim(),
+      mission:$('#obMission').value.trim()
+    };
+    await api('/api/identity',{method:'POST',body:JSON.stringify(body)});
+  }catch(e){/* non-fatal */}
+  if(ob)ob.style.display='none';
+}
+(function(){
+  const s=$('#obSave'),k=$('#obSkip');
+  if(s)s.onclick=()=>saveOnboard(false);
+  if(k)k.onclick=()=>saveOnboard(true);
+})();
+
 /* ============ SIDEBAR COLLAPSE ============ */
 const LS_SIDEBAR='zeb_dash_sidebar';
 function applySidebar(){
@@ -842,7 +967,45 @@ $('#restartBtn').onclick=async()=>{
 
 /* ============ CHAT ============ */
 let history=[], currentSession=null, awaiting=false;
+let selectedModel=localStorage.getItem(LS_MODEL)||'local';
 let chatMode=localStorage.getItem(LS_MODE)||'simple';
+
+/* Persist the active conversation so navigating away (or reloading) returns
+   to the SAME chat instead of a fresh one. */
+function saveChatState(){
+  try{localStorage.setItem(LS_CHAT,JSON.stringify({
+    history:history.slice(-200),currentSession,title:$('#chatTitle').textContent||'New Chat'
+  }));}catch(e){}
+}
+function restoreChatState(){
+  try{
+    const s=JSON.parse(localStorage.getItem(LS_CHAT)||'null');
+    if(s&&Array.isArray(s.history)){
+      history=s.history;currentSession=s.currentSession||null;
+      if(s.title)$('#chatTitle').textContent=s.title;
+    }
+  }catch(e){}
+}
+
+/* Model selector: local backbone is the default/priority; connected API
+   providers appear as optional per-request backups. */
+async function loadModelSelector(){
+  const sel=$('#modelSel');if(!sel)return;
+  try{
+    const d=await api('/api/models');
+    const list=toArr(d,['available']);
+    sel.innerHTML='';
+    list.forEach(m=>{
+      const o=document.createElement('option');
+      o.value=m.id;
+      o.textContent=(m.local?'⚡ ':'')+(m.name||m.id)+(m.priority?' — default':'');
+      sel.appendChild(o);
+    });
+    if(!list.some(m=>m.id===selectedModel))selectedModel='local';
+    sel.value=selectedModel;
+    sel.onchange=()=>{selectedModel=sel.value||'local';localStorage.setItem(LS_MODEL,selectedModel);};
+  }catch(e){/* keep local-only */}
+}
 function applyMode(){
   const p=$('#chatPane');p.classList.toggle('term',chatMode==='term');
   $('#modeSimple').classList.toggle('on',chatMode==='simple');
@@ -888,12 +1051,16 @@ async function sendMsg(){
   const text=input.value.trim();
   if(!text||awaiting)return;
   input.value='';input.style.height='auto';
-  history.push({role:'user',content:text});addMsgNode('user',text);
+  history.push({role:'user',content:text});addMsgNode('user',text);saveChatState();
   awaiting=true;sendBtn.disabled=true;Brain.setTarget(1.0);showTyping();
   try{
-    const d=await api('/api/chat',{method:'POST',body:JSON.stringify({message:text,history:history.slice(0,-1)})});
+    // Local backbone is the default: only send a provider when the user has
+    // explicitly picked a remote in the model selector.
+    const payload={message:text,history:history.slice(0,-1)};
+    if(selectedModel&&selectedModel!=='local'&&selectedModel!=='local-model')payload.provider=selectedModel;
+    const d=await api('/api/chat',{method:'POST',body:JSON.stringify(payload)});
     const reply=(d&&(d.reply!=null?d.reply:d.content))||'(no reply)';
-    hideTyping();history.push({role:'assistant',content:reply});addMsgNode('assistant',reply);
+    hideTyping();history.push({role:'assistant',content:reply});addMsgNode('assistant',reply);saveChatState();
     if(Voice.active)Voice.speak(reply);
   }catch(e){hideTyping();addMsgNode('assistant','⚠ '+e.message);}
   finally{awaiting=false;sendBtn.disabled=false;Brain.setTarget(null);input.focus();}
@@ -1016,9 +1183,12 @@ function boot(){
   applySidebar();
   Voice.init();
   Brain.init();
+  restoreChatState();       // return to the same conversation, not a new one
+  loadModelSelector();      // populate the chat model dropdown (local default)
   renderMessages();
   showChat();setActive('sessions');
   pollStatus();
+  maybeOnboard();           // first-boot identity questions
   input.focus();
 }
 </script>

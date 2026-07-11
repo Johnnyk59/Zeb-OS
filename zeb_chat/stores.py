@@ -191,6 +191,149 @@ class ChannelStore:
             return False
 
 
+class IdentityStore:
+    """Zeb's learned identity — answers to the first-boot questions.
+
+    Persists the user's answers to "Who am I?", "Who are you?", and
+    "What's the mission?" under ``chat/identity.json`` so Zeb knows who it
+    serves and what it's for on every subsequent turn (and across container
+    restarts, since it lives on the data volume). Mirrors OpenClaw's
+    identity onboarding.
+    """
+
+    FIELDS = ("who_am_i", "who_are_you", "mission")
+
+    def __init__(self, base_dir: Path | None = None) -> None:
+        self._path = (Path(base_dir) if base_dir else _chat_dir()) / "identity.json"
+
+    def get(self) -> dict:
+        data = _read_json(self._path, {})
+        if not isinstance(data, dict):
+            data = {}
+        out = {k: str(data.get(k, "") or "") for k in self.FIELDS}
+        out["onboarded"] = bool(data.get("onboarded"))
+        out["updated_at"] = data.get("updated_at")
+        return out
+
+    def set(self, values: dict) -> dict:
+        try:
+            current = _read_json(self._path, {})
+            if not isinstance(current, dict):
+                current = {}
+            for k in self.FIELDS:
+                if k in values:
+                    current[k] = str(values.get(k, "") or "")
+            # Onboarding is complete once any answer is provided; an explicit
+            # ``onboarded`` in the payload wins.
+            if "onboarded" in values:
+                current["onboarded"] = bool(values["onboarded"])
+            else:
+                current["onboarded"] = any(
+                    str(current.get(k, "")).strip() for k in self.FIELDS
+                )
+            current["updated_at"] = time.time()
+            _atomic_write(self._path, json.dumps(current, indent=2))
+        except Exception:
+            pass
+        return self.get()
+
+    def system_preamble(self) -> str:
+        """Render the identity as a system-prompt preamble, or '' if unset."""
+        try:
+            data = self.get()
+            if not data.get("onboarded"):
+                return ""
+            parts = []
+            if data.get("who_am_i"):
+                parts.append(f"The user (who you serve and act on behalf of): {data['who_am_i']}")
+            if data.get("who_are_you"):
+                parts.append(f"Who you are: {data['who_are_you']}")
+            if data.get("mission"):
+                parts.append(f"Your mission: {data['mission']}")
+            if not parts:
+                return ""
+            return (
+                "You are Zeb, an autonomous AI operating with full agency and "
+                "full system access. Act proactively in the user's best "
+                "interest; complete tasks without asking permission when they "
+                "clearly serve the mission.\n" + "\n".join(parts)
+            )
+        except Exception:
+            return ""
+
+
+class RepoStore:
+    """Saved open-source GitHub repositories under ``chat/repos.json``.
+
+    Powers the dashboard's "GitHub Repos" section: repos the user (or Zeb's
+    GitHub scan) has found worth keeping for integration. De-duplicated by
+    ``full_name``.
+    """
+
+    def __init__(self, base_dir: Path | None = None) -> None:
+        self._path = (Path(base_dir) if base_dir else _chat_dir()) / "repos.json"
+
+    def _load(self) -> list:
+        data = _read_json(self._path, [])
+        return data if isinstance(data, list) else []
+
+    def add(self, repo: dict) -> dict | None:
+        full_name = str((repo or {}).get("full_name") or "").strip()
+        if not full_name:
+            return None
+        entry = {
+            "id": uuid.uuid4().hex,
+            "full_name": full_name,
+            "url": str(repo.get("url") or f"https://github.com/{full_name}"),
+            "description": str(repo.get("description") or ""),
+            "stars": int(repo.get("stars") or 0),
+            "language": str(repo.get("language") or ""),
+            "source": str(repo.get("source") or "manual"),
+            "added_at": time.time(),
+        }
+        try:
+            items = self._load()
+            # De-dupe by full_name (case-insensitive).
+            low = full_name.lower()
+            if any(str(e.get("full_name", "")).lower() == low for e in items):
+                return next(
+                    (e for e in items if str(e.get("full_name", "")).lower() == low),
+                    entry,
+                )
+            items.append(entry)
+            _atomic_write(self._path, json.dumps(items, indent=2))
+        except Exception:
+            pass
+        return entry
+
+    def list(self, query: str = "") -> list:
+        try:
+            items = [e for e in self._load() if isinstance(e, dict)]
+            q = str(query or "").strip().lower()
+            if q:
+                items = [
+                    e
+                    for e in items
+                    if q in str(e.get("full_name", "")).lower()
+                    or q in str(e.get("description", "")).lower()
+                    or q in str(e.get("language", "")).lower()
+                ]
+            items.sort(key=lambda e: e.get("added_at") or 0, reverse=True)
+            return items
+        except Exception:
+            return []
+
+    def delete(self, id: str) -> bool:
+        try:
+            items = self._load()
+            remaining = [e for e in items if e.get("id") != id]
+            if len(remaining) == len(items):
+                return False
+            return _atomic_write(self._path, json.dumps(remaining, indent=2))
+        except Exception:
+            return False
+
+
 class SessionStore:
     """Chat sessions, one JSON file per session under ``chat/sessions/``."""
 

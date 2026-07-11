@@ -10,6 +10,22 @@
 # values via usermod/groupmod; each supervised service then drops to that
 # user via `s6-setuidgid`.
 #
+# Persistence:
+#   Every service mounts `~/.zeb -> /opt/data` (ZEB_HOME). ALL of Zeb's
+#   durable state lives there and therefore survives container restarts AND
+#   image upgrades (the mount is host-owned; recreating the container never
+#   touches it):
+#     - chat sessions + conversation history  (/opt/data/chat/sessions)
+#     - learned identity (who am I / mission)  (/opt/data/chat/identity.json)
+#     - saved GitHub repos                     (/opt/data/chat/repos.json)
+#     - API keys + channels                    (/opt/data/chat/*.json)
+#     - autonomy memory / learned data         (/opt/data/autonomy)
+#     - the downloaded local model weights     (/opt/data/models/gguf)  <- so
+#       the multi-GB GGUF is fetched once and reused across every upgrade.
+#   To use a named Docker volume instead of the ~/.zeb bind mount, replace
+#   `~/.zeb:/opt/data` with `zeb-data:/opt/data` on each service and add a
+#   top-level `volumes:\n  zeb-data:` block.
+#
 # Security notes:
 #   - The dashboard service binds to 127.0.0.1 by default. It stores API
 #     keys; exposing it on LAN without auth is unsafe. If you want remote

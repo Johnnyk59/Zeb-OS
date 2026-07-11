@@ -20,13 +20,33 @@ logger = logging.getLogger("zeb_chat")
 _turn_lock = threading.Lock()
 
 
-def run_chat_turn(message: str, history: list[dict] | None = None) -> str:
+_LOCAL_SELECTORS = ("", "local", "local-model", "zeb-local", "offline")
+
+
+def run_chat_turn(
+    message: str,
+    history: list[dict] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> str:
     """Run one full Zeb agent turn and return the final response text.
+
+    The **local GGUF backbone is always the default**. A remote API provider
+    is used *only* when the caller explicitly selects one (``provider`` set
+    to a connected remote via the chat model dropdown). This is deliberate:
+    out of the box, and whenever nothing is selected, Zeb answers on the
+    local model with zero keys — it never auto-reaches for OpenAI (or any
+    other provider) and so can never raise "api_key not set". If an
+    explicitly-selected remote fails, we fall back to local rather than
+    erroring.
 
     Args:
         message: The user's message for this turn.
         history: Optional prior conversation history (list of role/content
             dicts) passed through to the agent.
+        provider: Optional explicit provider selection from the chat UI
+            ("local" / "" => local backbone; anything else => that remote).
+        model: Optional explicit model id for the selected remote provider.
 
     Returns:
         The agent's final response text, or a clear error string on failure.
@@ -40,22 +60,23 @@ def run_chat_turn(message: str, history: list[dict] | None = None) -> str:
         cfg = load_config()
         toolsets_list = sorted(_get_platform_tools(cfg, "cli"))
 
-        # Decide whether a usable *remote* provider is configured. Out of the
-        # box nothing is (model == ""), so a fresh `docker run` still answers
-        # "yo" instantly on the bundled local GGUF backbone — no keys, no
-        # config. A configured provider is preferred when present; the local
-        # backbone is also used as a last-resort fallback if the configured
-        # turn fails to initialise (e.g. missing/invalid credentials).
-        use_local = not _remote_provider_usable(cfg)
+        # Teach the agent who it serves and what its mission is (first-boot
+        # onboarding), so identity persists across every turn.
+        history = _inject_identity(history)
 
-        if not use_local:
+        sel = str(provider or "").strip().lower()
+        if sel not in _LOCAL_SELECTORS:
+            # Explicit remote selection — try it, fall back to local on any
+            # failure (missing key, network, etc.) so the user still gets a
+            # reply instead of an error.
             try:
-                agent = _build_remote_agent(cfg, toolsets_list)
+                agent = _build_remote_agent(cfg, toolsets_list, requested=sel, target_model=model)
                 result = agent.run_conversation(message, conversation_history=history)
                 return result.get("final_response") or ""
             except Exception:  # noqa: BLE001
-                logger.exception("Configured provider turn failed; falling back to local backbone")
-                use_local = True
+                logger.exception(
+                    "Selected provider %r failed; falling back to local backbone", sel
+                )
 
         # Local GGUF backbone — always available, zero configuration.
         try:
@@ -67,56 +88,46 @@ def run_chat_turn(message: str, history: list[dict] | None = None) -> str:
             return f"[Zeb chat error: {exc}]"
 
 
-def _remote_provider_usable(cfg: dict) -> bool:
-    """True when a configured remote provider looks ready to serve a turn.
-
-    Conservative: any signal that a real model + reachable endpoint/credential
-    exists counts. When this returns False the chat server uses the always-on
-    local GGUF backbone instead.
-    """
+def _inject_identity(history: list[dict] | None) -> list[dict] | None:
+    """Prepend Zeb's learned identity as a leading system message, if set."""
     try:
-        model_cfg = cfg.get("model") or {}
-        if isinstance(model_cfg, str):
-            model_name = model_cfg
-            provider = ""
-            base_url = ""
-        else:
-            model_name = model_cfg.get("default") or model_cfg.get("model") or ""
-            provider = str(model_cfg.get("provider") or "").strip().lower()
-            base_url = str(model_cfg.get("base_url") or "").strip()
-        if not model_name:
-            return False
-        if provider in ("local-model", "moa", "ollama"):
-            # Offline/in-process providers are "usable" without a remote key.
-            return True
-        from zeb_cli.runtime_provider import resolve_runtime_provider
+        from zeb_chat.stores import IdentityStore
 
-        runtime = resolve_runtime_provider(requested=None, target_model=model_name)
-        rp = str(runtime.get("provider") or "").strip().lower()
-        if rp in ("local-model", "moa", "ollama"):
-            return True
-        return bool(
-            runtime.get("api_key")
-            or runtime.get("credential_pool")
-            or runtime.get("base_url")
-            or base_url
-        )
-    except Exception:  # noqa: BLE001
-        return False
+        preamble = IdentityStore().system_preamble()
+    except Exception:
+        preamble = ""
+    if not preamble:
+        return history
+    sys_msg = {"role": "system", "content": preamble}
+    if isinstance(history, list):
+        # Don't double-inject if it's already the leading system message.
+        if history and history[0].get("role") == "system" and history[0].get("content") == preamble:
+            return history
+        return [sys_msg] + history
+    return [sys_msg]
 
 
-def _build_remote_agent(cfg: dict, toolsets_list: list[str]):
+def _build_remote_agent(
+    cfg: dict,
+    toolsets_list: list[str],
+    *,
+    requested: str | None = None,
+    target_model: str | None = None,
+):
     from zeb_cli.fallback_config import get_fallback_chain
     from zeb_cli.runtime_provider import resolve_runtime_provider
     from run_agent import AIAgent
 
     model_cfg = cfg.get("model") or {}
     if isinstance(model_cfg, str):
-        effective_model = model_cfg
+        cfg_model = model_cfg
     else:
-        effective_model = model_cfg.get("default") or model_cfg.get("model") or ""
+        cfg_model = model_cfg.get("default") or model_cfg.get("model") or ""
+    effective_model = (target_model or "").strip() or cfg_model
 
-    runtime = resolve_runtime_provider(requested=None, target_model=effective_model or None)
+    runtime = resolve_runtime_provider(
+        requested=(requested or None), target_model=effective_model or None
+    )
     fallback = get_fallback_chain(cfg)
 
     return AIAgent(

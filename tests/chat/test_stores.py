@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import zeb_constants
-from zeb_chat.stores import ApiKeyStore, ChannelStore, SessionStore
+from zeb_chat.stores import (
+    ApiKeyStore,
+    ChannelStore,
+    IdentityStore,
+    RepoStore,
+    SessionStore,
+)
 
 
 def _point_home(monkeypatch, tmp_path):
@@ -50,6 +56,56 @@ def test_channel_store_roundtrip(monkeypatch, tmp_path):
     assert "token" not in listed[0]
 
     assert store.delete(created["id"]) is True
+    assert store.list() == []
+    assert store.delete("nope") is False
+
+
+def test_identity_store_roundtrip(monkeypatch, tmp_path):
+    _point_home(monkeypatch, tmp_path)
+    store = IdentityStore()
+    assert store.get()["onboarded"] is False
+    assert store.system_preamble() == ""
+
+    out = store.set({"who_am_i": "Johnny", "who_are_you": "Zeb", "mission": "Ship"})
+    assert out["onboarded"] is True
+    assert out["who_am_i"] == "Johnny"
+
+    # Persisted + preamble now renders identity + agency framing.
+    preamble = IdentityStore().system_preamble()
+    assert "Johnny" in preamble and "Ship" in preamble
+    assert "full agency" in preamble.lower()
+
+
+def test_identity_store_explicit_skip(monkeypatch, tmp_path):
+    _point_home(monkeypatch, tmp_path)
+    # Skipping onboarding still marks it done so the modal doesn't re-appear.
+    out = IdentityStore().set({"onboarded": True})
+    assert out["onboarded"] is True
+
+
+def test_repo_store_roundtrip(monkeypatch, tmp_path):
+    _point_home(monkeypatch, tmp_path)
+    store = RepoStore()
+    assert store.list() == []
+
+    entry = store.add(
+        {"full_name": "rhasspy/piper", "description": "TTS", "stars": 9, "language": "C++"}
+    )
+    assert entry["full_name"] == "rhasspy/piper"
+    assert entry["url"] == "https://github.com/rhasspy/piper"
+
+    assert len(store.list()) == 1
+    assert len(store.list(query="piper")) == 1
+    assert store.list(query="nope") == []
+
+    # De-dupe by full_name; no second entry created.
+    store.add({"full_name": "rhasspy/piper"})
+    assert len(store.list()) == 1
+
+    # Missing full_name is rejected.
+    assert store.add({"description": "x"}) is None
+
+    assert store.delete(entry["id"]) is True
     assert store.list() == []
     assert store.delete("nope") is False
 

@@ -130,9 +130,14 @@ def test_models_shape(client):
     assert "current" in body
     assert isinstance(body["available"], list)
     assert "connected" in body
-    # Zero models until a provider is actually connected.
-    if not body["connected"]:
-        assert body["available"] == []
+    # The local backbone is ALWAYS present, first, and the priority default —
+    # Zeb works with zero keys out of the box.
+    assert body["default"] == "local"
+    assert body["current"] == "local"
+    first = body["available"][0]
+    assert first["id"] == "local"
+    assert first["local"] is True
+    assert first["priority"] is True
 
 
 def test_skills_stacks(client):
@@ -215,6 +220,80 @@ def test_voice_speak_falls_back_to_browser(client):
 def test_voice_speak_missing_text(client):
     res = client.post("/api/voice/speak", headers=AUTH, json={})
     assert res.status_code == 400
+
+
+def test_identity_lifecycle(client):
+    # Fresh: not onboarded.
+    res = client.get("/api/identity", headers=AUTH)
+    assert res.status_code == 200
+    assert res.json()["onboarded"] is False
+
+    res = client.post(
+        "/api/identity",
+        headers=AUTH,
+        json={"who_am_i": "Johnny", "who_are_you": "Zeb", "mission": "Build"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["onboarded"] is True
+    assert body["who_am_i"] == "Johnny"
+    assert body["mission"] == "Build"
+
+    # Persisted across a fresh read.
+    assert client.get("/api/identity", headers=AUTH).json()["who_are_you"] == "Zeb"
+
+
+def test_identity_requires_key(client):
+    assert client.get("/api/identity").status_code == 401
+    assert client.post("/api/identity").status_code == 401
+
+
+def test_repos_lifecycle(client):
+    # Empty to start.
+    assert client.get("/api/repos", headers=AUTH).json()["repos"] == []
+
+    res = client.post(
+        "/api/repos",
+        headers=AUTH,
+        json={
+            "full_name": "rhasspy/piper",
+            "description": "Local neural TTS",
+            "stars": 11000,
+            "language": "C++",
+        },
+    )
+    assert res.status_code == 200
+    created = res.json()
+    assert created["full_name"] == "rhasspy/piper"
+    rid = created["id"]
+
+    repos = client.get("/api/repos", headers=AUTH).json()["repos"]
+    assert len(repos) == 1
+
+    # Search filters by name.
+    assert len(client.get("/api/repos", headers=AUTH, params={"q": "piper"}).json()["repos"]) == 1
+    assert client.get("/api/repos", headers=AUTH, params={"q": "nomatch"}).json()["repos"] == []
+
+    # De-dupe by full_name.
+    client.post("/api/repos", headers=AUTH, json={"full_name": "rhasspy/piper"})
+    assert len(client.get("/api/repos", headers=AUTH).json()["repos"]) == 1
+
+    assert client.delete(f"/api/repos/{rid}", headers=AUTH).json() == {"ok": True}
+    assert client.get("/api/repos", headers=AUTH).json()["repos"] == []
+
+
+def test_repos_add_requires_full_name(client):
+    res = client.post("/api/repos", headers=AUTH, json={"description": "x"})
+    assert res.status_code == 400
+
+
+def test_repos_scan_requires_query(client):
+    res = client.post("/api/repos/scan", headers=AUTH, json={})
+    assert res.status_code == 400
+
+
+def test_repos_requires_key(client):
+    assert client.get("/api/repos").status_code == 401
 
 
 def test_cron_shape(client):

@@ -200,46 +200,71 @@ async def write_file(request: Request):
 # --------------------------------------------------------------------------
 @router.get("/api/models")
 def models(request: Request):
-    """Report only models from providers that are actually connected.
+    """List the local backbone (always, as the priority default) + connected remotes.
 
-    The dashboard should show *zero* models out of the box — not the full
-    catalog of provider models the user could theoretically use. So we return
-    the configured model (if any) and whether a real provider credential is
-    present, never the unused provider list.
+    Philosophy: Zeb runs on its local GGUF backbone out of the box with no
+    keys. That local model is ALWAYS present and is the default/priority
+    option in the chat selector. Any API providers the user has actually
+    connected are listed after it as optional, faster backups the user can
+    pick per-request — they are never the default and never used unless
+    explicitly selected.
     """
     require_key(request)
-    current = ""
-    provider = ""
     cfg = {}
     try:
         from zeb_cli import config as _cfg
 
         cfg = _cfg.load_config() or {}
-        model_cfg = cfg.get("model")
-        if isinstance(model_cfg, dict):
-            current = str(model_cfg.get("default") or model_cfg.get("model") or "")
-            provider = str(model_cfg.get("provider") or "")
-        elif isinstance(model_cfg, str):
-            current = model_cfg
     except Exception:
-        current = ""
+        cfg = {}
 
+    # The always-on local backbone, first and default.
+    local_name = "Zeb Local"
+    try:
+        from agent.local_model_manager import local_model_display_name
+
+        local_name = "Zeb Local · " + local_model_display_name(cfg)
+    except Exception:
+        pass
+    available: list[dict] = [
+        {
+            "id": "local",
+            "name": local_name,
+            "provider": "local-model",
+            "connected": True,
+            "local": True,
+            "priority": True,
+        }
+    ]
+
+    # Connected remote providers (optional, user-selectable backups).
     connected = False
     try:
-        from zeb_cli.setup import _model_section_has_credentials
-
-        connected = bool(_model_section_has_credentials(cfg))
+        connected_ids = _connected_provider_ids()
+        # local-model is always in that set; the "real remote connected"
+        # signal is anything beyond it.
+        remotes = sorted(pid for pid in connected_ids if pid != "local-model")
+        connected = bool(remotes)
+        for pid in remotes:
+            available.append(
+                {
+                    "id": pid,
+                    "name": pid,
+                    "provider": pid,
+                    "connected": True,
+                    "local": False,
+                    "priority": False,
+                }
+            )
     except Exception:
         connected = False
 
-    available: list[dict] = []
-    # Zero models until a provider is genuinely connected. A configured-but-
-    # uncredentialed default is *not* surfaced (it would be an "unused"
-    # model); the always-on local backbone is the zero-config default and is
-    # communicated by the empty state, not listed as a connected provider.
-    if current and connected:
-        available.append({"id": current, "provider": provider or "configured", "connected": True})
-    return {"current": current, "available": available, "connected": connected}
+    return {
+        "current": "local",
+        "default": "local",
+        "available": available,
+        "connected": connected,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -602,6 +627,122 @@ async def voice_speak(request: Request):
     if not audio:
         return Response(status_code=204)
     return Response(content=audio, media_type="audio/wav")
+
+
+# --------------------------------------------------------------------------
+# Identity — first-boot onboarding ("Who am I / Who are you / Mission")
+# --------------------------------------------------------------------------
+@router.get("/api/identity")
+def get_identity(request: Request):
+    require_key(request)
+    try:
+        from zeb_chat.stores import IdentityStore
+
+        return IdentityStore().get()
+    except Exception as exc:
+        return {
+            "who_am_i": "",
+            "who_are_you": "",
+            "mission": "",
+            "onboarded": False,
+            "error": str(exc),
+        }
+
+
+@router.post("/api/identity")
+async def set_identity(request: Request):
+    require_key(request)
+    try:
+        from zeb_chat.stores import IdentityStore
+
+        body = await _json_body(request)
+        return IdentityStore().set(body)
+    except Exception as exc:
+        return {"onboarded": False, "error": str(exc)}
+
+
+# --------------------------------------------------------------------------
+# GitHub Repos — saved open-source repos + search + scan
+# --------------------------------------------------------------------------
+@router.get("/api/repos")
+def list_repos(request: Request, q: str | None = None):
+    require_key(request)
+    try:
+        from zeb_chat.stores import RepoStore
+
+        return {"repos": RepoStore().list(query=q or "")}
+    except Exception as exc:
+        return {"repos": [], "error": str(exc)}
+
+
+@router.post("/api/repos")
+async def add_repo(request: Request):
+    require_key(request)
+    try:
+        from zeb_chat.stores import RepoStore
+
+        body = await _json_body(request)
+        # Accept either a full repo dict or just a full_name.
+        if not body.get("full_name") and body.get("name"):
+            body["full_name"] = body["name"]
+        if not str(body.get("full_name") or "").strip():
+            raise HTTPException(status_code=400, detail="full_name required")
+        added = RepoStore().add(body)
+        if added is None:
+            raise HTTPException(status_code=400, detail="invalid repo")
+        return added
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@router.delete("/api/repos/{rid}")
+def delete_repo(rid: str, request: Request):
+    require_key(request)
+    try:
+        from zeb_chat.stores import RepoStore
+
+        return {"ok": bool(RepoStore().delete(rid))}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/api/repos/scan")
+async def scan_repos(request: Request):
+    """Describe a need → search GitHub → save matching open-source repos.
+
+    Saves every result into the RepoStore (de-duped) so the found repos show
+    up in the saved list immediately, ready for integration.
+    """
+    require_key(request)
+    body = await _json_body(request)
+    query = str(body.get("query", "") or body.get("q", "") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query required")
+    try:
+        from zeb_chat.github_scan import scan
+
+        result = scan(query, limit=int(body.get("limit") or 10))
+    except Exception as exc:
+        return {"results": [], "added": [], "error": str(exc)}
+
+    added = []
+    try:
+        from zeb_chat.stores import RepoStore
+
+        store = RepoStore()
+        for repo in result.get("results", []):
+            saved = store.add(repo)
+            if saved:
+                added.append(saved)
+    except Exception:
+        pass
+    return {
+        "results": result.get("results", []),
+        "added": added,
+        "error": result.get("error", ""),
+    }
 
 
 # --------------------------------------------------------------------------
