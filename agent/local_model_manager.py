@@ -35,14 +35,18 @@ logger = logging.getLogger(__name__)
 # ``local_model.repo_id`` / ``local_model.quant`` documentation has a
 # single source of truth to point at.
 #
-# Phi-3-mini-4k in a 4-bit quant is ~2.3GB — the sweet spot for a
-# zero-config default: small enough to download and load on a laptop/VM,
-# capable enough to hold a real conversation and follow simple tool calls.
-# (Set local_model.repo_id to "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF" +
-# quant "Q4_K_M" for an even smaller ~670MB fallback on tiny hosts.)
-DEFAULT_LOCAL_MODEL_REPO = "microsoft/Phi-3-mini-4k-instruct-gguf"
-DEFAULT_LOCAL_MODEL_QUANT = "q4"  # matches Phi-3-mini-4k-instruct-q4.gguf (~2.3GB)
-DEFAULT_LOCAL_MODEL_CTX = 4096  # Phi-3-mini-4k's trained context window
+# ONE capable model for everything (chat + background autonomy + aux), run
+# "at lower capacity" for efficiency rather than juggling several smaller
+# weights. Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB) is strong on
+# reasoning and tool calls; loaded with mmap + a reduced context window +
+# a fraction of the CPU cores (see agent/llama_cpp_adapter.py), it stays
+# CPU/RAM-friendly while keeping quality. bartowski's repo is single-file
+# per quant, so the download is one clean file.
+# (For tiny hosts, set local_model.repo_id to
+# "microsoft/Phi-3-mini-4k-instruct-gguf" + quant "q4" for a ~2.3GB model.)
+DEFAULT_LOCAL_MODEL_REPO = "bartowski/Qwen2.5-7B-Instruct-GGUF"
+DEFAULT_LOCAL_MODEL_QUANT = "Q4_K_M"  # single-file ~4.7GB
+DEFAULT_LOCAL_MODEL_CTX = 4096  # reduced context = lower RAM, "lower capacity"
 
 ProgressCallback = Callable[[str], None]
 

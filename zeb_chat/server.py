@@ -393,6 +393,13 @@ def create_app() -> FastAPI:
 
         message = body.get("message")
         history = body.get("history")
+        # Optional explicit model selection from the chat dropdown. Absent /
+        # "local" => the local backbone (the default). Anything else names a
+        # connected remote provider to use for THIS request only.
+        provider = body.get("provider")
+        model = body.get("model")
+        provider = provider if isinstance(provider, str) else None
+        model = model if isinstance(model, str) else None
         if not isinstance(message, str) or not message.strip():
             return JSONResponse(
                 {"error": "message must be a non-empty string"}, status_code=400
@@ -414,7 +421,9 @@ def create_app() -> FastAPI:
         if _activity is not None:
             _activity.begin("processing")
         try:
-            reply = await run_in_threadpool(run_chat_turn, message, history)
+            reply = await run_in_threadpool(
+                run_chat_turn, message, history, provider, model
+            )
         finally:
             if _activity is not None:
                 _activity.end()

@@ -80,13 +80,41 @@ class LocalModelLoadError(RuntimeError):
     """Raised when llama-cpp-python or the GGUF weights can't be loaded."""
 
 
-def _load_model(model_path: str, *, n_ctx: int, n_gpu_layers: int) -> Any:
+def _default_threads() -> int:
+    """A CPU-thread count that leaves headroom instead of pegging every core.
+
+    Zeb runs one *larger* model at "lower capacity" for efficiency: using
+    roughly half the cores (capped) keeps the box responsive for the rest of
+    the agent + background bots while still generating at a usable rate.
+    """
+    try:
+        import os
+
+        cpus = os.cpu_count() or 4
+    except Exception:
+        cpus = 4
+    return max(2, min(8, cpus // 2))
+
+
+def _load_model(
+    model_path: str,
+    *,
+    n_ctx: int,
+    n_gpu_layers: int,
+    n_threads: int | None = None,
+    use_mmap: bool = True,
+) -> Any:
     """Load (or reuse) the process-wide ``llama_cpp.Llama`` instance.
 
-    Kept as a single module-level singleton, guarded by a lock: a ~2-4B
-    quantized model already takes real memory and load time (seconds), so
-    every caller in the process should share one loaded instance rather
-    than each constructing (and leaking) its own.
+    Kept as a single module-level singleton, guarded by a lock: the model
+    takes real memory and load time (seconds), so every caller in the
+    process — interactive chat AND the background autonomy bots — shares one
+    loaded instance rather than each constructing (and leaking) its own.
+    That single shared weight is the whole point of "one model, not three".
+
+    Loaded for efficiency: ``use_mmap`` keeps weights memory-mapped (lower
+    resident RAM) and ``n_threads`` defaults to a fraction of the cores so
+    the model runs at "lower capacity" without starving everything else.
     """
     global _loaded_model, _loaded_model_path
     with _model_lock:
@@ -102,8 +130,15 @@ def _load_model(model_path: str, *, n_ctx: int, n_gpu_layers: int) -> Any:
                 "`pip install llama-cpp-python`."
             )
 
-        logger.info("Loading local GGUF model from %s (n_ctx=%d)", model_path, n_ctx)
-        _record("model.loading", f"{model_path.split('/')[-1]} (n_ctx={n_ctx})")
+        threads = n_threads or _default_threads()
+        logger.info(
+            "Loading local GGUF model from %s (n_ctx=%d, n_threads=%d, mmap=%s)",
+            model_path, n_ctx, threads, use_mmap,
+        )
+        _record(
+            "model.loading",
+            f"{model_path.split('/')[-1]} (n_ctx={n_ctx}, threads={threads})",
+        )
         _t0 = time.time()
         try:
             _loaded_model = llama_cpp.Llama(
@@ -114,6 +149,8 @@ def _load_model(model_path: str, *, n_ctx: int, n_gpu_layers: int) -> Any:
                 # otherwise. Either way this must never raise — it's the
                 # backbone with no fallback of its own.
                 n_gpu_layers=n_gpu_layers,
+                n_threads=threads,
+                use_mmap=use_mmap,
                 verbose=False,
             )
         except Exception as exc:
@@ -271,12 +308,20 @@ class LlamaCppClient:
         self,
         *,
         model_path: str,
-        n_ctx: int = 8192,
+        n_ctx: int = 4096,
         n_gpu_layers: int = -1,
+        n_threads: int | None = None,
+        use_mmap: bool = True,
         **_ignored: Any,
     ):
         self.model_path = model_path
-        self._llama = _load_model(model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers)
+        self._llama = _load_model(
+            model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            n_threads=n_threads,
+            use_mmap=use_mmap,
+        )
         self.chat = SimpleNamespace(completions=_LocalChatCompletions(self))
 
     def ping(self, timeout: float = 30.0) -> bool:
