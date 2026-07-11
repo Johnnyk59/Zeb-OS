@@ -90,14 +90,57 @@ def run_chat_turn(
             return f"[Zeb chat error: {exc}]"
 
 
+def _model_awareness_preamble() -> str:
+    """A short, factual note about Zeb's own model configuration.
+
+    Injected so that when a user asks "what model are you running?" or "what's
+    your context window?", Zeb answers from its real configuration — the model
+    name, context-window size, and config file path — instead of guessing or
+    dumping Python/interpreter environment details.
+    """
+    try:
+        from zeb_chat.dashboard_api import build_model_info
+
+        info = build_model_info()
+    except Exception:
+        return ""
+    backbone = info.get("backbone") or info.get("name") or "a local GGUF model"
+    ctx_human = info.get("context_window_human") or "unknown"
+    cfg_path = info.get("config_path") or "~/.zeb/config.yaml"
+    lines = [
+        "Your own runtime configuration (report these verbatim when the user "
+        "asks what model you are, your context window, or how you are set up — "
+        "do NOT describe the Python interpreter, OS, or process environment):",
+        f"- Model / backbone: {backbone}",
+        f"- Context window: {ctx_human}",
+        f"- Provider: {info.get('provider') or 'local-model'}",
+        f"- Config file: {cfg_path}",
+    ]
+    if info.get("weights_path"):
+        lines.append(f"- Weights file: {info['weights_path']}")
+    if info.get("remote_connected") and info.get("remote_providers"):
+        lines.append(
+            "- Connected remote providers (optional, only when selected): "
+            + ", ".join(info["remote_providers"])
+        )
+    return "\n".join(lines)
+
+
 def _inject_identity(history: list[dict] | None) -> list[dict] | None:
-    """Prepend Zeb's learned identity as a leading system message, if set."""
+    """Prepend Zeb's model-awareness note + learned identity as a leading system message."""
+    parts: list[str] = []
+    awareness = _model_awareness_preamble()
+    if awareness:
+        parts.append(awareness)
     try:
         from zeb_chat.stores import IdentityStore
 
-        preamble = IdentityStore().system_preamble()
+        identity = IdentityStore().system_preamble()
     except Exception:
-        preamble = ""
+        identity = ""
+    if identity:
+        parts.append(identity)
+    preamble = "\n\n".join(parts).strip()
     if not preamble:
         return history
     sys_msg = {"role": "system", "content": preamble}

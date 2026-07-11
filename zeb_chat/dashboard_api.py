@@ -129,11 +129,25 @@ def delete_session(sid: str, request: Request):
 # --------------------------------------------------------------------------
 # Files (full workspace access)
 # --------------------------------------------------------------------------
+def _default_files_root() -> str:
+    """Directory the Files tab opens at when no path is supplied.
+
+    Prefer ``/opt`` (the tidy top of a Docker deployment tree) so the browser
+    lands on a clean, shallow view rather than deep inside ``/opt/zeb``. Fall
+    back to the current working directory on hosts without ``/opt`` (local
+    dev, macOS, Windows).
+    """
+    for candidate in ("/opt",):
+        if os.path.isdir(candidate):
+            return candidate
+    return os.getcwd()
+
+
 @router.get("/api/files")
 def list_files(request: Request, path: str | None = None):
     require_key(request)
     try:
-        target = os.path.abspath(path or os.getcwd())
+        target = os.path.abspath(path or _default_files_root())
         entries = []
         try:
             names = os.listdir(target)
@@ -239,6 +253,7 @@ def models(request: Request):
 
     # Connected remote providers (optional, user-selectable backups).
     connected = False
+    seen_ids = {"local"}
     try:
         connected_ids = _connected_provider_ids()
         # local-model is always in that set; the "real remote connected"
@@ -256,8 +271,32 @@ def models(request: Request):
                     "priority": False,
                 }
             )
+            seen_ids.add(pid)
     except Exception:
         connected = False
+
+    # An Anthropic subscription (OAuth token) bills to plan credits rather than
+    # a metered key, and isn't picked up by the api-key provider scan above, so
+    # surface it explicitly as a selectable remote when connected.
+    try:
+        from zeb_cli.config import get_env_value_prefer_dotenv
+
+        if (get_env_value_prefer_dotenv("CLAUDE_CODE_OAUTH_TOKEN") or "").strip():
+            if "anthropic" not in seen_ids:
+                available.append(
+                    {
+                        "id": "anthropic",
+                        "name": "Anthropic (subscription)",
+                        "provider": "anthropic",
+                        "connected": True,
+                        "local": False,
+                        "priority": False,
+                        "subscription": True,
+                    }
+                )
+            connected = True
+    except Exception:
+        pass
 
     return {
         "current": "local",
@@ -265,6 +304,186 @@ def models(request: Request):
         "available": available,
         "connected": connected,
     }
+
+
+def _human_ctx(n: int) -> str:
+    """Render a context-window token count as a compact label (e.g. 65536 -> '64K')."""
+    try:
+        n = int(n)
+    except Exception:
+        return str(n)
+    if n <= 0:
+        return "unknown"
+    if n % 1024 == 0 and n >= 1024:
+        k = n // 1024
+        if k % 1024 == 0:
+            return f"{k // 1024}M tokens"
+        return f"{k}K tokens"
+    if n >= 1000:
+        return f"{n // 1000}K tokens"
+    return f"{n} tokens"
+
+
+def build_model_info() -> dict:
+    """Describe the model Zeb is actually running on, for /status and self-awareness.
+
+    Reports the human model name, the real context-window size, and the config
+    file path — the facts a user (or Zeb itself) needs to answer "what model
+    are you and how are you configured?" accurately, instead of leaking Python
+    environment details. Fail-open: every field degrades independently.
+    """
+    info: dict = {
+        "name": "Zeb Local",
+        "backbone": "",
+        "provider": "local-model",
+        "context_window": 0,
+        "context_window_human": "unknown",
+        "quant": "",
+        "repo_id": "",
+        "config_path": "",
+        "weights_path": "",
+        "weights_ready": False,
+        "loaded": False,
+        "remote_connected": False,
+        "remote_providers": [],
+    }
+
+    cfg = {}
+    try:
+        from zeb_cli.config import get_config_path, load_config
+
+        cfg = load_config() or {}
+        try:
+            info["config_path"] = str(get_config_path())
+        except Exception:
+            pass
+    except Exception:
+        cfg = {}
+
+    try:
+        from agent.local_model_manager import (
+            DEFAULT_LOCAL_MODEL_CTX,
+            get_local_model_path,
+            local_model_display_name,
+            resolved_n_ctx,
+            resolved_repo_quant,
+        )
+
+        info["backbone"] = local_model_display_name(cfg)
+        info["name"] = "Zeb Local · " + info["backbone"]
+        repo, quant = resolved_repo_quant(cfg)
+        info["repo_id"] = repo
+        info["quant"] = quant
+        try:
+            ctx = int(resolved_n_ctx(cfg))
+        except Exception:
+            ctx = int(DEFAULT_LOCAL_MODEL_CTX)
+        info["context_window"] = ctx
+        info["context_window_human"] = _human_ctx(ctx)
+        p = get_local_model_path(cfg)
+        if p is not None:
+            info["weights_ready"] = True
+            info["weights_path"] = str(p)
+    except Exception:
+        pass
+
+    try:
+        from agent.llama_cpp_adapter import is_model_loaded
+
+        info["loaded"] = bool(is_model_loaded())
+    except Exception:
+        pass
+
+    try:
+        connected_ids = _connected_provider_ids()
+        remotes = sorted(pid for pid in connected_ids if pid != "local-model")
+        info["remote_providers"] = remotes
+        info["remote_connected"] = bool(remotes)
+    except Exception:
+        pass
+
+    return info
+
+
+@router.get("/api/modelinfo")
+def model_info(request: Request):
+    """Live self-description of the active model (name, context window, config path)."""
+    require_key(request)
+    try:
+        return build_model_info()
+    except Exception as exc:  # pragma: no cover - fail-open
+        return {"name": "Zeb Local", "error": str(exc)}
+
+
+# --------------------------------------------------------------------------
+# Anthropic subscription — connect via OAuth subscription token
+# --------------------------------------------------------------------------
+_ANTHROPIC_OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+
+
+@router.get("/api/anthropic/status")
+def anthropic_status(request: Request):
+    """Report whether an Anthropic subscription token is connected.
+
+    A connected subscription routes chat through the user's Claude plan
+    credits (via ``CLAUDE_CODE_OAUTH_TOKEN``) instead of a metered API key.
+    """
+    require_key(request)
+    connected = False
+    masked = ""
+    try:
+        from zeb_cli.config import get_env_value_prefer_dotenv
+
+        token = (get_env_value_prefer_dotenv(_ANTHROPIC_OAUTH_ENV) or "").strip()
+        if token:
+            connected = True
+            masked = (token[:6] + "…" + token[-4:]) if len(token) > 12 else "connected"
+    except Exception as exc:
+        return {"connected": False, "error": str(exc)}
+    return {"connected": connected, "masked": masked, "env_var": _ANTHROPIC_OAUTH_ENV}
+
+
+@router.post("/api/anthropic/connect")
+async def anthropic_connect(request: Request):
+    """Store a Claude subscription OAuth token so chat bills to plan credits.
+
+    The token is produced by ``claude setup-token`` (Claude Code's subscription
+    login). We persist it to ``~/.zeb/.env`` as ``CLAUDE_CODE_OAUTH_TOKEN`` —
+    the same variable the provider registry already recognizes — so Anthropic
+    requests authenticate against the user's subscription rather than a
+    pay-as-you-go API key.
+    """
+    require_key(request)
+    body = await _json_body(request)
+    token = str(body.get("token", "") or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="token required")
+    # OAuth subscription tokens are long and start with a recognizable prefix;
+    # accept liberally but reject obviously-wrong short values.
+    if len(token) < 20:
+        raise HTTPException(status_code=400, detail="token looks too short to be valid")
+    try:
+        from zeb_cli.config import save_env_value
+
+        save_env_value(_ANTHROPIC_OAUTH_ENV, token)
+        os.environ[_ANTHROPIC_OAUTH_ENV] = token
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "connected": True}
+
+
+@router.post("/api/anthropic/disconnect")
+def anthropic_disconnect(request: Request):
+    """Remove the stored Anthropic subscription token."""
+    require_key(request)
+    try:
+        from zeb_cli.config import save_env_value
+
+        save_env_value(_ANTHROPIC_OAUTH_ENV, "")
+        os.environ.pop(_ANTHROPIC_OAUTH_ENV, None)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "connected": False}
 
 
 # --------------------------------------------------------------------------
