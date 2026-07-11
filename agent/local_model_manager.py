@@ -7,14 +7,22 @@ the always-on local backbone, downloading it once into
 after (mirrors the ``cache/images``, ``cache/videos`` convention in
 zeb_constants.get_zeb_home()).
 
-The default model is **Qwen2.5-7B-Instruct** in a 4-bit GGUF quant (~4.7GB)
-with a 64K context window — chosen for strong reasoning, tool-call support,
-and the ability to handle full conversations with the complete agent system
-prompt.  A fresh container downloads it once on first boot and caches it
-forever; users can override every part of this via ``config.yaml``'s
-``local_model:`` section, or point ``local_model.path`` at any GGUF file
-already on disk to skip the download path entirely (air-gapped installs,
-custom fine-tunes).
+The default model is **Qwen2.5-7B-Instruct** in a 4-bit GGUF quant
+(~4.7GB) with a 128K context window.  It is chosen deliberately for
+long-context work on a modest server: Qwen2.5 uses grouped-query attention
+(GQA), so its KV cache stays small (~0.057 MB/token → only ~7.5GB at the
+full 128K).  Weights + cache together land near ~12GB at 128K, so it runs
+comfortably in the background of a typical VPS (e.g. 8 vCPU / 32GB) while
+leaving plenty of headroom.  A fresh container downloads it once on first
+boot and caches it forever; users can override every part of this via
+``config.yaml``'s ``local_model:`` section, or point ``local_model.path``
+at any GGUF file already on disk to skip the download path entirely
+(air-gapped installs, custom fine-tunes).
+
+Note on memory: KV cache scales linearly with ``n_ctx``.  Lower
+``local_model.n_ctx`` to reduce RAM (64K ≈ 3.8GB cache).  Avoid models
+without GQA (e.g. Phi-3.5-mini) for long context — their KV cache is ~8×
+larger per token (~50GB at 128K), which won't fit on a 32GB host.
 """
 
 from __future__ import annotations
@@ -36,16 +44,16 @@ logger = logging.getLogger(__name__)
 # single source of truth to point at.
 #
 # ONE capable model for everything (chat + background autonomy + aux).
-# Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB) supports 128K context
-# natively, is strong on reasoning and tool calls, and bartowski's repo
-# provides single-file-per-quant for clean downloads.  Loaded with mmap +
-# a fraction of the CPU cores (see agent/llama_cpp_adapter.py) for
-# efficiency.
-# (For tiny hosts, set local_model.repo_id to
-# "microsoft/Phi-3-mini-4k-instruct-gguf" + quant "q4" for a ~2.3GB model.)
+# Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB) supports a 128K context
+# window and — thanks to grouped-query attention — keeps its KV cache tiny
+# (~7.5GB even at the full 128K), so long-context runs fit comfortably on a
+# modest VPS. bartowski's repo provides single-file-per-quant for clean
+# downloads. Loaded with mmap + a fraction of the CPU cores (see
+# agent/llama_cpp_adapter.py) so it stays a background citizen, not a full
+# load.
 DEFAULT_LOCAL_MODEL_REPO = "bartowski/Qwen2.5-7B-Instruct-GGUF"
 DEFAULT_LOCAL_MODEL_QUANT = "Q4_K_M"  # single-file ~4.7GB
-DEFAULT_LOCAL_MODEL_CTX = 65536  # Qwen2.5-7B supports 128K; 64K balances capability vs RAM
+DEFAULT_LOCAL_MODEL_CTX = 131072  # Qwen2.5-7B native 128K; ~7.5GB KV cache via GQA
 
 ProgressCallback = Callable[[str], None]
 
