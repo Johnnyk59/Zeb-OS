@@ -174,6 +174,27 @@ def read_file(request: Request, path: str | None = None):
         return {"path": path or "", "content": "", "truncated": False, "error": str(exc)}
 
 
+@router.post("/api/files/write")
+async def write_file(request: Request):
+    require_key(request)
+    try:
+        body = await _json_body(request)
+        path = str(body.get("path", "") or "")
+        content = body.get("content", "")
+        if not path:
+            raise HTTPException(status_code=400, detail="path required")
+        if not isinstance(content, str):
+            raise HTTPException(status_code=400, detail="content must be a string")
+        target = os.path.abspath(path)
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        return {"ok": True, "path": target}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 # --------------------------------------------------------------------------
 # Models
 # --------------------------------------------------------------------------
@@ -323,7 +344,46 @@ def channels(request: Request):
                 pass
     except Exception as exc:
         return {"telegram": {"configured": False, "detail": str(exc)}}
-    return {"telegram": {"configured": configured, "detail": detail}}
+    channel_list: list = []
+    try:
+        from zeb_chat.stores import ChannelStore
+
+        channel_list = ChannelStore().list()
+    except Exception:
+        channel_list = []
+    return {
+        "telegram": {"configured": configured, "detail": detail},
+        "channels": channel_list,
+    }
+
+
+@router.post("/api/channels")
+async def create_channel(request: Request):
+    require_key(request)
+    try:
+        from zeb_chat.stores import ChannelStore
+
+        body = await _json_body(request)
+        name = str(body.get("name", "") or "").strip()
+        token = str(body.get("token", "") or "").strip()
+        if not name or not token:
+            raise HTTPException(status_code=400, detail="name and token required")
+        return ChannelStore().add(name, token, str(body.get("kind", "telegram") or "telegram"))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@router.delete("/api/channels/{cid}")
+def delete_channel(cid: str, request: Request):
+    require_key(request)
+    try:
+        from zeb_chat.stores import ChannelStore
+
+        return {"ok": bool(ChannelStore().delete(cid))}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 # --------------------------------------------------------------------------

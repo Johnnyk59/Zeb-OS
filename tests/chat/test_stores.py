@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import zeb_constants
-from zeb_chat.stores import ApiKeyStore, SessionStore
+from zeb_chat.stores import ApiKeyStore, ChannelStore, SessionStore
 
 
 def _point_home(monkeypatch, tmp_path):
@@ -33,6 +33,25 @@ def test_api_key_store_short_key_mask(monkeypatch, tmp_path):
     _point_home(monkeypatch, tmp_path)
     created = ApiKeyStore().add("abc", "short")
     assert created["masked"] == "•••"
+
+
+def test_channel_store_roundtrip(monkeypatch, tmp_path):
+    _point_home(monkeypatch, tmp_path)
+    store = ChannelStore()
+    created = store.add("My Bot", "123456:AAAAtokenvaluehere", "telegram")
+    assert created["name"] == "My Bot"
+    assert created["kind"] == "telegram"
+    assert "token" not in created  # public view never leaks the raw token
+    assert created["masked"] == "1234…here"
+
+    listed = store.list()
+    assert len(listed) == 1
+    assert listed[0]["id"] == created["id"]
+    assert "token" not in listed[0]
+
+    assert store.delete(created["id"]) is True
+    assert store.list() == []
+    assert store.delete("nope") is False
 
 
 def test_session_store_roundtrip(monkeypatch, tmp_path):

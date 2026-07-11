@@ -131,6 +131,66 @@ class ApiKeyStore:
             return False
 
 
+class ChannelStore:
+    """User-added messaging channels under ``chat/channels.json``.
+
+    Each entry is a name + a token (e.g. a Telegram bot token). Tokens are
+    masked on read, mirroring ``ApiKeyStore``.
+    """
+
+    def __init__(self, base_dir: Path | None = None) -> None:
+        self._path = (Path(base_dir) if base_dir else _chat_dir()) / "channels.json"
+
+    def _load(self) -> list:
+        data = _read_json(self._path, [])
+        return data if isinstance(data, list) else []
+
+    def add(self, name: str, token: str, kind: str = "telegram") -> dict:
+        entry = {
+            "id": uuid.uuid4().hex,
+            "name": str(name or ""),
+            "kind": str(kind or "telegram"),
+            "token": str(token or ""),
+            "masked": _mask(token),
+            "created_at": time.time(),
+        }
+        try:
+            items = self._load()
+            items.append(entry)
+            _atomic_write(self._path, json.dumps(items, indent=2), mode=0o600)
+        except Exception:
+            pass
+        return self._public(entry)
+
+    @staticmethod
+    def _public(entry: dict) -> dict:
+        return {
+            "id": entry.get("id"),
+            "name": entry.get("name", ""),
+            "kind": entry.get("kind", "telegram"),
+            "masked": entry.get("masked", "•••"),
+            "created_at": entry.get("created_at"),
+        }
+
+    def list(self) -> list:
+        try:
+            return [self._public(e) for e in self._load() if isinstance(e, dict)]
+        except Exception:
+            return []
+
+    def delete(self, id: str) -> bool:
+        try:
+            items = self._load()
+            remaining = [e for e in items if e.get("id") != id]
+            if len(remaining) == len(items):
+                return False
+            return _atomic_write(
+                self._path, json.dumps(remaining, indent=2), mode=0o600
+            )
+        except Exception:
+            return False
+
+
 class SessionStore:
     """Chat sessions, one JSON file per session under ``chat/sessions/``."""
 
