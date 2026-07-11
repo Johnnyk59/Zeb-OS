@@ -197,6 +197,30 @@ model:
 # worktree_sync: false  # Branch from local HEAD (offline / pinned base)
 
 # =============================================================================
+# Local GGUF Backbone (always-on, zero API keys)
+# =============================================================================
+# The offline model Zeb runs when no remote provider is selected. It powers
+# chat, background bots, and autonomous tasks with no keys and no network.
+# Downloads once on first startup into <zeb_home>/models/gguf/ and is cached.
+#
+# The default is Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB), which natively
+# supports a 128K context window. n_ctx is set to 64K by default — enough to
+# hold the full agent system prompt, tools, context files, and a long
+# conversation, and at/above the 64K minimum Zeb requires for tool-calling.
+#
+# All fields are optional; the defaults below are what Zeb uses out of the box.
+# local_model:
+#   repo_id: "bartowski/Qwen2.5-7B-Instruct-GGUF"
+#   quant: "Q4_K_M"
+#   # path: "/abs/path/to/model.gguf"   # Use a GGUF already on disk (skips download)
+#   n_ctx: 65536                          # Context window. Lower to save RAM.
+#   n_threads: 0                          # 0 => auto (~half the cores, capped)
+#
+# For a lighter host, Phi-3.5-mini also has a 128K context in a ~2.3GB quant:
+#   repo_id: "microsoft/Phi-3.5-mini-instruct-gguf"
+#   quant: "Q4_K_M"
+
+# =============================================================================
 # Terminal Tool Configuration
 # =============================================================================
 # Choose ONE of the following terminal configurations by uncommenting it.

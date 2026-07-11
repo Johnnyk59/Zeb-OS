@@ -913,18 +913,20 @@ DEFAULT_CONFIG = {
     # This is Zeb's PRIMARY brain: chat, background bots, and autonomous
     # tasks all run on this one model with zero API keys. repo_id/quant pick
     # the default download; path overrides with a GGUF already on disk. The
-    # default is a single capable Qwen2.5-7B 4-bit quant (~4.7GB), run "at
-    # lower capacity" (reduced n_ctx + mmap + a fraction of the CPU cores)
-    # so one good model covers everything without high RAM/CPU. Tune n_ctx /
-    # n_threads to trade quality for resource use (blank => efficient
-    # defaults in llama_cpp_adapter.py).
-    # (repo_id/quant mirror DEFAULT_LOCAL_MODEL_* in local_model_manager.py;
-    # leave a field blank to fall back to that module-level default.)
+    # default is a single capable Qwen2.5-7B 4-bit quant (~4.7GB), which
+    # natively supports a 128K context window. n_ctx is set to 64K — enough
+    # to hold the full agent system prompt, tools, context files, and a long
+    # conversation, and above the 64K minimum Zeb requires for tool-calling.
+    # Loaded with mmap + a fraction of the CPU cores so it stays RAM/CPU
+    # friendly. Lower n_ctx to trade context length for RAM.
+    # (repo_id/quant/n_ctx mirror DEFAULT_LOCAL_MODEL_* in
+    # local_model_manager.py; leave a field blank/0 to fall back to that
+    # module-level default.)
     "local_model": {
         "repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
         "quant": "Q4_K_M",
         "path": "",
-        "n_ctx": 4096,
+        "n_ctx": 65536,
         "n_threads": 0,  # 0 => auto (about half the cores, capped)
     },
     # Background self-diagnosis/auto-repair loop for the always-on gateway

@@ -4628,13 +4628,22 @@ def resolve_provider_client(
         from agent.local_model_manager import (
             LocalModelUnavailable,
             ensure_local_model_weights,
+            resolved_n_ctx,
         )
 
         try:
             from zeb_cli.config import load_config as _load_lm_cfg
 
-            model_path = ensure_local_model_weights(_load_lm_cfg())
-            client = LlamaCppClient(model_path=str(model_path))
+            _lm_cfg = _load_lm_cfg()
+            model_path = ensure_local_model_weights(_lm_cfg)
+            # Pass n_ctx from config: the loaded llama.cpp model is a
+            # process-wide singleton keyed on path, so whichever client
+            # constructs first pins the context window for everyone. Without
+            # this, an auxiliary call that loads first would cap the shared
+            # model at the adapter's 4K default.
+            client = LlamaCppClient(
+                model_path=str(model_path), n_ctx=resolved_n_ctx(_lm_cfg)
+            )
         except (LocalModelUnavailable, LocalModelLoadError) as exc:
             logger.warning("resolve_provider_client: local-model unavailable: %s", exc)
             return None, None
