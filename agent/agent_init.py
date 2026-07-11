@@ -871,6 +871,7 @@ def init_agent(
         from agent.local_model_manager import (
             LocalModelUnavailable,
             ensure_local_model_weights,
+            resolved_n_ctx,
         )
 
         agent.api_mode = "chat_completions"
@@ -882,10 +883,14 @@ def init_agent(
                 if getattr(agent, "tool_progress_callback", None) and not agent.quiet_mode
                 else None
             )
+            _lm_cfg = _load_lm_cfg()
             _model_path = ensure_local_model_weights(
-                _load_lm_cfg(), progress_callback=_lm_progress
+                _lm_cfg, progress_callback=_lm_progress
             )
-            agent.client = LlamaCppClient(model_path=str(_model_path))
+            agent.client = LlamaCppClient(
+                model_path=str(_model_path),
+                n_ctx=resolved_n_ctx(_lm_cfg),
+            )
         except (LocalModelUnavailable, LocalModelLoadError) as _lm_exc:
             raise RuntimeError(
                 f"Local model backbone unavailable: {_lm_exc}"
@@ -1878,11 +1883,9 @@ def init_agent(
     agent.codex_app_server_auto_compaction = codex_app_server_auto_compaction
 
     # Reject models whose context window is below the minimum required
-    # for reliable tool-calling workflows (64K tokens).  The local GGUF
-    # backbone is exempt: it runs chat-only (no tools) on a small context
-    # window by design and must never be blocked by this gate.
+    # for reliable tool-calling workflows (64K tokens).
     _ctx = getattr(agent.context_compressor, "context_length", 0)
-    if _ctx and _ctx < MINIMUM_CONTEXT_LENGTH and agent.provider != "local-model":
+    if _ctx and _ctx < MINIMUM_CONTEXT_LENGTH:
         raise ValueError(
             f"Model {agent.model} has a context window of {_ctx:,} tokens, "
             f"which is below the minimum {MINIMUM_CONTEXT_LENGTH:,} required "

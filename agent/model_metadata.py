@@ -1936,7 +1936,8 @@ def get_model_context_length(
                     return ctx
         except Exception:
             pass
-        return 4096
+        from agent.local_model_manager import DEFAULT_LOCAL_MODEL_CTX
+        return DEFAULT_LOCAL_MODEL_CTX
 
     # 0a. MoA virtual provider — ``model`` is a preset name, not a real model,
     # and ``base_url`` is the local virtual endpoint, so every probe below would
