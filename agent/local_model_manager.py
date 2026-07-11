@@ -7,11 +7,11 @@ the always-on local backbone, downloading it once into
 after (mirrors the ``cache/images``, ``cache/videos`` convention in
 zeb_constants.get_zeb_home()).
 
-The default model is Microsoft's **Phi-3-mini** in a small 4-bit GGUF quant
-— chosen so a fresh container can download it quickly and run it acceptably
-on CPU-only hardware with no configuration at all: the user opens the chat
-UI, types "yo", and gets a reply from a model that fetched itself on first
-boot. Users can override every part of this via ``config.yaml``'s
+The default model is **Qwen2.5-7B-Instruct** in a 4-bit GGUF quant (~4.7GB)
+with a 64K context window — chosen for strong reasoning, tool-call support,
+and the ability to handle full conversations with the complete agent system
+prompt.  A fresh container downloads it once on first boot and caches it
+forever; users can override every part of this via ``config.yaml``'s
 ``local_model:`` section, or point ``local_model.path`` at any GGUF file
 already on disk to skip the download path entirely (air-gapped installs,
 custom fine-tunes).
@@ -35,18 +35,17 @@ logger = logging.getLogger(__name__)
 # ``local_model.repo_id`` / ``local_model.quant`` documentation has a
 # single source of truth to point at.
 #
-# ONE capable model for everything (chat + background autonomy + aux), run
-# "at lower capacity" for efficiency rather than juggling several smaller
-# weights. Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB) is strong on
-# reasoning and tool calls; loaded with mmap + a reduced context window +
-# a fraction of the CPU cores (see agent/llama_cpp_adapter.py), it stays
-# CPU/RAM-friendly while keeping quality. bartowski's repo is single-file
-# per quant, so the download is one clean file.
+# ONE capable model for everything (chat + background autonomy + aux).
+# Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB) supports 128K context
+# natively, is strong on reasoning and tool calls, and bartowski's repo
+# provides single-file-per-quant for clean downloads.  Loaded with mmap +
+# a fraction of the CPU cores (see agent/llama_cpp_adapter.py) for
+# efficiency.
 # (For tiny hosts, set local_model.repo_id to
 # "microsoft/Phi-3-mini-4k-instruct-gguf" + quant "q4" for a ~2.3GB model.)
 DEFAULT_LOCAL_MODEL_REPO = "bartowski/Qwen2.5-7B-Instruct-GGUF"
 DEFAULT_LOCAL_MODEL_QUANT = "Q4_K_M"  # single-file ~4.7GB
-DEFAULT_LOCAL_MODEL_CTX = 4096  # reduced context = lower RAM, "lower capacity"
+DEFAULT_LOCAL_MODEL_CTX = 65536  # Qwen2.5-7B supports 128K; 64K balances capability vs RAM
 
 ProgressCallback = Callable[[str], None]
 
@@ -102,6 +101,15 @@ def resolved_repo_quant(config: dict[str, Any] | None = None) -> tuple[str, str]
     repo = (lm.get("repo_id") or DEFAULT_LOCAL_MODEL_REPO).strip()
     quant = (lm.get("quant") or DEFAULT_LOCAL_MODEL_QUANT).strip()
     return repo, quant
+
+
+def resolved_n_ctx(config: dict[str, Any] | None = None) -> int:
+    """Return the context window size for the local model, applying defaults."""
+    lm = _local_model_config(config)
+    val = lm.get("n_ctx") or lm.get("context_length")
+    if isinstance(val, int) and val > 0:
+        return val
+    return DEFAULT_LOCAL_MODEL_CTX
 
 
 def local_model_display_name(config: dict[str, Any] | None = None) -> str:
