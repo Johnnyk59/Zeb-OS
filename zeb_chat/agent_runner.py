@@ -22,6 +22,13 @@ _turn_lock = threading.Lock()
 
 _LOCAL_SELECTORS = ("", "local", "local-model", "zeb-local", "offline")
 
+_LOCAL_SYSTEM_PROMPT = (
+    "You are Zeb, a helpful AI assistant. "
+    "Answer the user's questions clearly and concisely. "
+    "Be friendly, direct, and honest. "
+    "If you don't know something, say so."
+)
+
 
 def run_chat_turn(
     message: str,
@@ -81,7 +88,11 @@ def run_chat_turn(
         # Local GGUF backbone — always available, zero configuration.
         try:
             agent = _build_local_agent(toolsets_list)
-            result = agent.run_conversation(message, conversation_history=history)
+            result = agent.run_conversation(
+                message,
+                system_message=_LOCAL_SYSTEM_PROMPT,
+                conversation_history=history,
+            )
             return result.get("final_response") or ""
         except Exception as exc:  # noqa: BLE001
             logger.exception("Local backbone turn failed")
@@ -148,12 +159,11 @@ def _build_local_agent(toolsets_list: list[str]):
     """Construct an AIAgent bound to the in-process local GGUF backbone.
 
     The agent stack (agent/agent_init.py, provider == "local-model") resolves
-    and downloads the weights on first use.  Tools are disabled: the small
-    quantized GGUF model has a 4 096-token context window — the serialized
-    tool schemas alone would exceed it, triggering a context-overflow error
-    before the user's first message even fits.  Chat is the only viable mode
-    at this model size; tool-calling requires a remote provider with a larger
-    context window.
+    and downloads the weights on first use.  Tools are disabled and the heavy
+    system prompt parts (context files, SOUL.md, memory) are skipped: the
+    small quantized GGUF model has a 4 096-token context window — the full
+    agent system prompt alone would consume most of it.  A minimal system
+    prompt is passed via ``run_conversation(system_message=...)`` instead.
     """
     from run_agent import AIAgent
 
@@ -164,6 +174,8 @@ def _build_local_agent(toolsets_list: list[str]):
         api_mode="chat_completions",
         model="zeb-local",
         enabled_toolsets=[],
+        skip_context_files=True,
+        skip_memory=True,
         quiet_mode=True,
         platform="cli",
     )
