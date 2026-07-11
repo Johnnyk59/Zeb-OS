@@ -913,20 +913,21 @@ DEFAULT_CONFIG = {
     # This is Zeb's PRIMARY brain: chat, background bots, and autonomous
     # tasks all run on this one model with zero API keys. repo_id/quant pick
     # the default download; path overrides with a GGUF already on disk. The
-    # default is a single capable Qwen2.5-7B 4-bit quant (~4.7GB), which
-    # natively supports a 128K context window. n_ctx is set to 64K — enough
-    # to hold the full agent system prompt, tools, context files, and a long
-    # conversation, and above the 64K minimum Zeb requires for tool-calling.
-    # Loaded with mmap + a fraction of the CPU cores so it stays RAM/CPU
-    # friendly. Lower n_ctx to trade context length for RAM.
+    # default is Phi-3.5-mini-instruct, a small 4-bit quant (~2.4GB) with a
+    # 128K context window — well above the 64K minimum Zeb requires for
+    # tool-calling. n_ctx is set to the full 128K.
+    # Memory note: Phi-3.5-mini has no grouped-query attention, so its KV
+    # cache is large (~0.37 MB/token → ~50GB at 128K). On a RAM-limited host
+    # lower n_ctx (32768 ≈ 13GB), or set repo_id to
+    # "bartowski/Qwen2.5-7B-Instruct-GGUF" (GQA → ~7.5GB at 128K).
     # (repo_id/quant/n_ctx mirror DEFAULT_LOCAL_MODEL_* in
     # local_model_manager.py; leave a field blank/0 to fall back to that
     # module-level default.)
     "local_model": {
-        "repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+        "repo_id": "bartowski/Phi-3.5-mini-instruct-GGUF",
         "quant": "Q4_K_M",
         "path": "",
-        "n_ctx": 65536,
+        "n_ctx": 131072,
         "n_threads": 0,  # 0 => auto (about half the cores, capped)
     },
     # Background self-diagnosis/auto-repair loop for the always-on gateway

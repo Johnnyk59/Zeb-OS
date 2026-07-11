@@ -203,22 +203,28 @@ model:
 # chat, background bots, and autonomous tasks with no keys and no network.
 # Downloads once on first startup into <zeb_home>/models/gguf/ and is cached.
 #
-# The default is Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB), which natively
-# supports a 128K context window. n_ctx is set to 64K by default — enough to
-# hold the full agent system prompt, tools, context files, and a long
-# conversation, and at/above the 64K minimum Zeb requires for tool-calling.
+# The default is Phi-3.5-mini-instruct in a 4-bit quant (~2.4GB) with a 128K
+# context window — a light download that still holds the full agent system
+# prompt, tools, context files, and a long conversation (well above the 64K
+# minimum Zeb requires for tool-calling). n_ctx is set to the full 128K.
+#
+# MEMORY NOTE: Phi-3.5-mini has no grouped-query attention, so its KV cache is
+# large (~0.37 MB/token → ~50GB at 128K, ~13GB at 32K). On a RAM-limited host,
+# lower n_ctx, or switch to Qwen2.5-7B (GQA → only ~7.5GB at 128K, see below).
 #
 # All fields are optional; the defaults below are what Zeb uses out of the box.
 # local_model:
-#   repo_id: "bartowski/Qwen2.5-7B-Instruct-GGUF"
+#   repo_id: "bartowski/Phi-3.5-mini-instruct-GGUF"
 #   quant: "Q4_K_M"
 #   # path: "/abs/path/to/model.gguf"   # Use a GGUF already on disk (skips download)
-#   n_ctx: 65536                          # Context window. Lower to save RAM.
+#   n_ctx: 131072                         # 128K. Lower (e.g. 32768) to save RAM.
 #   n_threads: 0                          # 0 => auto (~half the cores, capped)
 #
-# For a lighter host, Phi-3.5-mini also has a 128K context in a ~2.3GB quant:
-#   repo_id: "microsoft/Phi-3.5-mini-instruct-gguf"
+# Stronger model with a far lighter long-context footprint (~4.7GB download,
+# but GQA keeps the 128K KV cache to ~7.5GB):
+#   repo_id: "bartowski/Qwen2.5-7B-Instruct-GGUF"
 #   quant: "Q4_K_M"
+#   n_ctx: 131072
 
 # =============================================================================
 # Terminal Tool Configuration

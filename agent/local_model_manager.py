@@ -7,14 +7,21 @@ the always-on local backbone, downloading it once into
 after (mirrors the ``cache/images``, ``cache/videos`` convention in
 zeb_constants.get_zeb_home()).
 
-The default model is **Qwen2.5-7B-Instruct** in a 4-bit GGUF quant (~4.7GB)
-with a 64K context window — chosen for strong reasoning, tool-call support,
-and the ability to handle full conversations with the complete agent system
-prompt.  A fresh container downloads it once on first boot and caches it
-forever; users can override every part of this via ``config.yaml``'s
+The default model is **Phi-3.5-mini-instruct** in a 4-bit GGUF quant
+(~2.4GB) with a 128K context window — a light download that still handles
+full conversations plus the complete agent system prompt and tools.  A
+fresh container downloads it once on first boot and caches it forever;
+users can override every part of this via ``config.yaml``'s
 ``local_model:`` section, or point ``local_model.path`` at any GGUF file
 already on disk to skip the download path entirely (air-gapped installs,
 custom fine-tunes).
+
+Note on memory: Phi-3.5-mini does not use grouped-query attention, so its
+KV cache grows quickly with ``n_ctx`` (roughly 0.37 MB/token → ~50GB at the
+full 128K).  On a RAM-constrained host, lower ``local_model.n_ctx`` (32K is
+~13GB), or switch ``local_model.repo_id`` to
+``bartowski/Qwen2.5-7B-Instruct-GGUF`` (GQA → ~7.5GB at 128K) for a heavier
+download but a far lighter long-context footprint.
 """
 
 from __future__ import annotations
@@ -36,16 +43,16 @@ logger = logging.getLogger(__name__)
 # single source of truth to point at.
 #
 # ONE capable model for everything (chat + background autonomy + aux).
-# Qwen2.5-7B-Instruct in a 4-bit quant (~4.7GB) supports 128K context
-# natively, is strong on reasoning and tool calls, and bartowski's repo
-# provides single-file-per-quant for clean downloads.  Loaded with mmap +
-# a fraction of the CPU cores (see agent/llama_cpp_adapter.py) for
-# efficiency.
-# (For tiny hosts, set local_model.repo_id to
-# "microsoft/Phi-3-mini-4k-instruct-gguf" + quant "q4" for a ~2.3GB model.)
-DEFAULT_LOCAL_MODEL_REPO = "bartowski/Qwen2.5-7B-Instruct-GGUF"
-DEFAULT_LOCAL_MODEL_QUANT = "Q4_K_M"  # single-file ~4.7GB
-DEFAULT_LOCAL_MODEL_CTX = 65536  # Qwen2.5-7B supports 128K; 64K balances capability vs RAM
+# Phi-3.5-mini-instruct in a 4-bit quant (~2.4GB) has a 128K context window
+# in a small, fast package, and bartowski's repo provides
+# single-file-per-quant for clean downloads.  Loaded with mmap + a fraction
+# of the CPU cores (see agent/llama_cpp_adapter.py) for efficiency.
+# (For a stronger model / lighter long-context KV cache via GQA, set
+# local_model.repo_id to "bartowski/Qwen2.5-7B-Instruct-GGUF" — ~4.7GB but
+# only ~7.5GB KV cache at 128K vs Phi-3.5-mini's ~50GB.)
+DEFAULT_LOCAL_MODEL_REPO = "bartowski/Phi-3.5-mini-instruct-GGUF"
+DEFAULT_LOCAL_MODEL_QUANT = "Q4_K_M"  # single-file ~2.4GB
+DEFAULT_LOCAL_MODEL_CTX = 131072  # Phi-3.5-mini native 128K window
 
 ProgressCallback = Callable[[str], None]
 
