@@ -331,10 +331,11 @@ def interruptible_api_call(agent, api_kwargs: dict):
                         invalidate_runtime_client(region)
                     raise
                 result["response"] = normalize_converse_response(raw_response)
-            elif agent.provider == "moa":
-                # MoA is a virtual chat-completions provider backed by the
-                # in-process MoAClient facade. Do not rebuild a request-local
-                # OpenAI client from the virtual runtime metadata.
+            elif agent.provider in ("moa", "local-model"):
+                # MoA and local-model are virtual chat-completions providers
+                # backed by in-process facades (MoAClient / LlamaCppClient).
+                # Do not rebuild a request-local OpenAI client from the
+                # virtual runtime metadata — use the pre-built agent.client.
                 result["response"] = agent.client.chat.completions.create(**api_kwargs)
             else:
                 request_client = _set_request_client(
@@ -2580,6 +2581,13 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
                     if agent.api_mode == "anthropic_messages":
                         agent._try_refresh_anthropic_client_credentials()
                         result["response"] = _call_anthropic()
+                    elif agent.provider in ("moa", "local-model"):
+                        # In-process facades (MoAClient / LlamaCppClient)
+                        # already expose .chat.completions.create() — use
+                        # agent.client directly instead of building an
+                        # OpenAI SDK client (which would fail with
+                        # "api_key must be set").
+                        result["response"] = agent.client.chat.completions.create(**api_kwargs)
                     else:
                         result["response"] = _call_chat_completions()
                     return  # success
