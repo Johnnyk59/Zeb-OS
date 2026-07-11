@@ -200,9 +200,17 @@ async def write_file(request: Request):
 # --------------------------------------------------------------------------
 @router.get("/api/models")
 def models(request: Request):
+    """Report only models from providers that are actually connected.
+
+    The dashboard should show *zero* models out of the box — not the full
+    catalog of provider models the user could theoretically use. So we return
+    the configured model (if any) and whether a real provider credential is
+    present, never the unused provider list.
+    """
     require_key(request)
     current = ""
-    available: list[str] = []
+    provider = ""
+    cfg = {}
     try:
         from zeb_cli import config as _cfg
 
@@ -210,19 +218,28 @@ def models(request: Request):
         model_cfg = cfg.get("model")
         if isinstance(model_cfg, dict):
             current = str(model_cfg.get("default") or model_cfg.get("model") or "")
+            provider = str(model_cfg.get("provider") or "")
         elif isinstance(model_cfg, str):
             current = model_cfg
     except Exception:
         current = ""
-    try:
-        from providers import list_providers
 
-        available = [getattr(p, "name", "") for p in list_providers() if getattr(p, "name", "")]
+    connected = False
+    try:
+        from zeb_cli.setup import _model_section_has_credentials
+
+        connected = bool(_model_section_has_credentials(cfg))
     except Exception:
-        available = []
-    if not available and current:
-        available = [current]
-    return {"current": current, "available": available}
+        connected = False
+
+    available: list[dict] = []
+    # Zero models until a provider is genuinely connected. A configured-but-
+    # uncredentialed default is *not* surfaced (it would be an "unused"
+    # model); the always-on local backbone is the zero-config default and is
+    # communicated by the empty state, not listed as a connected provider.
+    if current and connected:
+        available.append({"id": current, "provider": provider or "configured", "connected": True})
+    return {"current": current, "available": available, "connected": connected}
 
 
 # --------------------------------------------------------------------------
@@ -258,25 +275,76 @@ def cron_jobs(request: Request):
 # --------------------------------------------------------------------------
 @router.get("/api/skills")
 def skills(request: Request):
+    """List skills grouped into stacks.
+
+    Each skill carries a ``stack`` label; the dashboard renders one collapsible
+    stack per label. Skills without a category fall under a default
+    ``Core Skills`` stack. A ``stacks`` summary (ordered, with counts) is also
+    returned so the client doesn't have to re-derive grouping.
+    """
     require_key(request)
     try:
         from tools import skills_tool
 
         raw = skills_tool._find_all_skills(skip_disabled=True) or []
         out = []
+        order: list[str] = []
+        counts: dict[str, int] = {}
         for s in raw:
             if not isinstance(s, dict):
                 continue
+            category = str(s.get("category", "") or "").strip()
+            stack = category or "Core Skills"
             out.append(
                 {
                     "name": s.get("name"),
                     "description": s.get("description", ""),
-                    "category": s.get("category", ""),
+                    "category": category,
+                    "stack": stack,
                 }
             )
-        return {"skills": out}
+            if stack not in counts:
+                counts[stack] = 0
+                order.append(stack)
+            counts[stack] += 1
+        # "Core Skills" always leads the list when present.
+        if "Core Skills" in order:
+            order.remove("Core Skills")
+            order.insert(0, "Core Skills")
+        stacks = [{"name": name, "count": counts[name]} for name in order]
+        return {"skills": out, "stacks": stacks}
     except Exception as exc:
-        return {"skills": [], "error": str(exc)}
+        return {"skills": [], "stacks": [], "error": str(exc)}
+
+
+def _connected_provider_ids() -> set:
+    """Provider directory-ids that are actually connected (have credentials).
+
+    The local GGUF backbone is always-on, so it is always considered
+    connected. Everything else must have a real key / active-provider signal.
+    """
+    ids = {"local-model"}
+    try:
+        from zeb_cli.auth import get_active_provider
+
+        ap = get_active_provider()
+        if ap:
+            ids.add(str(ap).strip().lower())
+    except Exception:
+        pass
+    try:
+        from zeb_cli.auth import PROVIDER_REGISTRY, get_env_value
+
+        for pid, pconf in PROVIDER_REGISTRY.items():
+            for env_var in getattr(pconf, "api_key_env_vars", []) or []:
+                if env_var == "CLAUDE_CODE_OAUTH_TOKEN":
+                    continue
+                if get_env_value(env_var):
+                    ids.add(str(pid).strip().lower())
+                    break
+    except Exception:
+        pass
+    return ids
 
 
 # --------------------------------------------------------------------------
@@ -284,6 +352,13 @@ def skills(request: Request):
 # --------------------------------------------------------------------------
 @router.get("/api/plugins")
 def plugins(request: Request):
+    """List installed/active plugins.
+
+    Feature plugins (``plugins/<name>/``) are all shown. Model-provider
+    plugins (``plugins/model-providers/<name>/``) are filtered to only those
+    that are actually connected — the dashboard should never list ~30 unused
+    provider plugins.
+    """
     require_key(request)
     out = []
     try:
@@ -291,13 +366,18 @@ def plugins(request: Request):
 
         import yaml as _yaml
 
+        connected = _connected_provider_ids()
         patterns = ["plugins/*/plugin.yaml", "plugins/model-providers/*/plugin.yaml"]
         seen = set()
         for pattern in patterns:
+            is_provider = "model-providers" in pattern
             for manifest in _glob.glob(pattern):
                 if manifest in seen:
                     continue
                 seen.add(manifest)
+                dir_id = os.path.basename(os.path.dirname(manifest)).strip().lower()
+                if is_provider and dir_id not in connected:
+                    continue  # drop unconnected provider plugins
                 try:
                     with open(manifest, "r", encoding="utf-8") as fh:
                         data = _yaml.safe_load(fh) or {}
