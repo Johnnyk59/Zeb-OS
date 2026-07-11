@@ -271,7 +271,7 @@ class _LocalChatCompletions:
         max_tokens = max_tokens or 2048
         # Transient fallback only — immediately replaced by the loaded
         # model's real n_ctx below.
-        n_ctx = 131072
+        n_ctx = 32768
         try:
             _n = llama.n_ctx()
             if isinstance(_n, int) and _n > 0:
@@ -325,7 +325,7 @@ class LlamaCppClient:
         self,
         *,
         model_path: str,
-        n_ctx: int = 131072,
+        n_ctx: int = 32768,
         n_gpu_layers: int = -1,
         n_threads: int | None = None,
         use_mmap: bool = True,
