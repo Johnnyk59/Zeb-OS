@@ -148,8 +148,12 @@ def _build_local_agent(toolsets_list: list[str]):
     """Construct an AIAgent bound to the in-process local GGUF backbone.
 
     The agent stack (agent/agent_init.py, provider == "local-model") resolves
-    and downloads the weights on first use. Full toolsets are kept so a local
-    turn has the same workspace read/modify capabilities as a remote one.
+    and downloads the weights on first use.  Tools are disabled: the small
+    quantized GGUF model has a 4 096-token context window — the serialized
+    tool schemas alone would exceed it, triggering a context-overflow error
+    before the user's first message even fits.  Chat is the only viable mode
+    at this model size; tool-calling requires a remote provider with a larger
+    context window.
     """
     from run_agent import AIAgent
 
@@ -159,7 +163,7 @@ def _build_local_agent(toolsets_list: list[str]):
         provider="local-model",
         api_mode="chat_completions",
         model="zeb-local",
-        enabled_toolsets=toolsets_list,
+        enabled_toolsets=[],
         quiet_mode=True,
         platform="cli",
     )
