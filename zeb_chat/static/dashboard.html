@@ -132,6 +132,50 @@
   .stack-body{margin:8px 0 0 6px;padding-left:12px;border-left:1px solid var(--line)}
   .stack.collapsed .stack-body{display:none}
 
+  /* DIAGNOSE + LOCAL MODEL STATUS */
+  .diag-note{font-family:var(--mono);font-size:11px;color:var(--dim);background:var(--g1);border:1px solid var(--line);
+    border-radius:9px;padding:10px 13px;margin-bottom:14px;line-height:1.5}
+  .diag-note b{color:var(--cyan)}
+  .diag-banner{display:flex;align-items:center;gap:10px;padding:12px 15px;border-radius:10px;margin-bottom:14px;
+    font-size:13px;border:1px solid var(--line)}
+  .diag-banner .dbdot{width:9px;height:9px;border-radius:50%;flex:none;background:currentColor;
+    box-shadow:0 0 10px currentColor}
+  .diag-banner.ok{background:rgba(34,224,208,.08);border-color:rgba(34,224,208,.3);color:var(--cyan)}
+  .diag-banner.degraded{background:rgba(255,180,84,.08);border-color:rgba(255,180,84,.3);color:var(--amber)}
+  .diag-banner.critical,.diag-banner.unknown{background:#2a1418;border-color:#3a2226;color:var(--danger)}
+  .badge.crit{color:var(--danger);border-color:#3a2226;background:#2a1418}
+  .badge.rep{color:var(--violet);border-color:rgba(160,107,255,.3);background:rgba(160,107,255,.08)}
+
+  .stat-dot{width:11px;height:11px;border-radius:50%;background:var(--dim2);display:inline-block;flex:none}
+  .stat-dot.on{background:var(--cyan);box-shadow:0 0 11px var(--cyan);animation:sdp 1.4s ease-in-out infinite}
+  .stat-dot.warn{background:var(--amber);box-shadow:0 0 8px rgba(255,180,84,.7)}
+  .stat-dot.off{background:var(--dim2)}
+  @keyframes sdp{0%,100%{opacity:.7;transform:scale(1)}50%{opacity:1;transform:scale(1.28)}}
+
+  .card-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+  .stat-card{background:var(--g1);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .stat-card .sc-label{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim2);margin-bottom:6px}
+  .stat-card .sc-val{font-size:18px;color:var(--txt);letter-spacing:-.3px}
+  .stat-card .sc-sub{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px;word-break:break-all}
+  @media (max-width:680px){.card-grid{grid-template-columns:1fr}}
+
+  .meter{margin:12px 0}
+  .meter .mlabel{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--dim);margin-bottom:5px}
+  .meter .mlabel b{color:var(--txt);font-weight:500}
+  .meter .mbar{height:8px;background:var(--g2);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .meter .mfill{height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--cyan),var(--violet));transition:width .45s ease}
+  .meter .mfill.hot{background:linear-gradient(90deg,var(--amber),var(--danger))}
+
+  .logbox{background:#050506;border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-family:var(--mono);
+    font-size:11px;max-height:240px;overflow:auto;line-height:1.65}
+  .logline{display:flex;gap:9px;white-space:nowrap}
+  .logline .lt{color:var(--dim2);flex:none}
+  .logline .le{color:var(--cyan);flex:none;min-width:118px}
+  .logline.warn .le{color:var(--amber)}
+  .logline.error .le{color:var(--danger)}
+  .logline .ld{color:var(--dim);white-space:normal}
+  .sec-label{font-family:var(--mono);text-transform:uppercase;letter-spacing:1.5px;font-size:10px;color:var(--dim);margin:18px 0 8px}
+
   /* CHAT */
   .chat-top{display:flex;align-items:center;gap:12px;padding:16px 26px;border-bottom:1px solid var(--line)}
   .chat-top h2{margin:0;font-size:15px;letter-spacing:-.2px}
@@ -313,10 +357,12 @@ const TABS=[
   {id:'sessions',label:'Chat Sessions',ic:'&#9670;'},
   {id:'files',label:'Files',ic:'&#9636;'},
   {id:'models',label:'Models',ic:'&#9673;'},
+  {id:'localmodel',label:'Local Model Status',ic:'&#9889;'},
   {id:'cron',label:'Cron Jobs',ic:'&#9201;'},
   {id:'skills',label:'Skills',ic:'&#10022;'},
   {id:'plugins',label:'Plugins',ic:'&#9638;'},
   {id:'channels',label:'Channels',ic:'&#9758;'},
+  {id:'diagnose',label:'Zeb Diagnose',ic:'&#10010;'},
   {id:'keys',label:'API Keys',ic:'&#9919;'},
 ];
 const tabsEl=$('#tabs');
@@ -329,7 +375,13 @@ TABS.forEach(t=>{
 });
 function setActive(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.id===id));}
 
+// Live panels (Local Model Status) refresh on a timer; keep a single handle
+// so switching tabs / returning to chat always tears the poll down.
+let panelTimer=null;
+function stopPanelTimer(){if(panelTimer){clearInterval(panelTimer);panelTimer=null;}}
+
 function showChat(){
+  stopPanelTimer();
   $('#chatPane').classList.add('show');$('#dataPane').classList.remove('show');
 }
 function showData(title){
@@ -339,14 +391,17 @@ function showData(title){
 $('#backBtn').onclick=()=>{setActive('sessions');showChat();};
 
 function openTab(id){
+  stopPanelTimer();
   activeTab=id;setActive(id);
   if(id==='sessions'){renderSessions();showData('Chat Sessions');}
   else if(id==='files')renderFiles('');
   else if(id==='models')renderSimple('Models',loadModels);
+  else if(id==='localmodel')renderLocalModel();
   else if(id==='cron')renderSimple('Cron Jobs',loadCron);
   else if(id==='skills')renderSimple('Skills',loadSkills);
   else if(id==='plugins')renderSimple('Plugins',loadPlugins);
   else if(id==='channels')renderChannels();
+  else if(id==='diagnose')renderDiagnose();
   else if(id==='keys')renderKeys();
 }
 
@@ -624,6 +679,148 @@ async function listKeys(){
 }
 function mask(v){v=String(v);if(v.includes('•')||v.includes('*'))return v;if(v.length<=8)return '••••';return v.slice(0,4)+'••••••••'+v.slice(-4);}
 
+/* ============ ZEB DIAGNOSE (offline self-heal) ============ */
+function prettyComp(c){return String(c||'').replace(/_/g,' ').replace(/\b\w/g,m=>m.toUpperCase());}
+async function renderDiagnose(){
+  showData('Zeb Diagnose');bodyLoading();
+  const b=$('#dataBody');
+  const paint=async(repair)=>{
+    bodyLoading();
+    try{
+      const d=repair?await api('/api/diagnose/repair',{method:'POST'}):await api('/api/diagnose');
+      b.innerHTML='';
+      const note=el('div','diag-note');
+      note.innerHTML='<b>Fully offline.</b> These checks and repairs run with zero AI-provider dependency — Zeb can diagnose and fix itself with no keys and no internet. If Zeb breaks, this still works.';
+      b.appendChild(note);
+      const overall=(d.overall||'unknown');
+      const labels={ok:'All systems healthy',degraded:'Minor issues detected',critical:'Critical issues detected',unknown:'Status unknown'};
+      const banner=el('div','diag-banner '+overall);
+      banner.innerHTML='<span class="dbdot"></span><span>'+esc(labels[overall]||overall)+'</span>';
+      const sm=d.summary||{};
+      if(sm.repaired)banner.innerHTML+='<span class="badge rep" style="margin-left:auto">'+sm.repaired+' auto-repaired</span>';
+      b.appendChild(banner);
+      const bar=el('div','toolbar');
+      const rd=el('button','btn');rd.innerHTML='&#8635; Run diagnostics';rd.onclick=()=>paint(false);
+      const rp=el('button','btn btn-accent');rp.textContent='Self-heal now';rp.onclick=()=>paint(true);
+      bar.appendChild(rd);bar.appendChild(rp);b.appendChild(bar);
+      if(d.error)b.appendChild(inlineErr(d.error));
+      const checks=d.checks||[];
+      if(!checks.length&&!d.error){b.appendChild(emptyState('&#10010;','No health checks reported.'));return;}
+      checks.forEach(c=>{
+        const r=el('div','row');const g=el('div','grow');g.style.cursor='default';
+        g.appendChild(el('div','title',prettyComp(c.component)));
+        g.appendChild(el('div','meta',c.message||''));
+        r.appendChild(g);
+        if(c.repaired)r.appendChild(el('span','badge rep','repaired'));
+        const cls=c.status==='ok'?'on':(c.status==='degraded'?'off':'crit');
+        r.appendChild(el('span','badge '+cls,c.status));
+        b.appendChild(r);
+      });
+    }catch(e){b.innerHTML='';b.appendChild(inlineErr(e.message));}
+  };
+  paint(false);
+}
+
+/* ============ LOCAL MODEL STATUS (live) ============ */
+function fmtBytes(n){n=Number(n||0);if(n<=0)return '0 B';const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++;}return (i===0?n.toFixed(0):n.toFixed(1))+' '+u[i];}
+function logTime(ts){const d=new Date((ts||0)*1000);return d.toLocaleTimeString([],{hour12:false});}
+let lmNet=null;  // last net counters, for live bandwidth delta
+async function renderLocalModel(){
+  showData('Local Model Status');bodyLoading();
+  const b=$('#dataBody');lmNet=null;let built=false;
+  const paint=async()=>{
+    let d;
+    try{d=await api('/api/localmodel');}
+    catch(e){if(!built){b.innerHTML='';b.appendChild(inlineErr(e.message));}return;}
+    if(!built){buildLocalModel(b,d);built=true;}
+    fillLocalModel(d);
+  };
+  await paint();
+  stopPanelTimer();
+  panelTimer=setInterval(()=>{
+    if(activeTab!=='localmodel'){stopPanelTimer();return;}
+    paint();
+  },1500);
+}
+function buildLocalModel(b,d){
+  b.innerHTML='';
+  const head=el('div','row');head.style.cursor='default';
+  const g=el('div','grow');
+  const t=el('div','title');t.innerHTML='<span class="stat-dot" id="lmDot"></span> <span id="lmName">'+esc(d.name||'Local model')+'</span>';
+  g.appendChild(t);g.appendChild(el('div','meta')).id='lmMeta';
+  head.appendChild(g);
+  const st=el('span','badge');st.id='lmState';head.appendChild(st);
+  b.appendChild(head);
+  const grid=el('div','card-grid');
+  grid.innerHTML=
+    '<div class="stat-card"><div class="sc-label">Model</div><div class="sc-val" id="lmModelVal">—</div><div class="sc-sub" id="lmModelSub"></div></div>'+
+    '<div class="stat-card"><div class="sc-label">State</div><div class="sc-val" id="lmStateVal">—</div><div class="sc-sub" id="lmStateSub"></div></div>';
+  b.appendChild(grid);
+  const meters=el('div');
+  meters.innerHTML=
+    '<div class="meter"><div class="mlabel"><span>CPU</span><b id="lmCpuTxt">—</b></div><div class="mbar"><div class="mfill" id="lmCpuFill"></div></div></div>'+
+    '<div class="meter"><div class="mlabel"><span>Memory (system)</span><b id="lmRamTxt">—</b></div><div class="mbar"><div class="mfill" id="lmRamFill"></div></div></div>'+
+    '<div class="meter" id="lmDlWrap" style="display:none"><div class="mlabel"><span id="lmDlLabel">Downloading weights</span><b id="lmDlTxt">—</b></div><div class="mbar"><div class="mfill" id="lmDlFill"></div></div></div>';
+  b.appendChild(meters);
+  b.appendChild(el('div','sec-label','Bandwidth'));
+  const bw=el('div','meta');bw.id='lmNet';bw.style.fontFamily='var(--mono)';bw.textContent='—';b.appendChild(bw);
+  b.appendChild(el('div','sec-label','Background activity'));
+  const box=el('div','logbox');box.id='lmLogs';box.textContent='No activity yet.';b.appendChild(box);
+}
+function setMeter(fillId,txtId,pct,txt,hot){
+  const f=$('#'+fillId),t=$('#'+txtId);if(!f)return;
+  f.style.width=Math.max(0,Math.min(100,Number(pct)||0))+'%';
+  f.classList.toggle('hot',!!hot);
+  if(t&&txt!=null)t.textContent=txt;
+}
+function fillLocalModel(d){
+  const dot=$('#lmDot');if(!dot)return;
+  const dl=d.download||{},ram=d.ram||{},net=d.net||{};
+  const loaded=!!d.loaded,ready=!!d.ready,dlActive=!!dl.active;
+  $('#lmName').textContent=d.name||'Local model';
+  dot.className='stat-dot '+(loaded||dlActive?'on':(ready?'warn':'off'));
+  const stateTxt=loaded?'active':(dlActive?'downloading':(ready?'ready':'idle'));
+  const stBadge=$('#lmState');stBadge.textContent=stateTxt;
+  stBadge.className='badge '+(loaded?'on':(dlActive?'v':(ready?'off':'')));
+  $('#lmMeta').textContent=(d.path||'(weights not downloaded yet)')+(d.size_bytes?(' · '+fmtBytes(d.size_bytes)):'');
+  $('#lmModelVal').textContent=String(d.name||'—').split(' · ')[0];
+  $('#lmModelSub').textContent=(d.provider||'local-model')+(d.ctx?(' · '+d.ctx+' ctx'):'');
+  $('#lmStateVal').textContent=stateTxt;
+  $('#lmStateSub').textContent=ready?(loaded?'loaded in memory':'weights cached on disk'):(dlActive?'downloading weights…':'weights not yet downloaded');
+  const cpu=Number(d.cpu_percent||0);
+  setMeter('lmCpuFill','lmCpuTxt',cpu,cpu.toFixed(0)+'%'+(d.process_cpu_percent?(' · proc '+Number(d.process_cpu_percent).toFixed(0)+'%'):''),cpu>85);
+  const rp=Number(ram.percent||0);
+  const ramTxt=(ram.system_used_mb!=null?fmtBytes(ram.system_used_mb*1048576)+' / '+fmtBytes((ram.system_total_mb||0)*1048576):rp.toFixed(0)+'%')+(ram.process_mb!=null?(' · Zeb '+fmtBytes(ram.process_mb*1048576)):'');
+  setMeter('lmRamFill','lmRamTxt',rp,ramTxt,rp>88);
+  const dw=$('#lmDlWrap');
+  if(dlActive){
+    dw.style.display='';
+    setMeter('lmDlFill','lmDlTxt',Number(dl.percent||0),(dl.human_downloaded||'')+(dl.human_total?(' / '+dl.human_total):'')+(dl.human_rate?(' · '+dl.human_rate):''),false);
+    $('#lmDlLabel').textContent='Downloading '+(dl.file||'weights');
+  }else if(dl&&Number(dl.percent)>=100&&dl.total_bytes){
+    dw.style.display='';setMeter('lmDlFill','lmDlTxt',100,'complete',false);$('#lmDlLabel').textContent='Weights downloaded';
+  }else{dw.style.display='none';}
+  if(net.bytes_recv!=null){
+    let line='session ↓ '+fmtBytes(net.bytes_recv)+'  ↑ '+fmtBytes(net.bytes_sent);
+    if(lmNet){
+      const dr=Math.max(0,net.bytes_recv-lmNet.r),ds=Math.max(0,net.bytes_sent-lmNet.s),dt=Math.max(0.001,(Date.now()-lmNet.t)/1000);
+      line+='   ·   now ↓ '+fmtBytes(dr/dt)+'/s  ↑ '+fmtBytes(ds/dt)+'/s';
+    }
+    lmNet={r:net.bytes_recv,s:net.bytes_sent,t:Date.now()};
+    $('#lmNet').textContent=line;
+  }
+  const logs=d.events||[],box=$('#lmLogs');
+  if(logs.length){
+    box.innerHTML='';
+    logs.slice(-80).forEach(ev=>{
+      const l=el('div','logline '+(ev.level==='error'?'error':(ev.level==='warn'?'warn':'')));
+      l.innerHTML='<span class="lt">'+logTime(ev.ts)+'</span><span class="le">'+esc(ev.event||'')+'</span><span class="ld">'+esc(ev.detail||'')+'</span>';
+      box.appendChild(l);
+    });
+    box.scrollTop=box.scrollHeight;
+  }
+}
+
 /* ============ SIDEBAR COLLAPSE ============ */
 const LS_SIDEBAR='zeb_dash_sidebar';
 function applySidebar(){
@@ -710,7 +907,7 @@ async function sendMsg(){
 const Voice=(function(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   const synth=window.speechSynthesis||null;
-  let rec=null, active=false, listening=false;
+  let rec=null, active=false, listening=false, serverVoice=false;
   const btn=()=>document.getElementById('voiceBtn');
   function supported(){return !!SR;}
   function setBtn(state){
@@ -719,16 +916,40 @@ const Voice=(function(){
     b.classList.toggle('speaking',state==='speaking');
     b.title=state==='listening'?'Listening… click to stop':(active?'Voice chat on — click to stop':'Voice chat');
   }
-  function speak(text){
+  function afterSpeak(){setBtn(active?'':'');if(active&&!awaiting)startListening();}
+  function browserSpeak(text){
     if(!synth||!active)return;
     try{
       synth.cancel();
       const u=new SpeechSynthesisUtterance(String(text).slice(0,3000));
       u.rate=1.02;u.pitch=1.0;
       setBtn('speaking');
-      u.onend=()=>{setBtn(active?'':'');if(active&&!awaiting)startListening();};
+      u.onend=afterSpeak;
       synth.speak(u);
-    }catch(e){/* ignore */}
+    }catch(e){afterSpeak();}
+  }
+  // Prefer Zeb's offline neural voice (server-side Piper) when it's available,
+  // falling back to the browser's own speechSynthesis. Both feed the SAME
+  // local-model reply, so voice output "just works" either way.
+  async function speak(text){
+    if(!active)return;
+    const t=String(text||'').slice(0,3000);
+    if(serverVoice){
+      try{
+        const res=await fetch('/api/voice/speak',{method:'POST',
+          headers:{'Authorization':'Bearer '+KEY,'Content-Type':'application/json'},
+          body:JSON.stringify({text:t})});
+        if(res.ok&&(res.headers.get('content-type')||'').indexOf('audio')>=0){
+          const url=URL.createObjectURL(await res.blob());
+          const audio=new Audio(url);setBtn('speaking');
+          audio.onended=()=>{URL.revokeObjectURL(url);afterSpeak();};
+          audio.onerror=()=>{URL.revokeObjectURL(url);browserSpeak(t);};
+          audio.play().catch(()=>{URL.revokeObjectURL(url);browserSpeak(t);});
+          return;
+        }
+      }catch(e){/* fall through to browser voice */}
+    }
+    browserSpeak(t);
   }
   function startListening(){
     if(!rec||listening)return;
@@ -758,6 +979,13 @@ const Voice=(function(){
       const b=btn();if(!b)return;
       if(!supported()){b.disabled=true;b.title='Voice chat not supported in this browser';return;}
       b.onclick=toggle;
+      // Detect Zeb's offline neural voice (Piper) and use it when present.
+      try{
+        fetch('/api/voice/status',{headers:{'Authorization':'Bearer '+KEY}})
+          .then(r=>r.ok?r.json():null)
+          .then(s=>{if(s&&s.engine==='piper')serverVoice=true;})
+          .catch(()=>{});
+      }catch(e){}
     }
   };
 })();

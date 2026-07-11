@@ -182,6 +182,32 @@ COPY pyproject.toml uv.lock ./
 RUN touch ./README.md
 RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra anthropic --extra bedrock --extra azure-identity --extra hindsight --extra matrix
 
+# ---------- Local GGUF backbone (baked in, zero-config) ----------
+# The published image sets ZEB_DISABLE_LAZY_INSTALLS=1 and seals /opt/zeb
+# read-only, so the runtime CANNOT pip-install the local-model stack on
+# first use the way a source install does (tools/lazy_deps.py). Without
+# these two packages baked into the venv, the always-on local backbone
+# can neither download its weights nor run them, and a fresh `docker run`
+# has no working model until the user configures a hosted provider —
+# defeating the "type 'yo' and get an instant local reply" promise.
+#
+#   * huggingface_hub  → one-time GGUF weight download into
+#                        $ZEB_HOME/models/gguf/ (agent/local_model_manager.py)
+#   * llama-cpp-python → in-process CPU inference of that GGUF
+#                        (agent/llama_cpp_adapter.py)
+#
+# Versions are pinned to match tools/lazy_deps.py so the baked-in and
+# lazy-install paths never diverge. llama-cpp-python ships a compiled C++
+# extension; we prefer the maintainer's prebuilt CPU wheels
+# (abetlen.github.io/llama-cpp-python/whl/cpu) to keep the build fast and
+# deterministic, and fall back to a source build (the cmake/g++ toolchain
+# installed above is already present) if that index is unreachable.
+RUN uv pip install --no-cache-dir "huggingface_hub==1.22.0" && \
+    ( uv pip install --no-cache-dir \
+        --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
+        "llama-cpp-python==0.3.33" \
+      || CMAKE_ARGS="-DGGML_NATIVE=OFF" uv pip install --no-cache-dir "llama-cpp-python==0.3.33" )
+
 # ---------- Frontend build (cached independently from Python source) ----------
 # Copy only the frontend source trees first so that Python-only changes don't
 # invalidate the (relatively slow) web + ui-tui build layer.

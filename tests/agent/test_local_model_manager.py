@@ -34,9 +34,18 @@ class TestGetLocalModelPath:
         assert get_local_model_path({}) is None
 
     def test_finds_cached_download(self, tmp_path):
-        target_dir = tmp_path / "models" / "gguf" / "NousResearch__Hermes-3-Llama-3.2-3B-GGUF"
+        # Uses the module defaults (Phi-3-mini / q4) so the test tracks the
+        # configured default instead of hardcoding a model name.
+        from agent.local_model_manager import (
+            DEFAULT_LOCAL_MODEL_QUANT,
+            DEFAULT_LOCAL_MODEL_REPO,
+        )
+
+        target_dir = (
+            tmp_path / "models" / "gguf" / DEFAULT_LOCAL_MODEL_REPO.replace("/", "__")
+        )
         target_dir.mkdir(parents=True)
-        (target_dir / "Hermes-3-Llama-3.2-3B.Q4_K_M.gguf").write_bytes(b"fake")
+        (target_dir / f"model-{DEFAULT_LOCAL_MODEL_QUANT}.gguf").write_bytes(b"fake")
         assert get_local_model_path({}) is not None
 
 
@@ -87,7 +96,7 @@ class TestEnsureLocalModelWeights:
         monkeypatch.setattr(
             "agent.local_model_manager._get_hf_hub_sdk", lambda: fake_hub
         )
-        with pytest.raises(LocalModelUnavailable, match="No Q4_K_M GGUF file found"):
+        with pytest.raises(LocalModelUnavailable, match="GGUF file found"):
             ensure_local_model_weights({})
 
     def test_download_failure_wrapped_in_clear_error(self, monkeypatch):

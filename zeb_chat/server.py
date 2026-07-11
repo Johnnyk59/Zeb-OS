@@ -423,10 +423,57 @@ def create_app() -> FastAPI:
     return app
 
 
+def _prefetch_local_model() -> None:
+    """Kick off the local GGUF weight download in the background at boot.
+
+    The backbone is lazy by default (loads on first request), which means
+    the very first "yo" pays the multi-GB download before it can answer.
+    Starting the download the moment the server boots means the weights are
+    usually already on disk (or well underway) by the time anyone types, so
+    the first local reply is fast. Fully fail-open and opt-out via
+    ``ZEB_LOCAL_MODEL_PREFETCH=0``; the download itself is a no-op once the
+    weights are cached, so a restart never re-downloads.
+    """
+    import os
+
+    if os.environ.get("ZEB_LOCAL_MODEL_PREFETCH", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+        "off",
+    ):
+        return
+
+    def _worker() -> None:
+        try:
+            from zeb_cli.config import load_config
+
+            cfg = load_config()
+        except Exception:
+            cfg = {}
+        try:
+            from agent.local_model_manager import ensure_local_model_weights
+
+            ensure_local_model_weights(cfg)
+            logger.info("Local model weights ready (prefetched at boot)")
+        except Exception as exc:  # noqa: BLE001 - never crash the server
+            logger.info("Local model prefetch skipped: %s", exc)
+
+    import threading
+
+    threading.Thread(
+        target=_worker, name="local-model-prefetch", daemon=True
+    ).start()
+
+
 def run_server(host: str = "0.0.0.0", port: int = 8000) -> None:
     """Build the app, log the API key banner, and run uvicorn."""
     app = create_app()
     log_api_key_banner(app.state.api_key, host, port)
+
+    # Start fetching the local backbone weights now so the first message
+    # doesn't have to wait for the whole download.
+    _prefetch_local_model()
 
     import uvicorn
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from types import SimpleNamespace
 from typing import Any, Iterator, Optional
 
@@ -34,6 +35,16 @@ logger = logging.getLogger(__name__)
 _model_lock = threading.Lock()
 _loaded_model: Any = None
 _loaded_model_path: Optional[str] = None
+
+
+def _record(event: str, detail: str = "", level: str = "info") -> None:
+    """Push a status event without ever letting telemetry break inference."""
+    try:
+        from agent import local_model_status
+
+        local_model_status.record(event, detail, level)
+    except Exception:
+        pass
 
 
 def _get_llama_cpp_sdk():
@@ -92,6 +103,8 @@ def _load_model(model_path: str, *, n_ctx: int, n_gpu_layers: int) -> Any:
             )
 
         logger.info("Loading local GGUF model from %s (n_ctx=%d)", model_path, n_ctx)
+        _record("model.loading", f"{model_path.split('/')[-1]} (n_ctx={n_ctx})")
+        _t0 = time.time()
         try:
             _loaded_model = llama_cpp.Llama(
                 model_path=model_path,
@@ -104,10 +117,12 @@ def _load_model(model_path: str, *, n_ctx: int, n_gpu_layers: int) -> Any:
                 verbose=False,
             )
         except Exception as exc:
+            _record("model.load_error", str(exc), level="error")
             raise LocalModelLoadError(
                 f"Failed to load GGUF model at {model_path}: {exc}"
             ) from exc
         _loaded_model_path = model_path
+        _record("model.loaded", f"ready in {time.time() - _t0:.1f}s")
         return _loaded_model
 
 
@@ -121,12 +136,20 @@ def unload_model() -> None:
     """
     global _loaded_model, _loaded_model_path
     with _model_lock:
+        was_loaded = _loaded_model is not None
         _loaded_model = None
         _loaded_model_path = None
+    if was_loaded:
+        _record("model.unloaded", "freed for reload / memory reclaim")
 
 
 def is_model_loaded() -> bool:
     return _loaded_model is not None
+
+
+def loaded_model_path() -> Optional[str]:
+    """Public accessor for the path of the currently loaded model (or None)."""
+    return _loaded_model_path
 
 
 def _namespace_tool_calls(tool_calls: Optional[list[dict[str, Any]]]):

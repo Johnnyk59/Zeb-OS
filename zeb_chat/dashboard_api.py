@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
 logger = logging.getLogger("zeb_chat")
 
@@ -395,6 +395,213 @@ def plugins(request: Request):
     except Exception as exc:
         return {"plugins": [], "error": str(exc)}
     return {"plugins": out}
+
+
+# --------------------------------------------------------------------------
+# Zeb Diagnose — offline health check + self-repair (zero AI dependency)
+# --------------------------------------------------------------------------
+def _run_diagnostics() -> dict:
+    """Run the self-healing health checks and shape them for the dashboard.
+
+    Uses ``gateway.self_healing.run_health_checks`` — the exact same checks
+    the background monitor and ``zeb doctor`` run. They are pure-Python
+    (disk, sqlite, YAML, local-model liveness) and several *self-repair* when
+    run (unloading a wedged model, repairing a malformed state.db), so this
+    works with no AI provider and no network at all.
+    """
+    try:
+        from gateway.self_healing import run_health_checks
+
+        results = run_health_checks()
+        checks = [
+            {
+                "component": r.component,
+                "status": r.status,
+                "message": r.message,
+                "repaired": bool(r.repaired),
+            }
+            for r in results
+        ]
+        counts = {"ok": 0, "degraded": 0, "critical": 0, "repaired": 0}
+        for c in checks:
+            counts[c["status"]] = counts.get(c["status"], 0) + 1
+            if c["repaired"]:
+                counts["repaired"] += 1
+        overall = (
+            "critical"
+            if counts["critical"]
+            else ("degraded" if counts["degraded"] else "ok")
+        )
+        return {
+            "checks": checks,
+            "summary": counts,
+            "overall": overall,
+            "offline": True,
+        }
+    except Exception as exc:
+        return {
+            "checks": [],
+            "summary": {},
+            "overall": "unknown",
+            "offline": True,
+            "error": str(exc),
+        }
+
+
+@router.get("/api/diagnose")
+def diagnose(request: Request):
+    require_key(request)
+    return _run_diagnostics()
+
+
+@router.post("/api/diagnose/repair")
+def diagnose_repair(request: Request):
+    """Trigger self-healing. Running the checks *is* the repair (they fix what
+    they safely can in place), so this returns the post-repair state."""
+    require_key(request)
+    return _run_diagnostics()
+
+
+# --------------------------------------------------------------------------
+# Local Model Status — live identity + CPU/RAM/bandwidth/activity
+# --------------------------------------------------------------------------
+@router.get("/api/localmodel")
+def local_model(request: Request):
+    """Report everything the Local Model Status panel shows, live.
+
+    Model identity + whether weights are on disk / loaded, plus real-time
+    CPU and RAM (via psutil), download bandwidth, and a rolling activity
+    log. Entirely fail-open — every block degrades independently so a
+    missing psutil or an unimportable model stack still returns a useful
+    partial snapshot.
+    """
+    require_key(request)
+    out: dict = {
+        "name": "",
+        "provider": "local-model",
+        "loaded": False,
+        "ready": False,
+        "path": "",
+        "size_bytes": 0,
+        "ctx": 0,
+        "cpu_percent": 0.0,
+        "process_cpu_percent": 0.0,
+        "ram": {},
+        "net": {},
+        "download": {},
+        "events": [],
+        "active": False,
+    }
+
+    try:
+        from zeb_cli.config import load_config
+
+        cfg = load_config() or {}
+    except Exception:
+        cfg = {}
+
+    try:
+        from agent.local_model_manager import (
+            DEFAULT_LOCAL_MODEL_CTX,
+            get_local_model_path,
+            local_model_display_name,
+        )
+
+        out["name"] = local_model_display_name(cfg)
+        p = get_local_model_path(cfg)
+        if p is not None:
+            out["ready"] = True
+            out["path"] = str(p)
+            try:
+                out["size_bytes"] = p.stat().st_size
+            except Exception:
+                pass
+        lm = cfg.get("local_model") if isinstance(cfg.get("local_model"), dict) else {}
+        out["ctx"] = int((lm or {}).get("ctx") or DEFAULT_LOCAL_MODEL_CTX)
+    except Exception:
+        pass
+
+    try:
+        from agent.llama_cpp_adapter import is_model_loaded, loaded_model_path
+
+        out["loaded"] = bool(is_model_loaded())
+        lp = loaded_model_path()
+        if lp and not out["path"]:
+            out["path"] = lp
+    except Exception:
+        pass
+
+    try:
+        import psutil
+
+        vm = psutil.virtual_memory()
+        out["ram"] = {
+            "process_mb": round(psutil.Process().memory_info().rss / 1048576, 1),
+            "system_used_mb": round(vm.used / 1048576, 1),
+            "system_total_mb": round(vm.total / 1048576, 1),
+            "percent": vm.percent,
+        }
+        # interval=None => non-blocking, measured since the previous call in
+        # this long-lived process; the panel polls, so values stay live.
+        out["cpu_percent"] = psutil.cpu_percent(interval=None)
+        try:
+            out["process_cpu_percent"] = psutil.Process().cpu_percent(interval=None)
+        except Exception:
+            pass
+        nio = psutil.net_io_counters()
+        out["net"] = {"bytes_sent": nio.bytes_sent, "bytes_recv": nio.bytes_recv}
+    except Exception:
+        pass
+
+    try:
+        from agent import local_model_status
+
+        snap = local_model_status.snapshot()
+        out["events"] = snap.get("events", [])
+        out["download"] = snap.get("download", {})
+    except Exception:
+        pass
+
+    out["active"] = bool(out["loaded"] or (out.get("download") or {}).get("active"))
+    return out
+
+
+# --------------------------------------------------------------------------
+# Voice — optional offline neural TTS (Piper) with browser fallback
+# --------------------------------------------------------------------------
+@router.get("/api/voice/status")
+def voice_status(request: Request):
+    require_key(request)
+    try:
+        from zeb_chat.voice_agent import status as _voice_status
+
+        return _voice_status()
+    except Exception as exc:
+        return {"engine": "browser", "offline": True, "detail": str(exc)}
+
+
+@router.post("/api/voice/speak")
+async def voice_speak(request: Request):
+    """Synthesize speech with Piper and return WAV audio.
+
+    Returns 204 (no content) when server-side voice isn't available, which
+    is the client's signal to fall back to the browser's own speech engine.
+    """
+    require_key(request)
+    body = await _json_body(request)
+    text = str(body.get("text", "") or "")
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="text required")
+    audio = None
+    try:
+        from zeb_chat.voice_agent import synthesize
+
+        audio = synthesize(text)
+    except Exception:
+        audio = None
+    if not audio:
+        return Response(status_code=204)
+    return Response(content=audio, media_type="audio/wav")
 
 
 # --------------------------------------------------------------------------

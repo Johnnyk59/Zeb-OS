@@ -911,12 +911,16 @@ DEFAULT_CONFIG = {
     "toolsets": ["zeb-cli"],
     # Local GGUF backbone (agent/local_model_manager.py, agent/llama_cpp_adapter.py).
     # repo_id/quant pick the default download; path overrides with a GGUF file
-    # already on disk (skips the download entirely). Select it with
+    # already on disk (skips the download entirely). The default is a small
+    # Phi-3-mini 4-bit quant (~2.3GB) that auto-downloads on first use so a
+    # fresh container can chat with zero configuration. Select it with
     # `zeb model` (provider local-model) or add it to fallback_providers
     # explicitly — it is never auto-injected into the fallback chain.
+    # (These mirror DEFAULT_LOCAL_MODEL_REPO/QUANT in local_model_manager.py;
+    # leave a field blank to fall back to that module-level default.)
     "local_model": {
-        "repo_id": "",
-        "quant": "",
+        "repo_id": "microsoft/Phi-3-mini-4k-instruct-gguf",
+        "quant": "q4",
         "path": "",
     },
     # Background self-diagnosis/auto-repair loop for the always-on gateway
