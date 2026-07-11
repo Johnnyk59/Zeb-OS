@@ -129,6 +129,24 @@ def test_models_shape(client):
     body = res.json()
     assert "current" in body
     assert isinstance(body["available"], list)
+    assert "connected" in body
+    # Zero models until a provider is actually connected.
+    if not body["connected"]:
+        assert body["available"] == []
+
+
+def test_skills_stacks(client):
+    res = client.get("/api/skills", headers=AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    assert isinstance(body["skills"], list)
+    assert isinstance(body["stacks"], list)
+    # Every skill carries a stack label; every stack in the summary is a
+    # {name, count} dict.
+    for s in body["skills"]:
+        assert "stack" in s
+    for st in body["stacks"]:
+        assert "name" in st and "count" in st
 
 
 def test_cron_shape(client):

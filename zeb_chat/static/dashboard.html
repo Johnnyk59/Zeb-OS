@@ -53,12 +53,20 @@
   #app{display:none;height:100%}
   #app.on{display:flex}
   .sidebar{width:20%;min-width:210px;max-width:320px;background:var(--g1);border-right:1px solid var(--line);
-    display:flex;flex-direction:column;height:100%}
+    display:flex;flex-direction:column;height:100%;transition:width .2s ease,min-width .2s ease}
+  .sidebar.collapsed{width:0;min-width:0;max-width:0;border-right:none;overflow:hidden}
   .brand{display:flex;align-items:center;gap:10px;padding:18px 18px 14px}
+  .brand-name{flex:1;min-width:0}
   .brand .dot{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--cyan),var(--violet));
-    box-shadow:0 0 16px rgba(34,224,208,.35)}
+    box-shadow:0 0 16px rgba(34,224,208,.35);flex:none}
   .brand b{font-size:15px;letter-spacing:-.3px}
   .brand span{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:2px;display:block}
+  .collapse-btn{background:transparent;border:none;color:var(--dim);font-size:14px;padding:4px 6px;border-radius:6px;transition:all .14s;flex:none}
+  .collapse-btn:hover{color:var(--txt);background:var(--g2)}
+  .sidebar-open{position:fixed;top:14px;left:12px;z-index:60;display:none;background:var(--g2);border:1px solid var(--line);
+    color:var(--txt);font-size:15px;width:34px;height:34px;border-radius:9px;align-items:center;justify-content:center}
+  .sidebar-open.show{display:flex}
+  .sidebar-open:hover{background:var(--g3)}
   .tabs{flex:1;overflow-y:auto;padding:8px 10px}
   .tab{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;
     border:1px solid transparent;color:var(--dim);padding:10px 12px;border-radius:9px;margin:2px 0;
@@ -113,6 +121,17 @@
   .iconbtn:hover{color:var(--danger);background:#2a1418}
   .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
 
+  /* SKILL STACKS */
+  .stack{margin-bottom:10px}
+  .stack-head{display:flex;align-items:center;gap:10px;background:var(--g2);border:1px solid var(--line);
+    border-radius:10px;padding:11px 14px;cursor:pointer;transition:all .14s}
+  .stack-head:hover{border-color:var(--g4)}
+  .stack-head .caret{color:var(--cyan);font-size:11px;transition:transform .18s;display:inline-block}
+  .stack.collapsed .caret{transform:rotate(-90deg)}
+  .stack-head .sname{flex:1;font-size:13px;letter-spacing:.2px}
+  .stack-body{margin:8px 0 0 6px;padding-left:12px;border-left:1px solid var(--line)}
+  .stack.collapsed .stack-body{display:none}
+
   /* CHAT */
   .chat-top{display:flex;align-items:center;gap:12px;padding:16px 26px;border-bottom:1px solid var(--line)}
   .chat-top h2{margin:0;font-size:15px;letter-spacing:-.2px}
@@ -146,6 +165,12 @@
   #chatInput:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,224,208,.13)}
   #sendBtn{height:48px;padding:0 20px;border-radius:12px}
   #sendBtn:disabled{opacity:.4;cursor:not-allowed}
+  .iconvoice{height:48px;width:48px;padding:0;border-radius:12px;font-size:18px;display:flex;align-items:center;justify-content:center}
+  .iconvoice.listening{border-color:var(--magenta);color:var(--magenta);
+    box-shadow:0 0 0 3px rgba(255,92,200,.18);animation:vpulse 1.1s ease-in-out infinite}
+  .iconvoice.speaking{border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 0 3px rgba(34,224,208,.18)}
+  .iconvoice:disabled{opacity:.35;cursor:not-allowed}
+  @keyframes vpulse{0%,100%{box-shadow:0 0 0 3px rgba(255,92,200,.14)}50%{box-shadow:0 0 0 6px rgba(255,92,200,.28)}}
 
   /* TERMINAL MODE */
   #chatPane.term{background:#050506}
@@ -189,10 +214,12 @@
 
 <!-- APP -->
 <div id="app">
-  <aside class="sidebar">
+  <button class="sidebar-open" id="sidebarOpen" title="Show sidebar">&#9776;</button>
+  <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="dot"></div>
-      <div><b>Zeb</b><span>DASHBOARD</span></div>
+      <div class="brand-name"><b>Zeb</b><span>DASHBOARD</span></div>
+      <button class="collapse-btn" id="sidebarCollapse" title="Hide sidebar">&#10094;</button>
     </div>
     <nav class="tabs" id="tabs"></nav>
     <div class="sidebar-foot">
@@ -212,7 +239,7 @@
       <div class="chat-top">
         <h2 id="chatTitle">New Chat</h2>
         <div class="seg">
-          <button id="modeSimple" class="on">Simple</button>
+          <button id="modeSimple" class="on">Chat</button>
           <button id="modeTerm">Terminal</button>
         </div>
       </div>
@@ -220,6 +247,7 @@
       <div class="composer">
         <div class="composer-inner">
           <textarea id="chatInput" placeholder="Message Zeb…  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+          <button class="btn iconvoice" id="voiceBtn" title="Voice chat">&#127908;</button>
           <button class="btn btn-accent" id="sendBtn">Send</button>
         </div>
       </div>
@@ -379,14 +407,17 @@ function toArr(d,keys){if(Array.isArray(d))return d;for(const k of keys)if(d&&Ar
 async function loadModels(){
   const d=await api('/api/models');
   const cur=d.current||d.active||d.model||'';
-  const list=toArr(d,['models','available','list']);
+  const list=toArr(d,['available','models','list']);
   const out=[];
-  const head=el('div','row');head.innerHTML='<div class="grow"><div class="label">Current model</div><div class="title cur-model" style="margin-top:4px">'+esc(cur||'unknown')+'</div></div>';
-  out.push(head);
-  if(!list.length){out.push(emptyState('&#9673;','No models listed.'));return out;}
+  // Zero models until a provider is actually connected.
+  if(!list.length){
+    out.push(emptyState('&#9673;','No models connected. Add a provider key in the API Keys tab (or Zeb runs its local backbone by default).'));
+    return out;
+  }
   list.forEach(m=>{const name=typeof m==='string'?m:(m.id||m.name||'');
+    const prov=(typeof m==='object'&&m.provider)?m.provider:'';
     const r=el('div','row');const g=el('div','grow');g.appendChild(el('div','title',name));
-    if(typeof m==='object'&&m.description)g.appendChild(el('div','meta',m.description));
+    if(prov)g.appendChild(el('div','meta',prov));
     r.appendChild(g);if(name===cur)r.appendChild(el('span','badge on','current'));out.push(r);});
   return out;
 }
@@ -400,12 +431,32 @@ async function loadCron(){
     const on=j.enabled!==false;r.appendChild(el('span','badge '+(on?'on':'off'),on?'enabled':'disabled'));return r;});
 }
 async function loadSkills(){
-  const list=toArr(await api('/api/skills'),['skills']);
+  const d=await api('/api/skills');
+  const list=toArr(d,['skills']);
   if(!list.length)return [emptyState('&#10022;','No skills available.')];
-  return list.map(s=>{const r=el('div','row');const g=el('div','grow');
-    g.appendChild(el('div','title',s.name||s.id||''));
-    if(s.description)g.appendChild(el('div','meta',s.description));
-    r.appendChild(g);if(s.category)r.appendChild(el('span','badge v',s.category));return r;});
+  // Group skills under their parent stack. Order comes from the server's
+  // `stacks` summary (Core Skills first); anything else defaults to "Core
+  // Skills". Each stack is a collapsible group.
+  const groups={};const order=[];
+  (toArr(d,['stacks'])).forEach(s=>{const n=s.name||'Core Skills';if(!(n in groups)){groups[n]=[];order.push(n);}});
+  list.forEach(s=>{const stack=s.stack||s.category||'Core Skills';
+    if(!(stack in groups)){groups[stack]=[];order.push(stack);}groups[stack].push(s);});
+  const out=[];
+  order.forEach(name=>{
+    const skills=groups[name]||[];if(!skills.length)return;
+    const wrap=el('div','stack');
+    const head=el('div','stack-head');
+    head.innerHTML='<span class="caret">&#9660;</span><span class="sname">'+esc(name)+'</span>';
+    head.appendChild(el('span','badge v',String(skills.length)));
+    head.onclick=()=>wrap.classList.toggle('collapsed');
+    const body=el('div','stack-body');
+    skills.forEach(s=>{const r=el('div','row');const g=el('div','grow');g.style.cursor='default';
+      g.appendChild(el('div','title',s.name||s.id||''));
+      if(s.description)g.appendChild(el('div','meta',s.description));
+      r.appendChild(g);body.appendChild(r);});
+    wrap.appendChild(head);wrap.appendChild(body);out.push(wrap);
+  });
+  return out;
 }
 async function loadPlugins(){
   const list=toArr(await api('/api/plugins'),['plugins']);
@@ -471,37 +522,47 @@ async function loadChannelData(){
 }
 
 /* ============ FILES ============ */
+// filePath is an ABSOLUTE path (empty string => let the server pick the
+// workspace root). The Files tab opens at that root and shows only its
+// top-level entries; the user clicks into folders to descend. Navigation
+// uses the absolute path/parent the server returns, so it is robust at any
+// depth.
 let filePath='';
 async function renderFiles(path){
   activeTab='files';setActive('files');filePath=path||'';
   showData('Files');bodyLoading();
   const b=$('#dataBody');
   try{
-    const d=await api('/api/files?path='+encodeURIComponent(filePath));
+    const d=await api('/api/files'+(filePath?'?path='+encodeURIComponent(filePath):''));
     let items=toArr(d,['files','entries','items']);
+    const here=d&&d.path||filePath;const parent=d&&d.parent;
+    filePath=here||'';
     b.innerHTML='';
-    const crumb=el('div','crumb');crumb.innerHTML='&#9636; <b>/'+esc(filePath)+'</b>';b.appendChild(crumb);
-    if(filePath){const up=el('div','row');const g=el('div','grow');g.appendChild(el('div','title','.. (up)'));
-      g.onclick=()=>renderFiles(filePath.split('/').slice(0,-1).join('/'));up.appendChild(g);b.appendChild(up);}
+    const crumb=el('div','crumb');crumb.innerHTML='&#9636; <b>'+esc(here||'/')+'</b>';b.appendChild(crumb);
+    if(parent&&parent!==here){
+      const up=el('div','row');const g=el('div','grow');g.appendChild(el('div','title','.. (up)'));
+      g.onclick=()=>renderFiles(parent);up.appendChild(g);b.appendChild(up);
+    }
     items.sort((a,b2)=>{const da=isDir(a),db=isDir(b2);return da===db?String(fname(a)).localeCompare(fname(b2)):(da?-1:1);});
-    if(!items.length&&!filePath){b.appendChild(emptyState('&#9636;','This directory is empty.'));return;}
+    if(!items.length){b.appendChild(emptyState('&#9636;','This directory is empty.'));return;}
     items.forEach(it=>{
       const dir=isDir(it),name=fname(it);
       const r=el('div','row');const g=el('div','grow');
-      g.appendChild(el('div','title',(dir?'&#9636; ':'&#9662; ').replace(/&#\d+;/,m=>m)+name)).innerHTML=(dir?'&#9636; ':'&#8226; ')+esc(name);
-      const full=(filePath?filePath+'/':'')+name;
-      g.onclick=()=>dir?renderFiles(full):openFile(full);
+      g.innerHTML=(dir?'&#9636; ':'&#8226; ')+esc(name);
+      const abs=fpath(it)||((here?here.replace(/\/$/,'')+'/':'')+name);
+      g.onclick=()=>dir?renderFiles(abs):openFile(abs);
       r.appendChild(g);b.appendChild(r);
     });
   }catch(e){b.innerHTML='';b.appendChild(inlineErr(e.message));}
 }
 function isDir(it){if(typeof it==='string')return it.endsWith('/');return it.type==='dir'||it.type==='directory'||it.is_dir===true||it.dir===true;}
-function fname(it){if(typeof it==='string')return it.replace(/\/$/,'');return it.name||it.path||'';}
+function fname(it){if(typeof it==='string')return it.replace(/\/$/,'').split('/').pop();return it.name||(it.path?String(it.path).split('/').pop():'');}
+function fpath(it){if(typeof it==='string')return '';return it.path||'';}
 async function openFile(full){
   showData('Files');const b=$('#dataBody');b.innerHTML='';
   const back=el('button','btn');back.innerHTML='&larr; Back';back.onclick=()=>renderFiles(filePath);
   const save=el('button','btn btn-accent','Save');save.style.marginLeft='auto';save.disabled=true;
-  const bar=el('div','toolbar');bar.appendChild(back);bar.appendChild(el('div','crumb','/'+full));bar.appendChild(save);b.appendChild(bar);
+  const bar=el('div','toolbar');bar.appendChild(back);bar.appendChild(el('div','crumb',full));bar.appendChild(save);b.appendChild(bar);
   const status=el('div','meta');status.style.margin='0 0 8px';b.appendChild(status);
   const ta=el('textarea','mono-view');
   ta.style.width='100%';ta.style.minHeight='60vh';ta.style.resize='vertical';ta.style.outline='none';
@@ -562,6 +623,16 @@ async function listKeys(){
   }catch(e){holder.innerHTML='';holder.appendChild(inlineErr(e.message));}
 }
 function mask(v){v=String(v);if(v.includes('•')||v.includes('*'))return v;if(v.length<=8)return '••••';return v.slice(0,4)+'••••••••'+v.slice(-4);}
+
+/* ============ SIDEBAR COLLAPSE ============ */
+const LS_SIDEBAR='zeb_dash_sidebar';
+function applySidebar(){
+  const collapsed=localStorage.getItem(LS_SIDEBAR)==='1';
+  $('#sidebar').classList.toggle('collapsed',collapsed);
+  $('#sidebarOpen').classList.toggle('show',collapsed);
+}
+$('#sidebarCollapse').onclick=()=>{localStorage.setItem(LS_SIDEBAR,'1');applySidebar();};
+$('#sidebarOpen').onclick=()=>{localStorage.setItem(LS_SIDEBAR,'0');applySidebar();};
 
 /* ============ RESTART GATEWAY ============ */
 $('#restartBtn').onclick=async()=>{
@@ -626,9 +697,70 @@ async function sendMsg(){
     const d=await api('/api/chat',{method:'POST',body:JSON.stringify({message:text,history:history.slice(0,-1)})});
     const reply=(d&&(d.reply!=null?d.reply:d.content))||'(no reply)';
     hideTyping();history.push({role:'assistant',content:reply});addMsgNode('assistant',reply);
+    if(Voice.active)Voice.speak(reply);
   }catch(e){hideTyping();addMsgNode('assistant','⚠ '+e.message);}
   finally{awaiting=false;sendBtn.disabled=false;Brain.setTarget(null);input.focus();}
 }
+
+/* ============ VOICE CHAT ============ */
+/* Browser Web Speech API: transcribe speech -> feed the SAME /api/chat
+   pipeline as typed messages (identical permissions & workspace access),
+   then speak Zeb's reply back. Fully client-side; degrades gracefully when
+   the browser has no SpeechRecognition. */
+const Voice=(function(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  const synth=window.speechSynthesis||null;
+  let rec=null, active=false, listening=false;
+  const btn=()=>document.getElementById('voiceBtn');
+  function supported(){return !!SR;}
+  function setBtn(state){
+    const b=btn();if(!b)return;
+    b.classList.toggle('listening',state==='listening');
+    b.classList.toggle('speaking',state==='speaking');
+    b.title=state==='listening'?'Listening… click to stop':(active?'Voice chat on — click to stop':'Voice chat');
+  }
+  function speak(text){
+    if(!synth||!active)return;
+    try{
+      synth.cancel();
+      const u=new SpeechSynthesisUtterance(String(text).slice(0,3000));
+      u.rate=1.02;u.pitch=1.0;
+      setBtn('speaking');
+      u.onend=()=>{setBtn(active?'':'');if(active&&!awaiting)startListening();};
+      synth.speak(u);
+    }catch(e){/* ignore */}
+  }
+  function startListening(){
+    if(!rec||listening)return;
+    try{listening=true;setBtn('listening');rec.start();}catch(e){listening=false;}
+  }
+  function stopListening(){if(rec&&listening){try{rec.stop();}catch(e){}}listening=false;}
+  function build(){
+    rec=new SR();rec.lang='en-US';rec.interimResults=false;rec.maxAlternatives=1;rec.continuous=false;
+    rec.onresult=(ev)=>{
+      const t=(ev.results&&ev.results[0]&&ev.results[0][0]&&ev.results[0][0].transcript||'').trim();
+      if(t){input.value=t;sendMsg();}
+    };
+    rec.onerror=()=>{listening=false;setBtn(active?'':'');};
+    rec.onend=()=>{listening=false;if(active&&!awaiting&&!(synth&&synth.speaking))setBtn('');};
+  }
+  function toggle(){
+    if(!supported()){alert('Voice chat needs a browser with speech recognition (try Chrome/Edge).');return;}
+    if(!rec)build();
+    active=!active;
+    if(active){setBtn('');startListening();}
+    else{stopListening();if(synth)synth.cancel();setBtn('');}
+  }
+  return {
+    get active(){return active;},
+    speak,toggle,supported,
+    init(){
+      const b=btn();if(!b)return;
+      if(!supported()){b.disabled=true;b.title='Voice chat not supported in this browser';return;}
+      b.onclick=toggle;
+    }
+  };
+})();
 
 /* ============ STATUS POLL ============ */
 async function pollStatus(){
@@ -653,6 +785,8 @@ function boot(){
   if(booted){applyMode();return;}
   booted=true;
   applyMode();
+  applySidebar();
+  Voice.init();
   Brain.init();
   renderMessages();
   showChat();setActive('sessions');
@@ -664,182 +798,130 @@ function boot(){
 <script>
 /* ============ BRAIN — RAW WebGL ============ */
 const Brain=(function(){
-  let gl,canvas,pointProg,lineProg,ptBuf,ptCount,lineBuf,lineCount,linePairBuf;
-  let energy=0.05, targetEnergy=0.05, rot=0;
-  let neurons=[], edges=[];
-  let ok=false;
+  // 2D-canvas neuron network: a handful of neurons that drift, connected by
+  // synapses, with signals that travel edge-to-edge and make nodes FIRE
+  // (flash) on arrival — chaining into neighbours. Energy (driven by agent
+  // activity) scales the firing rate, signal speed, and glow. Reads clearly
+  // as a living network at small size, where 260 WebGL points looked like a
+  // single fuzzy blob.
+  let canvas,ctx,ok=false;
+  let W=0,H=0,dpr=1;
+  let energy=0.05, targetEnergy=0.05;
+  let nodes=[], edges=[], signals=[];
+  let last=0, fireAcc=0;
   const api={comm:false};
 
-  function rand(a,b){return a+Math.random()*(b-a);}
+  function rnd(a,b){return a+Math.random()*(b-a);}
 
-  function buildBrain(){
-    // two hemispheres — ellipsoid lobes
-    const N=260;neurons=[];
+  function build(){
+    const N=14;nodes=[];
     for(let i=0;i<N;i++){
-      // sample within unit sphere, squash to brain-ish ellipsoid, split hemispheres
-      let x,y,z,r;
-      do{x=rand(-1,1);y=rand(-1,1);z=rand(-1,1);r=x*x+y*y+z*z;}while(r>1);
-      const side=Math.random()<0.5?-1:1;
-      let px=x*0.55*Math.pow(r,0.15)+side*0.32; // gap between hemispheres
-      let py=y*0.62;
-      let pz=z*0.7;
-      // flatten bottom a little, lift front for lobe feel
-      py+=0.08*Math.sin(pz*3.0);
-      neurons.push([px,py,pz, Math.random()]); // 4th = phase seed
+      const ang=(i/N)*Math.PI*2+rnd(-0.35,0.35);
+      const rad=rnd(0.30,0.86);
+      nodes.push({
+        x:0.5+Math.cos(ang)*rad*0.42,
+        y:0.5+Math.sin(ang)*rad*0.42,
+        vx:rnd(-1,1)*0.012, vy:rnd(-1,1)*0.012,
+        fire:0, seed:Math.random()
+      });
     }
-    // synapses: connect nearby neurons
-    edges=[];const maxD=0.42;
+    edges=[];
+    const has=(i,j)=>edges.some(e=>(e[0]===i&&e[1]===j)||(e[0]===j&&e[1]===i));
     for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){
-      const a=neurons[i],b=neurons[j];
-      const d=Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
-      if(d<maxD&&Math.random()<0.28)edges.push([i,j]);
+      const d=Math.hypot(nodes[i].x-nodes[j].x,nodes[i].y-nodes[j].y);
+      if(d<0.30)edges.push([i,j]);
+    }
+    // guarantee no orphan nodes: link each to its nearest neighbour
+    for(let i=0;i<N;i++){
+      let best=-1,bd=9;
+      for(let j=0;j<N;j++){if(j===i)continue;
+        const d=Math.hypot(nodes[i].x-nodes[j].x,nodes[i].y-nodes[j].y);
+        if(d<bd){bd=d;best=j;}}
+      if(best>=0&&!has(i,best))edges.push([Math.min(i,best),Math.max(i,best)]);
     }
   }
 
-  const PT_VS=`
-    attribute vec3 pos; attribute float seed;
-    uniform mat4 uMVP; uniform float uEnergy; uniform float uTime;
-    varying float vBright;
-    void main(){
-      vec4 p=uMVP*vec4(pos,1.0);
-      gl_Position=p;
-      float pulse=0.5+0.5*sin(uTime*(1.5+uEnergy*5.0)+seed*6.28);
-      vBright=0.42+pulse*(0.28+uEnergy*0.9);
-      float sz=(3.2+uEnergy*5.0+pulse*uEnergy*4.5)/max(p.w,0.1)*90.0;
-      gl_PointSize=clamp(sz,2.2,16.0);
-    }`;
-  const PT_FS=`
-    precision mediump float; varying float vBright;
-    uniform vec3 uColA; uniform vec3 uColB; uniform float uEnergy;
-    void main(){
-      vec2 d=gl_PointCoord-vec2(0.5);
-      float r=length(d);
-      float a=smoothstep(0.5,0.0,r);
-      a=pow(a,1.6);
-      vec3 col=mix(uColA,uColB,uEnergy);
-      gl_FragColor=vec4(col*vBright,a*vBright);
-    }`;
-  const LN_VS=`
-    attribute vec3 pos; attribute float t;
-    uniform mat4 uMVP; uniform float uEnergy; uniform float uTime; uniform float uComm;
-    varying float vB;
-    void main(){
-      gl_Position=uMVP*vec4(pos,1.0);
-      float travel=fract(uTime*(0.15+uEnergy*0.9)+uComm*uTime*0.5);
-      float spark=smoothstep(0.12,0.0,abs(fract(t*1.0)-travel));
-      vB=0.05+uEnergy*0.18+spark*uEnergy*0.9;
-    }`;
-  const LN_FS=`
-    precision mediump float; varying float vB;
-    uniform vec3 uColA; uniform vec3 uColB; uniform float uEnergy;
-    void main(){ vec3 c=mix(uColA,uColB,uEnergy); gl_FragColor=vec4(c*vB,vB); }`;
-
-  function compile(src,type){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
-    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
-  function program(vs,fs){const p=gl.createProgram();
-    gl.attachShader(p,compile(vs,gl.VERTEX_SHADER));gl.attachShader(p,compile(fs,gl.FRAGMENT_SHADER));
-    gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));return p;}
-
-  function mat(rotY,rotX,aspect){
-    // perspective * translate(z=-3) * rotY * rotX
-    const cy=Math.cos(rotY),sy=Math.sin(rotY),cx=Math.cos(rotX),sx=Math.sin(rotX);
-    const f=1.0/Math.tan(0.9/2), zn=0.1, zf=10, z=-3.0;
-    // rotation combined (Ry then Rx)
-    const r=[
-      cy,      sy*sx,      -sy*cx,
-      0,       cx,          sx,
-      sy,      -cy*sx,      cy*cx
-    ];
-    // build column-major MVP
-    const m=new Float32Array(16);
-    // model-view (rotation + translate z)
-    const mv=[
-      r[0],r[3],r[6],0,
-      r[1],r[4],r[7],0,
-      r[2],r[5],r[8],0,
-      0,0,z,1
-    ];
-    const p=[
-      f/aspect,0,0,0,
-      0,f,0,0,
-      0,0,(zf+zn)/(zn-zf),-1,
-      0,0,(2*zf*zn)/(zn-zf),0
-    ];
-    // m = p * mv (column-major)
-    for(let c=0;c<4;c++)for(let rw=0;rw<4;rw++){
-      let s=0;for(let k=0;k<4;k++)s+=p[k*4+rw]*mv[c*4+k];
-      m[c*4+rw]=s;
-    }
-    return m;
+  function emitFrom(idx){
+    nodes[idx].fire=1;
+    edges.forEach(e=>{
+      let to=-1;
+      if(e[0]===idx)to=e[1];else if(e[1]===idx)to=e[0];else return;
+      if(signals.length<90&&Math.random()<0.85)signals.push({from:idx,to,t:0});
+    });
   }
 
-  function setup(){
-    buildBrain();
-    // point buffer: xyz + seed
-    const pd=new Float32Array(neurons.length*4);
-    neurons.forEach((n,i)=>{pd[i*4]=n[0];pd[i*4+1]=n[1];pd[i*4+2]=n[2];pd[i*4+3]=n[3];});
-    ptBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,ptBuf);gl.bufferData(gl.ARRAY_BUFFER,pd,gl.STATIC_DRAW);
-    ptCount=neurons.length;
-    // line buffer: xyz + t (0..1 along edge index)
-    const ld=[];
-    edges.forEach((e,ei)=>{const a=neurons[e[0]],b=neurons[e[1]];const t=ei/edges.length;
-      ld.push(a[0],a[1],a[2],t, b[0],b[1],b[2],t+0.02);});
-    linePairBuf=new Float32Array(ld);
-    lineBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,lineBuf);gl.bufferData(gl.ARRAY_BUFFER,linePairBuf,gl.STATIC_DRAW);
-    lineCount=edges.length*2;
-    pointProg=program(PT_VS,PT_FS);
-    lineProg=program(LN_VS,LN_FS);
+  function neuronColor(){return api.comm?[255,92,200]:[34,224,208];}
+  function signalColor(){return api.comm?[255,130,170]:[160,107,255];}
+
+  function step(dt){
+    energy+=(targetEnergy-energy)*Math.min(1,dt*3.0);
+    nodes.forEach(n=>{
+      n.x+=n.vx*dt*(0.4+energy);n.y+=n.vy*dt*(0.4+energy);
+      if(n.x<0.12||n.x>0.88){n.vx*=-1;n.x=Math.max(0.12,Math.min(0.88,n.x));}
+      if(n.y<0.12||n.y>0.88){n.vy*=-1;n.y=Math.max(0.12,Math.min(0.88,n.y));}
+      n.fire=Math.max(0,n.fire-dt*2.4);
+    });
+    fireAcc+=dt*(0.5+energy*7.0);
+    while(fireAcc>=1){fireAcc-=1;if(nodes.length)emitFrom((Math.random()*nodes.length)|0);}
+    const speed=0.55+energy*2.2;
+    for(let i=signals.length-1;i>=0;i--){
+      const s=signals[i];s.t+=dt*speed;
+      if(s.t>=1){
+        nodes[s.to].fire=1;
+        if(Math.random()<0.5+energy*0.4)emitFrom(s.to);
+        signals.splice(i,1);
+      }
+    }
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.globalCompositeOperation='lighter';
+    const nc=neuronColor(),sc=signalColor();
+    // synapses
+    ctx.lineWidth=1;
+    edges.forEach(e=>{
+      const a=nodes[e[0]],b=nodes[e[1]];
+      ctx.strokeStyle='rgba('+nc[0]+','+nc[1]+','+nc[2]+','+(0.05+energy*0.14)+')';
+      ctx.beginPath();ctx.moveTo(a.x*W,a.y*H);ctx.lineTo(b.x*W,b.y*H);ctx.stroke();
+    });
+    // travelling signals
+    signals.forEach(s=>{
+      const a=nodes[s.from],b=nodes[s.to];
+      const x=(a.x+(b.x-a.x)*s.t)*W,y=(a.y+(b.y-a.y)*s.t)*H;
+      const r=2.0+energy*2.2;
+      const g=ctx.createRadialGradient(x,y,0,x,y,r*3);
+      g.addColorStop(0,'rgba('+sc[0]+','+sc[1]+','+sc[2]+',0.95)');
+      g.addColorStop(1,'rgba('+sc[0]+','+sc[1]+','+sc[2]+',0)');
+      ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r*3,0,7);ctx.fill();
+    });
+    // neurons
+    const time=performance.now()/1000;
+    nodes.forEach(n=>{
+      const x=n.x*W,y=n.y*H;
+      const pulse=0.5+0.5*Math.sin(time*(1.2+energy*3.0)+n.seed*6.28);
+      const rr=1.7+energy*1.6+pulse*(0.5+energy*1.0)+n.fire*3.4;
+      const bright=0.5+n.fire*0.5+energy*0.3;
+      const glow=ctx.createRadialGradient(x,y,0,x,y,rr*3.2);
+      glow.addColorStop(0,'rgba('+nc[0]+','+nc[1]+','+nc[2]+','+bright+')');
+      glow.addColorStop(1,'rgba('+nc[0]+','+nc[1]+','+nc[2]+',0)');
+      ctx.fillStyle=glow;ctx.beginPath();ctx.arc(x,y,rr*3.2,0,7);ctx.fill();
+      ctx.fillStyle='rgba('+Math.min(255,nc[0]+140)+','+Math.min(255,nc[1]+30)+','+Math.min(255,nc[2]+50)+','+(0.75+n.fire*0.25)+')';
+      ctx.beginPath();ctx.arc(x,y,Math.max(1,rr*0.5),0,7);ctx.fill();
+    });
   }
 
   function resize(){
-    const dpr=Math.min(window.devicePixelRatio||1,2);
-    const w=canvas.clientWidth,h=canvas.clientHeight;
-    canvas.width=Math.max(1,w*dpr);canvas.height=Math.max(1,h*dpr);
-    gl.viewport(0,0,canvas.width,canvas.height);
+    dpr=Math.min(window.devicePixelRatio||1,2);
+    W=canvas.clientWidth||180;H=canvas.clientHeight||180;
+    canvas.width=Math.max(1,W*dpr);canvas.height=Math.max(1,H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
   }
 
-  let last=0;
   function frame(ts){
     if(!ok)return;
     const dt=Math.min((ts-last)/1000,0.05);last=ts;
-    energy+=(targetEnergy-energy)*Math.min(1,dt*3.0);
-    rot+=dt*(0.12+energy*0.6);
-    const time=ts/1000;
-    const aspect=canvas.width/canvas.height;
-    const mvp=mat(rot,0.35+Math.sin(rot*0.3)*0.12,aspect);
-
-    gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE); // additive
-    gl.disable(gl.DEPTH_TEST);
-
-    // colors: calm cyan -> hot magenta/violet; comm shifts toward magenta
-    const cool=[0.13,0.88,0.82], hot=api.comm?[1.0,0.36,0.78]:[0.63,0.42,1.0];
-
-    // lines
-    gl.useProgram(lineProg);
-    gl.bindBuffer(gl.ARRAY_BUFFER,lineBuf);
-    let lp=gl.getAttribLocation(lineProg,'pos');gl.enableVertexAttribArray(lp);gl.vertexAttribPointer(lp,3,gl.FLOAT,false,16,0);
-    let lt=gl.getAttribLocation(lineProg,'t');gl.enableVertexAttribArray(lt);gl.vertexAttribPointer(lt,1,gl.FLOAT,false,16,12);
-    gl.uniformMatrix4fv(gl.getUniformLocation(lineProg,'uMVP'),false,mvp);
-    gl.uniform1f(gl.getUniformLocation(lineProg,'uEnergy'),energy);
-    gl.uniform1f(gl.getUniformLocation(lineProg,'uTime'),time);
-    gl.uniform1f(gl.getUniformLocation(lineProg,'uComm'),api.comm?1.0:0.0);
-    gl.uniform3fv(gl.getUniformLocation(lineProg,'uColA'),cool);
-    gl.uniform3fv(gl.getUniformLocation(lineProg,'uColB'),hot);
-    gl.drawArrays(gl.LINES,0,lineCount);
-
-    // points
-    gl.useProgram(pointProg);
-    gl.bindBuffer(gl.ARRAY_BUFFER,ptBuf);
-    let pp=gl.getAttribLocation(pointProg,'pos');gl.enableVertexAttribArray(pp);gl.vertexAttribPointer(pp,3,gl.FLOAT,false,16,0);
-    let ps=gl.getAttribLocation(pointProg,'seed');gl.enableVertexAttribArray(ps);gl.vertexAttribPointer(ps,1,gl.FLOAT,false,16,12);
-    gl.uniformMatrix4fv(gl.getUniformLocation(pointProg,'uMVP'),false,mvp);
-    gl.uniform1f(gl.getUniformLocation(pointProg,'uEnergy'),energy);
-    gl.uniform1f(gl.getUniformLocation(pointProg,'uTime'),time);
-    gl.uniform3fv(gl.getUniformLocation(pointProg,'uColA'),cool);
-    gl.uniform3fv(gl.getUniformLocation(pointProg,'uColB'),hot);
-    gl.drawArrays(gl.POINTS,0,ptCount);
-
+    step(dt);draw();
     requestAnimationFrame(frame);
   }
 
@@ -878,10 +960,12 @@ const Brain=(function(){
     init(){
       try{
         canvas=document.getElementById('brainCanvas');
-        gl=canvas.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:true})||canvas.getContext('experimental-webgl');
-        if(!gl){fallback();return;}
-        resize();setup();ok=true;
+        ctx=canvas.getContext('2d');
+        if(!ctx){fallback();return;}
+        resize();build();ok=true;
         window.addEventListener('resize',resize);
+        // seed a little initial activity so it's alive immediately
+        for(let i=0;i<3;i++)emitFrom((Math.random()*nodes.length)|0);
         last=performance.now();requestAnimationFrame(frame);
       }catch(e){ok=false;fallback();}
     },
