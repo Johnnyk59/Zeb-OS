@@ -1,0 +1,47 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Auto-generate basic-auth credentials for the dashboard when it will
+# bind to a non-loopback address and no auth provider is configured.
+# Credentials are printed to container logs so the operator can read
+# them with `docker logs`.
+
+case "${ZEB_DASHBOARD:-}" in
+    1|true|TRUE|True|yes|YES|Yes) ;;
+    *) exit 0 ;;
+esac
+
+# Already configured — nothing to do.
+[ -n "${ZEB_DASHBOARD_BASIC_AUTH_USERNAME:-}" ] && exit 0
+[ -n "${ZEB_DASHBOARD_OAUTH_CLIENT_ID:-}" ] && exit 0
+
+dash_host="${ZEB_DASHBOARD_HOST:-0.0.0.0}"
+case "$dash_host" in
+    127.0.0.1|localhost|::1) exit 0 ;;
+esac
+
+# Generate a random 20-char password (url-safe base64, trimmed).
+gen_pw="$(head -c 15 /dev/urandom | base64 | tr -d '=+/' | head -c 20)"
+[ -z "$gen_pw" ] && gen_pw="zebos-$(date +%s)"
+
+# Persist to the s6 env dir so every service inherits them.
+s6_envdir="/run/s6/container_environment"
+if [ -d "$s6_envdir" ]; then
+    printf '%s' "admin"   > "${s6_envdir}/ZEB_DASHBOARD_BASIC_AUTH_USERNAME"
+    printf '%s' "$gen_pw"  > "${s6_envdir}/ZEB_DASHBOARD_BASIC_AUTH_PASSWORD"
+fi
+
+# Also export for any process spawned from this script chain.
+export ZEB_DASHBOARD_BASIC_AUTH_USERNAME="admin"
+export ZEB_DASHBOARD_BASIC_AUTH_PASSWORD="$gen_pw"
+
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  ZebOS Dashboard — auto-generated credentials              ║"
+echo "║                                                            ║"
+echo "║  Username:  admin                                          ║"
+printf '║  Password:  %-46s  ║\n' "$gen_pw"
+echo "║                                                            ║"
+echo "║  Set ZEB_DASHBOARD_BASIC_AUTH_USERNAME and                  ║"
+echo "║  ZEB_DASHBOARD_BASIC_AUTH_PASSWORD to use your own.         ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""

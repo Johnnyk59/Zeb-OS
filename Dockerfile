@@ -296,6 +296,7 @@ RUN mkdir -p /etc/cont-init.d && \
         > /etc/cont-init.d/01-zeb-setup && \
     chmod +x /etc/cont-init.d/01-zeb-setup
 COPY --chmod=0755 docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-supervise-perms
+COPY --chmod=0755 docker/cont-init.d/016-dashboard-auto-auth /etc/cont-init.d/016-dashboard-auto-auth
 COPY --chmod=0755 docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles
 
 # ---------- Runtime ----------
@@ -383,11 +384,8 @@ VOLUME [ "/opt/data" ]
 # and exec's the final program so its exit code becomes the container
 # exit code. Without the wrapper-as-ENTRYPOINT, leading-dash args
 # like `--version` would be intercepted by /init's POSIX shell.
-# Chat-only web UI (zeb_chat/, `zeb chatui`) default port. Documents the port
-# for `docker run -p 8000:8000`; with network_mode: host it's a no-op. The
-# supervised zeb-chat service runs only when ZEB_CHAT_UI is truthy, or you can
-# run `chatui` as the container command directly.
-EXPOSE 8000
+# ZebOS dashboard (React UI on web_server.py) default port.
+EXPOSE 9119
 
 ENTRYPOINT [ "/init", "/opt/zeb/docker/main-wrapper.sh" ]
 CMD [ ]
