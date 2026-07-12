@@ -59,13 +59,19 @@
   .ob-q{display:block;font-size:13px;color:var(--txt);margin:14px 0 6px}
   .ob-q span{color:var(--dim2);font-size:11px;font-family:var(--mono)}
   .onboard-card textarea.field{min-height:64px;resize:vertical}
+  .ob-provider{display:flex;gap:8px}
+  .ob-provider select.field{flex:0 0 40%;cursor:pointer}
+  .ob-provider input.field{flex:1;min-width:0}
+  .ob-err{color:var(--danger);font-size:12px;margin-right:auto;min-height:16px}
 
   /* APP LAYOUT */
   #app{display:none;height:100%}
   #app.on{display:flex}
   .sidebar{width:20%;min-width:210px;max-width:320px;background:var(--g1);border-right:1px solid var(--line);
-    display:flex;flex-direction:column;height:100%;transition:width .2s ease,min-width .2s ease}
-  .sidebar.collapsed{width:0;min-width:0;max-width:0;border-right:none;overflow:hidden}
+    display:flex;flex-direction:column;height:100%;overflow:hidden;
+    transition:width .32s cubic-bezier(.4,0,.2,1),min-width .32s cubic-bezier(.4,0,.2,1),
+      max-width .32s cubic-bezier(.4,0,.2,1),opacity .22s ease,border-color .32s ease}
+  .sidebar.collapsed{width:0;min-width:0;max-width:0;border-right-color:transparent;opacity:0}
   .brand{display:flex;align-items:center;gap:10px;padding:18px 18px 14px}
   .brand-name{flex:1;min-width:0}
   .brand .dot{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--cyan),var(--violet));
@@ -261,16 +267,24 @@
   #app.sb-collapsed .chat-top{padding-left:56px;}
   #app.sb-collapsed .pane-head{padding-left:56px;}
 
-  /* ===== SPLIT-SCREEN (sidebar hidden → chat left 50%, brain right 50%) ===== */
+  /* ===== FOCUS MODE (sidebar hidden) — full-width chat, brain floats over
+     the right half as a transparent overlay. Chat and brain are visually
+     separate but not divided: the message text flows naturally underneath the
+     brain, while the top and bottom bars span the FULL width and sit above it
+     so controls stay crisp and usable. ===== */
   @media (min-width:900px){
-    #app.split .main .pane{right:50%;}
+    /* Chat pane stays full width (no carve-out). */
     #app.split #brainWrap{
       position:fixed;top:0;right:0;left:auto;width:50vw;height:100vh;
-      border-left:1px solid var(--line);
-      background:radial-gradient(60% 55% at 50% 45%,rgba(20,20,34,.55),rgba(10,10,11,0) 72%);
+      border:none;background:none;z-index:38;pointer-events:none;
+      -webkit-mask-image:radial-gradient(70% 62% at 60% 46%,#000 55%,transparent 82%);
+      mask-image:radial-gradient(70% 62% at 60% 46%,#000 55%,transparent 82%);
     }
-    #app.split .seg{margin-right:12px;}
-    #app.split #brainStatus{bottom:26px;font-size:11px;letter-spacing:3px;}
+    /* Top & bottom bars span full width and float ABOVE the brain overlay. */
+    #app.split .chat-top,
+    #app.split .composer{position:relative;z-index:41;background:var(--bg);}
+    #app.split .composer{background:linear-gradient(180deg,rgba(10,10,11,0) 0%,var(--bg) 22%);}
+    #app.split #brainStatus{bottom:22px;font-size:11px;letter-spacing:3px;}
   }
 
   /* ===== NEW CHAT + RECENT CHATS POPOVER ===== */
@@ -385,20 +399,24 @@
   </main>
 </div>
 
-<!-- ONBOARDING: first-boot identity questions -->
+<!-- ONBOARDING: first-boot provider + identity -->
 <div id="onboard" style="display:none">
   <div class="onboard-card">
     <div class="brandmark"></div>
-    <h1>Let's get acquainted</h1>
-    <p>Three quick questions so Zeb knows who it works with and what it's for. You can change these anytime.</p>
-    <label class="ob-q">Who am I? <span>— you: your name / role</span></label>
-    <input id="obWhoAmI" class="field" type="text" autocomplete="off" placeholder="e.g. Johnny, indie builder"/>
+    <h1>Let's get you set up</h1>
+    <p>Pick a chat provider for fast, high-quality replies. Zeb's local model keeps running in the background 24/7 to power the live thinking brain — you always have both.</p>
+    <label class="ob-q">Chat provider <span>— fast responses; key stays on this machine</span></label>
+    <div class="ob-provider">
+      <select id="obProvider" class="field"></select>
+      <input id="obKey" class="field" type="password" autocomplete="off" spellcheck="false" placeholder="Paste API key"/>
+    </div>
     <label class="ob-q">Who are you? <span>— Zeb: how it should show up</span></label>
     <input id="obWhoAreYou" class="field" type="text" autocomplete="off" placeholder="e.g. My autonomous engineer &amp; researcher"/>
     <label class="ob-q">What's the mission?</label>
     <textarea id="obMission" class="field" placeholder="What are we here to do?"></textarea>
-    <div style="margin-top:18px;display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn" id="obSkip">Skip for now</button>
+    <div style="margin-top:18px;display:flex;gap:10px;justify-content:flex-end;align-items:center">
+      <span class="ob-err" id="obErr"></span>
+      <button class="btn" id="obSkip">Skip — use local only</button>
       <button class="btn btn-accent" id="obSave">Save &amp; start</button>
     </div>
   </div>
@@ -1054,22 +1072,47 @@ function repoRow(r,reload){
 }
 
 /* ============ ONBOARDING (first-boot identity) ============ */
+async function loadOnboardProviders(){
+  const sel=$('#obProvider');if(!sel)return;
+  try{
+    const d=await api('/api/providers');
+    const list=(d&&d.providers)||[];
+    sel.innerHTML='';
+    list.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;sel.appendChild(o);});
+  }catch(e){/* keep whatever's there */}
+}
 async function maybeOnboard(){
   try{
     const idn=await api('/api/identity');
     if(idn&&idn.onboarded)return;
   }catch(e){return;}
   const ob=$('#onboard');if(!ob)return;
+  await loadOnboardProviders();
   ob.style.display='flex';
-  setTimeout(()=>{const f=$('#obWhoAmI');if(f)f.focus();},60);
+  setTimeout(()=>{const f=$('#obKey');if(f)f.focus();},60);
 }
 async function saveOnboard(skip){
-  const ob=$('#onboard');
+  const ob=$('#onboard'),err=$('#obErr');if(err)err.textContent='';
+  if(!skip){
+    // Connect the chosen provider first so chat can use it immediately for
+    // fast, high-quality replies. The local model keeps running for the brain.
+    const provider=$('#obProvider').value;
+    const key=$('#obKey').value.trim();
+    if(key){
+      try{
+        await api('/api/onboard/provider',{method:'POST',body:JSON.stringify({provider,key})});
+        // Make the connected provider the default chat model; local stays the
+        // background/thinking engine behind the brain visualization.
+        selectedModel=provider;localStorage.setItem(LS_MODEL,provider);
+        loadModelSelector();
+      }catch(e){if(err){err.textContent=e.message;}return;}  // stay open on a bad key
+    }
+  }
   try{
     const body=skip?{onboarded:true}:{
-      who_am_i:$('#obWhoAmI').value.trim(),
       who_are_you:$('#obWhoAreYou').value.trim(),
-      mission:$('#obMission').value.trim()
+      mission:$('#obMission').value.trim(),
+      onboarded:true
     };
     await api('/api/identity',{method:'POST',body:JSON.stringify(body)});
   }catch(e){/* non-fatal */}
@@ -1438,7 +1481,7 @@ const Brain=(function(){
   function rnd(a,b){return a+Math.random()*(b-a);}
 
   function build(){
-    const N=30;nodes=[];
+    const N=24;nodes=[];
     // Even coverage via a Fibonacci sphere, squashed into a brain-ish
     // ellipsoid (wider than tall, a little flat front-to-back) + jitter.
     const GA=Math.PI*(3-Math.sqrt(5));
@@ -1469,7 +1512,7 @@ const Brain=(function(){
     edges.forEach(e=>{
       let to=-1;
       if(e[0]===idx)to=e[1];else if(e[1]===idx)to=e[0];else return;
-      if(signals.length<170&&Math.random()<0.8)signals.push({from:idx,to,t:0});
+      if(signals.length<90&&Math.random()<0.55)signals.push({from:idx,to,t:0});
     });
   }
 
@@ -1488,20 +1531,22 @@ const Brain=(function(){
   }
 
   function step(dt){
-    energy+=(targetEnergy-energy)*Math.min(1,dt*3.0);
-    rot+=dt*(0.10+energy*0.55);
+    energy+=(targetEnergy-energy)*Math.min(1,dt*2.2);
+    rot+=dt*(0.05+energy*0.26);           // slow, calm drift
     tGlobal+=dt;
     nodes.forEach(n=>{
-      const w=tGlobal*0.6+n.drift;
-      n.x=n.bx+Math.sin(w)*0.03;n.y=n.by+Math.cos(w*0.9)*0.03;n.z=n.bz+Math.sin(w*1.1)*0.03;
-      n.fire=Math.max(0,n.fire-dt*2.2);
+      const w=tGlobal*0.45+n.drift;
+      n.x=n.bx+Math.sin(w)*0.026;n.y=n.by+Math.cos(w*0.9)*0.026;n.z=n.bz+Math.sin(w*1.1)*0.026;
+      // Gentle fade — a slower decay reads as a smooth glow settling, not a flicker.
+      n.fire=Math.max(0,n.fire-dt*1.4);
     });
-    fireAcc+=dt*(0.6+energy*9.0);
+    fireAcc+=dt*(0.28+energy*3.6);         // far fewer spontaneous fires
     while(fireAcc>=1){fireAcc-=1;if(nodes.length)emitFrom((Math.random()*nodes.length)|0);}
-    const speed=0.5+energy*2.4;
+    const speed=0.4+energy*1.5;
     for(let i=signals.length-1;i>=0;i--){
       const s=signals[i];s.t+=dt*speed;
-      if(s.t>=1){nodes[s.to].fire=1;if(Math.random()<0.45+energy*0.4)emitFrom(s.to);signals.splice(i,1);}
+      // Softer arrival: partial fire + a quieter chain so bursts don't cascade.
+      if(s.t>=1){nodes[s.to].fire=Math.min(1,nodes[s.to].fire+0.7);if(Math.random()<0.22+energy*0.3)emitFrom(s.to);signals.splice(i,1);}
     }
   }
 
@@ -1540,7 +1585,7 @@ const Brain=(function(){
       const te=s.t*s.t*(3-2*s.t);
       const x=a.sx+(b.sx-a.sx)*te,y=a.sy+(b.sy-a.sy)*te;
       const persp=(a.persp+b.persp)/2;
-      const r=(scale*0.02+energy*scale*0.022)*persp;
+      const r=(scale*0.012+energy*scale*0.012)*persp;
       const g=ctx.createRadialGradient(x,y,0,x,y,r*3.4);
       g.addColorStop(0,'rgba('+sc[0]+','+sc[1]+','+sc[2]+',0.95)');
       g.addColorStop(0.4,'rgba('+sc[0]+','+sc[1]+','+sc[2]+',0.45)');
@@ -1548,20 +1593,21 @@ const Brain=(function(){
       ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r*3.4,0,7);ctx.fill();
     });
 
-    // neurons — nearer ones drawn last (on top), bigger and brighter
+    // neurons — small, refined, calm. Firing adds a soft, contained glow
+    // rather than ballooning the node; the pulse is slow and shallow.
     order.forEach(p=>{
-      const pulse=0.5+0.5*Math.sin(tGlobal*(1.4+energy*3.0)+p.seed*6.28);
+      const pulse=0.5+0.5*Math.sin(tGlobal*(0.7+energy*1.2)+p.seed*6.28);
       const depthN=(p.depth+1)/2;
-      const base=scale*(0.012+0.022*depthN)*p.persp;
-      const rr=base*(1+pulse*0.35+p.fire*2.4+energy*0.5);
-      const bright=Math.min(1,0.32+p.fire*0.6+energy*0.25+depthN*0.15);
-      const glow=ctx.createRadialGradient(p.sx,p.sy,0,p.sx,p.sy,rr*4.4);
+      const base=scale*(0.0075+0.012*depthN)*p.persp;
+      const rr=base*(1+pulse*0.15+p.fire*0.7+energy*0.2);
+      const bright=Math.min(1,0.26+p.fire*0.42+energy*0.16+depthN*0.13);
+      const glow=ctx.createRadialGradient(p.sx,p.sy,0,p.sx,p.sy,rr*3.1);
       glow.addColorStop(0,'rgba('+nc[0]+','+nc[1]+','+nc[2]+','+bright+')');
-      glow.addColorStop(0.5,'rgba('+nc[0]+','+nc[1]+','+nc[2]+','+(bright*0.35)+')');
+      glow.addColorStop(0.55,'rgba('+nc[0]+','+nc[1]+','+nc[2]+','+(bright*0.3)+')');
       glow.addColorStop(1,'rgba('+nc[0]+','+nc[1]+','+nc[2]+',0)');
-      ctx.fillStyle=glow;ctx.beginPath();ctx.arc(p.sx,p.sy,rr*4.4,0,7);ctx.fill();
-      ctx.fillStyle='rgba('+Math.min(255,nc[0]+120)+','+Math.min(255,nc[1]+25)+','+Math.min(255,nc[2]+40)+','+Math.min(1,0.72+p.fire*0.28)+')';
-      ctx.beginPath();ctx.arc(p.sx,p.sy,Math.max(0.6,rr*0.85),0,7);ctx.fill();
+      ctx.fillStyle=glow;ctx.beginPath();ctx.arc(p.sx,p.sy,rr*3.1,0,7);ctx.fill();
+      ctx.fillStyle='rgba('+Math.min(255,nc[0]+110)+','+Math.min(255,nc[1]+22)+','+Math.min(255,nc[2]+38)+','+Math.min(1,0.6+p.fire*0.3)+')';
+      ctx.beginPath();ctx.arc(p.sx,p.sy,Math.max(0.5,rr*0.75),0,7);ctx.fill();
     });
   }
 
@@ -1625,7 +1671,7 @@ const Brain=(function(){
         // always re-measures to fill its box.
         if(window.ResizeObserver){try{new ResizeObserver(()=>resize()).observe(canvas);}catch(e){}}
         // seed a little initial activity so it's alive immediately
-        for(let i=0;i<5;i++)emitFrom((Math.random()*nodes.length)|0);
+        for(let i=0;i<2;i++)emitFrom((Math.random()*nodes.length)|0);
         last=performance.now();requestAnimationFrame(frame);
       }catch(e){ok=false;fallback();}
     },
