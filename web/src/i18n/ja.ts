@@ -50,12 +50,12 @@ export const ja: Translations = {
   },
 
   app: {
-    brand: "Zeb Agent",
-    brandShort: "HA",
+    brand: "ZebOS",
+    brandShort: "ZO",
     closeNavigation: "ナビゲーションを閉じる",
     closeModelTools: "モデルとツールを閉じる",
     footer: {
-      org: "Nous Research",
+      org: "ZebOS",
     },
     activeSessionsLabel: "アクティブなセッション:",
     gatewayStatusLabel: "ゲートウェイの状態:",

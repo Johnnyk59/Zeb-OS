@@ -50,12 +50,12 @@ export const pt: Translations = {
   },
 
   app: {
-    brand: "Zeb Agent",
-    brandShort: "HA",
+    brand: "ZebOS",
+    brandShort: "ZO",
     closeNavigation: "Fechar navegação",
     closeModelTools: "Fechar modelo e ferramentas",
     footer: {
-      org: "Nous Research",
+      org: "ZebOS",
     },
     activeSessionsLabel: "Sessões ativas:",
     gatewayStatusLabel: "Estado do gateway:",

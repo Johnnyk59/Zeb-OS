@@ -50,12 +50,12 @@ export const af: Translations = {
   },
 
   app: {
-    brand: "Zeb Agent",
-    brandShort: "HA",
+    brand: "ZebOS",
+    brandShort: "ZO",
     closeNavigation: "Maak navigasie toe",
     closeModelTools: "Maak model en gereedskap toe",
     footer: {
-      org: "Nous Research",
+      org: "ZebOS",
     },
     activeSessionsLabel: "Aktiewe Sessies:",
     gatewayStatusLabel: "Gateway-status:",

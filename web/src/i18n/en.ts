@@ -53,12 +53,12 @@ export const en: Translations = {
   },
 
   app: {
-    brand: "Zeb Agent",
-    brandShort: "HA",
+    brand: "ZebOS",
+    brandShort: "ZO",
     closeNavigation: "Close navigation",
     closeModelTools: "Close model and tools",
     footer: {
-      org: "Nous Research",
+      org: "ZebOS",
     },
     activeSessionsLabel: "Active Sessions:",
     gatewayStatusLabel: "Gateway Status:",

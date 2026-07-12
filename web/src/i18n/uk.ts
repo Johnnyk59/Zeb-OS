@@ -50,12 +50,12 @@ export const uk: Translations = {
   },
 
   app: {
-    brand: "Zeb Agent",
-    brandShort: "HA",
+    brand: "ZebOS",
+    brandShort: "ZO",
     closeNavigation: "Закрити навігацію",
     closeModelTools: "Закрити модель та інструменти",
     footer: {
-      org: "Nous Research",
+      org: "ZebOS",
     },
     activeSessionsLabel: "Активні сесії:",
     gatewayStatusLabel: "Стан шлюзу:",

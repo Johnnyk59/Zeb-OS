@@ -317,6 +317,35 @@ function appendProfileParam(url: string, profile?: string): string {
 export const api = {
   buildWsUrl,
   getStatus: () => fetchJSON<StatusResponse>("/api/status"),
+  // ZebOS panels ---------------------------------------------------------
+  getLocalModel: () => fetchJSON<LocalModelStatus>("/api/localmodel"),
+  restartLocalModel: () =>
+    fetchJSON<{ ok: boolean; error?: string }>("/api/localmodel/restart", {
+      method: "POST",
+    }),
+  getDiagnose: () => fetchJSON<DiagnoseResponse>("/api/diagnose"),
+  runDiagnoseRepair: () =>
+    fetchJSON<DiagnoseResponse>("/api/diagnose/repair", { method: "POST" }),
+  getRepos: (q = "") =>
+    fetchJSON<ReposResponse>(
+      q ? `/api/repos?q=${encodeURIComponent(q)}` : "/api/repos",
+    ),
+  addRepo: (repo: { full_name: string; url?: string; description?: string }) =>
+    fetchJSON<SavedRepo & { error?: string }>("/api/repos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(repo),
+    }),
+  deleteRepo: (rid: string) =>
+    fetchJSON<{ ok: boolean }>(`/api/repos/${encodeURIComponent(rid)}`, {
+      method: "DELETE",
+    }),
+  scanRepos: (query: string, limit = 10) =>
+    fetchJSON<RepoScanResponse>("/api/repos/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, limit }),
+    }),
   /**
    * Identity probe for the dashboard auth gate (Phase 7).
    *
@@ -519,7 +548,7 @@ export const api = {
     }),
   getEnvVars: () => fetchJSON<Record<string, EnvVarInfo>>("/api/env"),
   setEnvVar: (key: string, value: string) =>
-    fetchJSON<{ ok: boolean }>("/api/env", {
+    fetchJSON<{ ok: boolean; default_model_set?: string }>("/api/env", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key, value }),
@@ -1640,6 +1669,73 @@ export interface PlatformStatus {
   error_message?: string;
   state: string;
   updated_at: string;
+}
+
+// ZebOS panels --------------------------------------------------------------
+
+export interface LocalModelStatus {
+  name: string;
+  provider: string;
+  loaded: boolean;
+  ready: boolean;
+  path: string;
+  size_bytes: number;
+  ctx: number;
+  cpu_percent: number;
+  process_cpu_percent: number;
+  ram: {
+    process_mb?: number;
+    system_used_mb?: number;
+    system_total_mb?: number;
+    percent?: number;
+  };
+  net: { bytes_sent?: number; bytes_recv?: number };
+  download: {
+    active?: boolean;
+    file?: string;
+    total_bytes?: number;
+    downloaded_bytes?: number;
+    percent?: number;
+    rate_mbps?: number;
+  };
+  events: Array<{ ts?: number; event?: string; detail?: string; level?: string }>;
+  active: boolean;
+}
+
+export interface DiagnoseCheck {
+  component: string;
+  status: "ok" | "degraded" | "critical" | string;
+  message: string;
+  repaired: boolean;
+}
+
+export interface DiagnoseResponse {
+  checks: DiagnoseCheck[];
+  summary: { ok?: number; degraded?: number; critical?: number; repaired?: number };
+  overall: "ok" | "degraded" | "critical" | "unknown" | string;
+  offline: boolean;
+  error?: string;
+}
+
+export interface SavedRepo {
+  id: string;
+  full_name: string;
+  url: string;
+  description?: string;
+  stars?: number;
+  language?: string;
+  added_at?: number;
+}
+
+export interface ReposResponse {
+  repos: SavedRepo[];
+  error?: string;
+}
+
+export interface RepoScanResponse {
+  results: SavedRepo[];
+  added: SavedRepo[];
+  error?: string;
 }
 
 export interface StatusResponse {

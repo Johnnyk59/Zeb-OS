@@ -32,6 +32,16 @@ export function resolvePageTitle(
   if (key) {
     return t.app.nav[key];
   }
+  // ZebOS pages whose titles can't be derived from the path segment.
+  const ZEBOS_TITLES: Record<string, string> = {
+    "/localmodel": "Local Model",
+    "/repos": "GitHub Repos",
+    "/diagnose": "Diagnose",
+    "/terminal": "Terminal",
+  };
+  if (ZEBOS_TITLES[normalized]) {
+    return ZEBOS_TITLES[normalized];
+  }
   // Derive title from pathname: "/profiles" → "Profiles"
   const segment = normalized.slice(1);
   if (segment) {
