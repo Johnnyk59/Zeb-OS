@@ -21,7 +21,7 @@ import {
 import {
   Activity,
   BarChart3,
-  BookOpen,
+  ChevronDown,
   Clock,
   Code,
   Cpu,
@@ -73,8 +73,11 @@ import { ProfileScopeBanner } from "@/components/ProfileScopeBanner";
 import { useSystemActions } from "@/contexts/useSystemActions";
 import type { SystemAction } from "@/contexts/system-actions-context";
 import ConfigPage from "@/pages/ConfigPage";
+import DiagnosePage from "@/pages/DiagnosePage";
 import DocsPage from "@/pages/DocsPage";
 import EnvPage from "@/pages/EnvPage";
+import LocalModelPage from "@/pages/LocalModelPage";
+import ReposPage from "@/pages/ReposPage";
 import FilesPage from "@/pages/FilesPage";
 import SessionsPage from "@/pages/SessionsPage";
 import LogsPage from "@/pages/LogsPage";
@@ -91,6 +94,7 @@ import ChannelsPage from "@/pages/ChannelsPage";
 import WebhooksPage from "@/pages/WebhooksPage";
 import SystemPage from "@/pages/SystemPage";
 import ChatPage from "@/pages/ChatPage";
+import ZebChatPage from "@/pages/ZebChatPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useI18n } from "@/i18n";
@@ -136,6 +140,9 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/files": FilesPage,
   "/analytics": AnalyticsPage,
   "/models": ModelsPage,
+  "/localmodel": LocalModelPage,
+  "/repos": ReposPage,
+  "/diagnose": DiagnosePage,
   "/logs": LogsPage,
   "/cron": CronPage,
   "/skills": SkillsPage,
@@ -149,7 +156,12 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/profiles/new": ProfileBuilderPage,
   "/config": ConfigPage,
   "/env": EnvPage,
+  // Reachable by URL for old bookmarks, but no longer in the sidebar.
   "/docs": DocsPage,
+  // The classic embedded TUI terminal — kept reachable by URL as a
+  // fallback while the bubble chat (ZebChatPage, mounted persistently
+  // at /chat) is the primary surface.
+  "/terminal": ChatPage,
 };
 
 // Route placeholder for /chat.  The persistent ChatPage host (rendered
@@ -160,7 +172,13 @@ function ChatRouteSink() {
   return null;
 }
 
-const BUILTIN_NAV_REST: NavItem[] = [
+/**
+ * Functional tabs — the things you *use* day to day. Rendered at the top
+ * of the sidebar. Configuration/admin surfaces live in the collapsible
+ * group below (BUILTIN_NAV_CONFIG). Documentation was removed from the
+ * nav entirely (its route still resolves for old bookmarks).
+ */
+const BUILTIN_NAV_MAIN: NavItem[] = [
   {
     path: "/sessions",
     labelKey: "sessions",
@@ -180,24 +198,33 @@ const BUILTIN_NAV_REST: NavItem[] = [
     label: "Models",
     icon: Cpu,
   },
-  { path: "/logs", labelKey: "logs", label: "Logs", icon: FileText },
-  { path: "/cron", labelKey: "cron", label: "Cron", icon: Clock },
+  { path: "/localmodel", label: "Local Model", icon: Activity },
+  { path: "/repos", label: "GitHub Repos", icon: Code },
   { path: "/skills", labelKey: "skills", label: "Skills", icon: Package },
-  { path: "/plugins", labelKey: "plugins", label: "Plugins", icon: Puzzle },
-  { path: "/mcp", label: "MCP", icon: Plug },
-  { path: "/channels", label: "Channels", icon: Radio },
-  { path: "/webhooks", label: "Webhooks", icon: Webhook },
-  { path: "/pairing", label: "Pairing", icon: ShieldCheck },
-  { path: "/profiles", labelKey: "profiles", label: "Profiles", icon: Users },
-  { path: "/config", labelKey: "config", label: "Config", icon: Settings },
-  { path: "/env", labelKey: "keys", label: "Keys", icon: KeyRound },
+  { path: "/cron", labelKey: "cron", label: "Cron", icon: Clock },
+  { path: "/env", labelKey: "keys", label: "API Keys", icon: KeyRound },
+  { path: "/diagnose", label: "Diagnose", icon: Heart },
+];
+
+/** Admin/configuration surfaces, consolidated under one collapsible
+ *  "Configuration" section in the sidebar. */
+const BUILTIN_NAV_CONFIG: NavItem[] = [
   { path: "/system", label: "System", icon: Wrench },
-  {
-    path: "/docs",
-    labelKey: "documentation",
-    label: "Documentation",
-    icon: BookOpen,
-  },
+  { path: "/profiles", labelKey: "profiles", label: "Profiles", icon: Users },
+  { path: "/pairing", label: "Pairing", icon: ShieldCheck },
+  { path: "/webhooks", label: "Webhooks", icon: Webhook },
+  { path: "/channels", label: "Channels", icon: Radio },
+  { path: "/mcp", label: "MCP", icon: Plug },
+  { path: "/plugins", labelKey: "plugins", label: "Plugins", icon: Puzzle },
+  { path: "/logs", labelKey: "logs", label: "Logs", icon: FileText },
+  { path: "/config", labelKey: "config", label: "Config", icon: Settings },
+];
+
+const CONFIG_NAV_PATHS = new Set(BUILTIN_NAV_CONFIG.map((i) => i.path));
+
+const BUILTIN_NAV_REST: NavItem[] = [
+  ...BUILTIN_NAV_MAIN,
+  ...BUILTIN_NAV_CONFIG,
 ];
 
 const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
@@ -575,10 +602,8 @@ export default function App() {
               >
                 <PluginSlot name="header-left" />
 
-                <Typography className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground uppercase">
-                  Zeb
-                  <br />
-                  Agent
+                <Typography className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.14em] text-midground uppercase">
+                  ZebOS
                 </Typography>
               </div>
 
@@ -616,17 +641,29 @@ export default function App() {
               aria-label={t.app.navigation}
             >
               <ul className="flex flex-col">
-                {sidebarNav.coreItems.map((item) => (
-                  <SidebarNavLink
-                    closeMobile={closeMobile}
-                    collapsed={isDesktopCollapsed}
-                    item={item}
-                    key={item.path}
-                    t={t}
-                    tooltipWarmRef={tooltipWarmRef}
-                  />
-                ))}
+                {sidebarNav.coreItems
+                  .filter((item) => !CONFIG_NAV_PATHS.has(item.path))
+                  .map((item) => (
+                    <SidebarNavLink
+                      closeMobile={closeMobile}
+                      collapsed={isDesktopCollapsed}
+                      item={item}
+                      key={item.path}
+                      t={t}
+                      tooltipWarmRef={tooltipWarmRef}
+                    />
+                  ))}
               </ul>
+
+              <SidebarConfigGroup
+                closeMobile={closeMobile}
+                collapsed={isDesktopCollapsed}
+                items={sidebarNav.coreItems.filter((item) =>
+                  CONFIG_NAV_PATHS.has(item.path),
+                )}
+                t={t}
+                tooltipWarmRef={tooltipWarmRef}
+              />
 
               {sidebarNav.pluginItems.length > 0 && (
                 <div
@@ -719,10 +756,9 @@ export default function App() {
             <div
               className={cn(
                 "relative z-2 flex min-w-0 min-h-0 flex-1 flex-col",
-                "px-3 sm:px-6",
-                isChatRoute
-                  ? "pb-0 pt-1 sm:pt-2 lg:pt-4"
-                  : "pt-2 sm:pt-4 lg:pt-6",
+                // Chat is full-bleed: its top bar and composer span the whole
+                // content area edge-to-edge; every other page keeps gutters.
+                isChatRoute ? "p-0" : "px-3 sm:px-6 pt-2 sm:pt-4 lg:pt-6",
                 isDocsRoute && "min-h-0 flex-1",
               )}
             >
@@ -774,7 +810,10 @@ export default function App() {
                       )}
                       aria-hidden={!isChatRoute}
                     >
-                      <ChatPage isActive={isChatRoute} />
+                      <ZebChatPage
+                        isActive={isChatRoute}
+                        sidebarCollapsed={isDesktopCollapsed}
+                      />
                     </div>
                   ))}
               </div>
@@ -888,6 +927,122 @@ function SidebarNavLink({
         <SidebarTooltip anchor={tooltipAnchor} label={navLabel} warmRef={tooltipWarmRef} />
       )}
     </li>
+  );
+}
+
+const CONFIG_GROUP_OPEN_KEY = "zeb-nav-config-open";
+
+/**
+ * Collapsible "Configuration" section grouping the admin surfaces
+ * (System, Profiles, Pairing, Webhooks, Channels, MCP, Plugins, Logs,
+ * Config). Auto-expands when the active route lives inside it so deep
+ * links always show where you are; the manual open/close preference is
+ * remembered across reloads.
+ */
+function SidebarConfigGroup({
+  closeMobile,
+  collapsed,
+  items,
+  t,
+  tooltipWarmRef,
+}: {
+  closeMobile: () => void;
+  collapsed: boolean;
+  items: NavItem[];
+  t: Translations;
+  tooltipWarmRef: TooltipWarmRef;
+}) {
+  const { pathname } = useLocation();
+  const routeInside = items.some(
+    (i) => pathname === i.path || pathname.startsWith(i.path + "/"),
+  );
+  const [openRaw, setOpenRaw] = useState(() => {
+    try {
+      return localStorage.getItem(CONFIG_GROUP_OPEN_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const open = openRaw || routeInside;
+  const toggle = () => {
+    setOpenRaw((prev) => {
+      // When the route forces the group open, the first click should CLOSE
+      // it — but that only sticks until navigation back inside the group.
+      const next = routeInside ? false : !prev;
+      try {
+        localStorage.setItem(CONFIG_GROUP_OPEN_KEY, String(next));
+      } catch {
+        /* private browsing */
+      }
+      return next;
+    });
+  };
+
+  if (items.length === 0) return null;
+
+  // Icon-collapsed sidebar: no room for a group header — render the items
+  // inline after a divider, keeping every page one click away.
+  if (collapsed) {
+    return (
+      <ul className="mt-1 flex flex-col border-t border-current/10 pt-1">
+        {items.map((item) => (
+          <SidebarNavLink
+            closeMobile={closeMobile}
+            collapsed={collapsed}
+            item={item}
+            key={item.path}
+            t={t}
+            tooltipWarmRef={tooltipWarmRef}
+          />
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <div className="mt-1 flex flex-col border-t border-current/10 pt-1">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className={cn(
+          "group/cfg relative flex w-full items-center gap-3",
+          "px-5 py-2.5",
+          "font-sans text-display uppercase text-xs tracking-[0.14em]",
+          "whitespace-nowrap transition-colors cursor-pointer",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground",
+          open ? "text-midground" : "text-text-tertiary hover:text-midground",
+        )}
+      >
+        <Settings className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">Configuration</span>
+        <ChevronDown
+          className={cn(
+            "ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200",
+            open ? "rotate-0" : "-rotate-90",
+          )}
+        />
+        <span
+          aria-hidden
+          className="absolute inset-y-0.5 left-1.5 right-1.5 bg-midground opacity-0 pointer-events-none transition-opacity duration-200 group-hover/cfg:opacity-5"
+        />
+      </button>
+
+      {open && (
+        <ul className="flex flex-col">
+          {items.map((item) => (
+            <SidebarNavLink
+              closeMobile={closeMobile}
+              collapsed={collapsed}
+              item={item}
+              key={item.path}
+              t={t}
+              tooltipWarmRef={tooltipWarmRef}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

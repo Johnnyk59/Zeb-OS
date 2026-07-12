@@ -38,10 +38,49 @@ const DEFAULT_LAYOUT: ThemeLayout = {
 // Themes
 // ---------------------------------------------------------------------------
 
+/**
+ * Zeb Dark — the canonical ZebOS look. Near-black canvas, cool porcelain
+ * text, a faint teal glow, Inter for UI text and JetBrains Mono for code.
+ * Deliberately restrained: contrast comes from typography and spacing, not
+ * from saturated color.
+ */
 export const defaultTheme: DashboardTheme = {
   name: "default",
+  label: "Zeb Dark",
+  description: "ZebOS signature — near-black, minimal, precise",
+  palette: {
+    background: { hex: "#08090b", alpha: 1 },
+    midground: { hex: "#e2e8ed", alpha: 1 },
+    foreground: { hex: "#ffffff", alpha: 0 },
+    warmGlow: "rgba(94, 234, 212, 0.10)",
+    noiseOpacity: 0.3,
+  },
+  typography: {
+    ...DEFAULT_TYPOGRAPHY,
+    fontSans: `"Inter", ${SYSTEM_SANS}`,
+    fontMono: `"JetBrains Mono", ${SYSTEM_MONO}`,
+    fontUrl:
+      "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap",
+    letterSpacing: "-0.008em",
+  },
+  layout: {
+    ...DEFAULT_LAYOUT,
+    radius: "0.625rem",
+  },
+  colorOverrides: {
+    success: "#34d399",
+    warning: "#fbbf24",
+    destructive: "#f87171",
+  },
+  terminalBackground: "#050607",
+  terminalForeground: "#dbe2e8",
+};
+
+/** The previous default — kept for anyone who prefers the teal look. */
+export const zebTealTheme: DashboardTheme = {
+  name: "zeb-teal",
   label: "Zeb Teal",
-  description: "Classic dark teal — the canonical Zeb look",
+  description: "Classic dark teal — the original Zeb look",
   palette: {
     background: { hex: "#041c1c", alpha: 1 },
     midground: { hex: "#ffe6cb", alpha: 1 },
@@ -214,23 +253,27 @@ export const nousBlueTheme: DashboardTheme = {
  */
 export const defaultLargeTheme: DashboardTheme = {
   name: "default-large",
-  label: "Zeb Teal (Large)",
-  description: "Zeb Teal with bigger fonts and roomier spacing",
+  label: "Zeb Dark (Large)",
+  description: "Zeb Dark with bigger fonts and roomier spacing",
   palette: defaultTheme.palette,
   typography: {
-    ...DEFAULT_TYPOGRAPHY,
+    ...defaultTheme.typography,
     baseSize: "18px",
     lineHeight: "1.65",
   },
   layout: {
-    ...DEFAULT_LAYOUT,
+    ...defaultTheme.layout,
     density: "spacious",
   },
+  colorOverrides: defaultTheme.colorOverrides,
+  terminalBackground: defaultTheme.terminalBackground,
+  terminalForeground: defaultTheme.terminalForeground,
 };
 
 export const BUILTIN_THEMES: Record<string, DashboardTheme> = {
   default: defaultTheme,
   "default-large": defaultLargeTheme,
+  "zeb-teal": zebTealTheme,
   "nous-blue": nousBlueTheme,
   midnight: midnightTheme,
   ember: emberTheme,

@@ -1,0 +1,305 @@
+/**
+ * BrainCanvas — Zeb's thinking brain as a 2.5D neuron network.
+ *
+ * A Fibonacci-sphere of neurons squashed into a brain-ish ellipsoid,
+ * depth-sorted and perspective-projected onto a 2D canvas. Signals travel
+ * along synapses and fire the neurons they reach; a transparent trail-fade
+ * leaves comet smears without painting over whatever sits behind the
+ * canvas (it's an overlay — the chat flows underneath).
+ *
+ * `energy` (0..1) drives firing rate, rotation, glow and the nucleus so
+ * the brain visibly "thinks harder" while the agent is working. The
+ * animation pauses when the tab is hidden or the canvas leaves the
+ * viewport.
+ */
+import { useEffect, useRef } from "react";
+
+interface Node {
+  bx: number;
+  by: number;
+  bz: number;
+  x: number;
+  y: number;
+  z: number;
+  seed: number;
+  drift: number;
+  fire: number;
+}
+
+interface Signal {
+  from: number;
+  to: number;
+  t: number;
+}
+
+const TILT = 0.34;
+const CT = Math.cos(TILT);
+const ST = Math.sin(TILT);
+
+function rnd(a: number, b: number): number {
+  return a + Math.random() * (b - a);
+}
+
+export function BrainCanvas({
+  energy = 0.05,
+  className,
+}: {
+  /** Target activity level 0..1 — eased internally, safe to change often. */
+  energy?: number;
+  className?: string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const energyRef = useRef(energy);
+  energyRef.current = energy;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let W = 0;
+    let H = 0;
+    let CX = 0;
+    let CY = 0;
+    let scale = 1;
+    let rot = 0;
+    let tGlobal = 0;
+    let last = 0;
+    let fireAcc = 0;
+    let cur = 0.05;
+    let raf = 0;
+    let running = true;
+    let visible = true;
+
+    // --- topology -----------------------------------------------------
+    const N = 24;
+    const nodes: Node[] = [];
+    const GA = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < N; i++) {
+      const y = 1 - (i / (N - 1)) * 2;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const th = GA * i;
+      let x = Math.cos(th) * r;
+      let z = Math.sin(th) * r;
+      let yy = y;
+      const k = rnd(0.8, 1.0);
+      x *= 1.18 * k;
+      yy *= 0.86 * k;
+      z *= 0.92 * k;
+      x += rnd(-0.05, 0.05);
+      yy += rnd(-0.05, 0.05);
+      z += rnd(-0.05, 0.05);
+      nodes.push({ bx: x, by: yy, bz: z, x, y: yy, z, seed: Math.random(), drift: rnd(0, 6.28), fire: 0 });
+    }
+    const edges: Array<[number, number]> = [];
+    const has = (i: number, j: number) =>
+      edges.some((e) => (e[0] === i && e[1] === j) || (e[0] === j && e[1] === i));
+    const D3 = (a: Node, b: Node) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+    for (let i = 0; i < N; i++)
+      for (let j = i + 1; j < N; j++) {
+        if (D3(nodes[i], nodes[j]) < 0.62) edges.push([i, j]);
+      }
+    for (let i = 0; i < N; i++) {
+      let best = -1;
+      let bd = 9;
+      for (let j = 0; j < N; j++) {
+        if (j === i) continue;
+        const d = D3(nodes[i], nodes[j]);
+        if (d < bd) {
+          bd = d;
+          best = j;
+        }
+      }
+      if (best >= 0 && !has(i, best)) edges.push([Math.min(i, best), Math.max(i, best)]);
+    }
+    const signals: Signal[] = [];
+
+    const emitFrom = (idx: number) => {
+      nodes[idx].fire = 1;
+      for (const e of edges) {
+        let to = -1;
+        if (e[0] === idx) to = e[1];
+        else if (e[1] === idx) to = e[0];
+        else continue;
+        if (signals.length < 90 && Math.random() < 0.55) signals.push({ from: idx, to, t: 0 });
+      }
+    };
+
+    // --- projection ----------------------------------------------------
+    const project = (n: Node) => {
+      const cr = Math.cos(rot);
+      const sr = Math.sin(rot);
+      const x = n.x * cr - n.z * sr;
+      const z = n.x * sr + n.z * cr;
+      const y2 = n.y * CT - z * ST;
+      const z2 = n.y * ST + z * CT;
+      const persp = 1 / (2.0 - z2 * 0.6);
+      return { sx: CX + x * scale * persp, sy: CY + y2 * scale * persp, depth: z2, persp };
+    };
+
+    const step = (dt: number) => {
+      cur += (energyRef.current - cur) * Math.min(1, dt * 2.2);
+      rot += dt * (0.05 + cur * 0.26);
+      tGlobal += dt;
+      for (const n of nodes) {
+        const w = tGlobal * 0.45 + n.drift;
+        n.x = n.bx + Math.sin(w) * 0.026;
+        n.y = n.by + Math.cos(w * 0.9) * 0.026;
+        n.z = n.bz + Math.sin(w * 1.1) * 0.026;
+        n.fire = Math.max(0, n.fire - dt * 1.4);
+      }
+      fireAcc += dt * (0.28 + cur * 3.6);
+      while (fireAcc >= 1) {
+        fireAcc -= 1;
+        emitFrom((Math.random() * nodes.length) | 0);
+      }
+      const speed = 0.4 + cur * 1.5;
+      for (let i = signals.length - 1; i >= 0; i--) {
+        const s = signals[i];
+        s.t += dt * speed;
+        if (s.t >= 1) {
+          nodes[s.to].fire = Math.min(1, nodes[s.to].fire + 0.7);
+          if (Math.random() < 0.22 + cur * 0.3) emitFrom(s.to);
+          signals.splice(i, 1);
+        }
+      }
+    };
+
+    const NC: [number, number, number] = [54, 232, 214];
+    const CC: [number, number, number] = [70, 120, 225];
+    const SC: [number, number, number] = [172, 120, 255];
+
+    const draw = () => {
+      // Pull existing pixels toward alpha 0 → comet trails without a
+      // dark box over the content behind the overlay.
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.fillStyle = `rgba(0,0,0,${0.3 + 0.14 * (1 - cur)})`;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = "lighter";
+
+      const coreR = scale * (0.55 + cur * 0.3);
+      const cg = ctx.createRadialGradient(CX, CY, 0, CX, CY, coreR);
+      cg.addColorStop(0, `rgba(${CC[0]},${CC[1]},${CC[2]},${0.1 + cur * 0.2})`);
+      cg.addColorStop(1, `rgba(${CC[0]},${CC[1]},${CC[2]},0)`);
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.arc(CX, CY, coreR, 0, 7);
+      ctx.fill();
+
+      const P = nodes.map((n, i) => {
+        const p = project(n) as ReturnType<typeof project> & {
+          i: number;
+          fire: number;
+          seed: number;
+        };
+        p.i = i;
+        p.fire = n.fire;
+        p.seed = n.seed;
+        return p;
+      });
+      const order = P.slice().sort((a, b) => a.depth - b.depth);
+
+      for (const e of edges) {
+        const a = P[e[0]];
+        const b = P[e[1]];
+        const dep = (a.depth + b.depth) / 2;
+        const al = (0.04 + cur * 0.16) * (0.45 + 0.55 * ((dep + 1) / 2));
+        ctx.strokeStyle = `rgba(${NC[0]},${NC[1]},${NC[2]},${al})`;
+        ctx.lineWidth = Math.max(0.4, scale * 0.006 * a.persp);
+        ctx.beginPath();
+        ctx.moveTo(a.sx, a.sy);
+        ctx.lineTo(b.sx, b.sy);
+        ctx.stroke();
+      }
+
+      for (const s of signals) {
+        const a = P[s.from];
+        const b = P[s.to];
+        const te = s.t * s.t * (3 - 2 * s.t);
+        const x = a.sx + (b.sx - a.sx) * te;
+        const y = a.sy + (b.sy - a.sy) * te;
+        const persp = (a.persp + b.persp) / 2;
+        const r = (scale * 0.012 + cur * scale * 0.012) * persp;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3.4);
+        g.addColorStop(0, `rgba(${SC[0]},${SC[1]},${SC[2]},0.95)`);
+        g.addColorStop(0.4, `rgba(${SC[0]},${SC[1]},${SC[2]},0.45)`);
+        g.addColorStop(1, `rgba(${SC[0]},${SC[1]},${SC[2]},0)`);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 3.4, 0, 7);
+        ctx.fill();
+      }
+
+      for (const p of order) {
+        const pulse = 0.5 + 0.5 * Math.sin(tGlobal * (0.7 + cur * 1.2) + p.seed * 6.28);
+        const depthN = (p.depth + 1) / 2;
+        const base = scale * (0.0075 + 0.012 * depthN) * p.persp;
+        const rr = base * (1 + pulse * 0.15 + p.fire * 0.7 + cur * 0.2);
+        const bright = Math.min(1, 0.26 + p.fire * 0.42 + cur * 0.16 + depthN * 0.13);
+        const glow = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, rr * 3.1);
+        glow.addColorStop(0, `rgba(${NC[0]},${NC[1]},${NC[2]},${bright})`);
+        glow.addColorStop(0.55, `rgba(${NC[0]},${NC[1]},${NC[2]},${bright * 0.3})`);
+        glow.addColorStop(1, `rgba(${NC[0]},${NC[1]},${NC[2]},0)`);
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(p.sx, p.sy, rr * 3.1, 0, 7);
+        ctx.fill();
+        ctx.fillStyle = `rgba(${Math.min(255, NC[0] + 110)},${Math.min(255, NC[1] + 22)},${Math.min(255, NC[2] + 38)},${Math.min(1, 0.6 + p.fire * 0.3)})`;
+        ctx.beginPath();
+        ctx.arc(p.sx, p.sy, Math.max(0.5, rr * 0.75), 0, 7);
+        ctx.fill();
+      }
+    };
+
+    const resize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      W = canvas.clientWidth || 180;
+      H = canvas.clientHeight || 180;
+      canvas.width = Math.max(1, Math.round(W * dpr));
+      canvas.height = Math.max(1, Math.round(H * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      CX = W / 2;
+      CY = H / 2;
+      scale = Math.min(W, H) * 0.42;
+      ctx.clearRect(0, 0, W, H);
+    };
+
+    const frame = (ts: number) => {
+      if (!running) return;
+      if (!visible || document.hidden) {
+        // Skip work while off-screen; keep the loop alive cheaply.
+        last = ts;
+        raf = requestAnimationFrame(frame);
+        return;
+      }
+      const dt = Math.min((ts - last) / 1000, 0.05);
+      last = ts;
+      step(dt);
+      draw();
+      raf = requestAnimationFrame(frame);
+    };
+
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+    const io = new IntersectionObserver((entries) => {
+      visible = entries[0]?.isIntersecting ?? true;
+    });
+    io.observe(canvas);
+
+    raf = requestAnimationFrame((ts) => {
+      last = ts;
+      frame(ts);
+    });
+
+    return () => {
+      running = false;
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      io.disconnect();
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className={className} aria-hidden />;
+}

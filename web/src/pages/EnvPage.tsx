@@ -684,7 +684,7 @@ export default function EnvPage() {
     if (!value) return;
     setSaving(key);
     try {
-      await api.setEnvVar(key, value);
+      const saveRes = await api.setEnvVar(key, value);
       setVars((prev) =>
         prev
           ? {
@@ -707,7 +707,16 @@ export default function EnvPage() {
         delete n[key];
         return n;
       });
-      showToast(`${key} ${t.common.save.toLowerCase()}d`, "success");
+      // ZebOS: pasting a provider key with no main model configured adopts
+      // that provider's recommended model as the chat default.
+      if (saveRes.default_model_set) {
+        showToast(
+          `${key} saved — chat now defaults to ${saveRes.default_model_set}`,
+          "success",
+        );
+      } else {
+        showToast(`${key} ${t.common.save.toLowerCase()}d`, "success");
+      }
     } catch (e) {
       showToast(`${t.config.failedToSave} ${key}: ${e}`, "error");
     } finally {

@@ -161,6 +161,66 @@ def _warm_gateway_module() -> None:
         pass
 
 
+def _start_local_model_autostart() -> None:
+    """Warm the local backbone model in a daemon thread at dashboard boot.
+
+    Downloads/verifies the GGUF weights if needed and records progress into
+    ``agent.local_model_status`` (the Local Model tab's activity feed).
+    ``ZEB_LOCAL_MODEL_PREFETCH=0`` disables entirely; ``ZEB_LOCAL_MODEL_WARM=0``
+    verifies weights but skips the RAM-heavy load (it then loads lazily on
+    first use). Fail-open: any error is logged to the activity feed, never
+    raised into startup.
+    """
+    if os.environ.get("ZEB_LOCAL_MODEL_PREFETCH", "1").strip() == "0":
+        return
+
+    def _worker() -> None:
+        try:
+            from agent import local_model_status
+
+            local_model_status.record("autostart", "dashboard boot: preparing local model")
+        except Exception:
+            pass
+        try:
+            from agent.local_model_manager import ensure_local_model_weights
+
+            cfg = load_config() or {}
+            path = ensure_local_model_weights(cfg)
+        except Exception as exc:  # noqa: BLE001 — background, log-only
+            try:
+                from agent import local_model_status
+
+                local_model_status.record(
+                    "autostart", f"weights unavailable: {exc}", level="error"
+                )
+            except Exception:
+                pass
+            return
+        if os.environ.get("ZEB_LOCAL_MODEL_WARM", "1").strip() == "0":
+            return
+        try:
+            from agent.llama_cpp_adapter import LlamaCppClient
+            from agent.local_model_manager import resolved_n_ctx
+
+            # Constructing the client loads the process-wide singleton, so the
+            # model is resident and the first brain/autonomy call is instant.
+            LlamaCppClient(model_path=str(path), n_ctx=resolved_n_ctx(cfg))
+            from agent import local_model_status
+
+            local_model_status.record("autostart", "local model loaded and resident")
+        except Exception as exc:  # noqa: BLE001 — background, log-only
+            try:
+                from agent import local_model_status
+
+                local_model_status.record(
+                    "autostart", f"warm load skipped: {exc}", level="warn"
+                )
+            except Exception:
+                pass
+
+    threading.Thread(target=_worker, name="localmodel-autostart", daemon=True).start()
+
+
 def _resolve_restart_drain_timeout() -> float:
     try:
         from zeb_cli.gateway import _get_restart_drain_timeout
@@ -188,6 +248,13 @@ async def _lifespan(app: "FastAPI"):
     # Running in an executor means the cost is paid in a worker thread while
     # the server socket is already open and accepting probes.
     asyncio.get_event_loop().run_in_executor(None, _warm_gateway_module)
+
+    # ZebOS: bring the local backbone model up in the background so it's
+    # running 24/7 from boot — it powers the brain visualization and the
+    # autonomy bots while a provider model handles user-facing chat.
+    # ZEB_LOCAL_MODEL_PREFETCH=0 skips entirely (tests/CI); weights download
+    # + verification happen off the event loop and never block startup.
+    _start_local_model_autostart()
 
     # Desktop-spawned backends (ZEB_DESKTOP=1) fire cron jobs themselves,
     # since the app has no gateway running the scheduler. Server `zeb
@@ -2587,6 +2654,297 @@ async def get_system_stats():
             pass
 
     return info
+
+
+# ---------------------------------------------------------------------------
+# ZebOS panels — local-model status/restart, offline diagnose, GitHub repos.
+#
+# These power the dashboard's Local Model, Diagnose, and Repos tabs. They
+# reuse the same modules the chat server (`zeb_chat`) and the background
+# monitor use, so the numbers shown here are the numbers the agent lives by.
+# Everything is fail-open: a missing psutil or an unimportable model stack
+# degrades to a partial snapshot rather than a 500.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/localmodel")
+async def get_local_model_status():
+    """Live identity + resource usage for the always-on local backbone model.
+
+    Model name / weights-on-disk / loaded state, plus real-time CPU, RAM,
+    network counters and the rolling activity log recorded by
+    ``agent.local_model_status``.
+    """
+
+    def _snapshot() -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "name": "",
+            "provider": "local-model",
+            "loaded": False,
+            "ready": False,
+            "path": "",
+            "size_bytes": 0,
+            "ctx": 0,
+            "cpu_percent": 0.0,
+            "process_cpu_percent": 0.0,
+            "ram": {},
+            "net": {},
+            "download": {},
+            "events": [],
+            "active": False,
+        }
+        try:
+            cfg = load_config() or {}
+        except Exception:
+            cfg = {}
+        try:
+            from agent.local_model_manager import (
+                DEFAULT_LOCAL_MODEL_CTX,
+                get_local_model_path,
+                local_model_display_name,
+            )
+
+            out["name"] = local_model_display_name(cfg)
+            p = get_local_model_path(cfg)
+            if p is not None:
+                out["ready"] = True
+                out["path"] = str(p)
+                try:
+                    out["size_bytes"] = p.stat().st_size
+                except Exception:
+                    pass
+            lm = cfg.get("local_model") if isinstance(cfg.get("local_model"), dict) else {}
+            out["ctx"] = int((lm or {}).get("ctx") or DEFAULT_LOCAL_MODEL_CTX)
+        except Exception:
+            pass
+        try:
+            from agent.llama_cpp_adapter import is_model_loaded, loaded_model_path
+
+            out["loaded"] = bool(is_model_loaded())
+            lp = loaded_model_path()
+            if lp and not out["path"]:
+                out["path"] = lp
+        except Exception:
+            pass
+        try:
+            import psutil  # type: ignore
+
+            vm = psutil.virtual_memory()
+            out["ram"] = {
+                "process_mb": round(psutil.Process().memory_info().rss / 1048576, 1),
+                "system_used_mb": round(vm.used / 1048576, 1),
+                "system_total_mb": round(vm.total / 1048576, 1),
+                "percent": vm.percent,
+            }
+            # interval=None → non-blocking, measured since the previous call
+            # in this long-lived process; the panel polls, so values stay live.
+            out["cpu_percent"] = psutil.cpu_percent(interval=None)
+            try:
+                out["process_cpu_percent"] = psutil.Process().cpu_percent(interval=None)
+            except Exception:
+                pass
+            nio = psutil.net_io_counters()
+            out["net"] = {"bytes_sent": nio.bytes_sent, "bytes_recv": nio.bytes_recv}
+        except Exception:
+            pass
+        try:
+            from agent import local_model_status
+
+            snap = local_model_status.snapshot()
+            out["events"] = snap.get("events", [])
+            out["download"] = snap.get("download", {})
+        except Exception:
+            pass
+        out["active"] = bool(out["loaded"] or (out.get("download") or {}).get("active"))
+        return out
+
+    return await asyncio.to_thread(_snapshot)
+
+
+@app.post("/api/localmodel/restart")
+async def restart_local_model():
+    """Unload the local model and re-warm it in the background.
+
+    The recovery path when the backbone wedges: drop the in-process
+    singleton (freeing its RAM immediately), then re-verify weights and
+    reload off the request path. Status streams into the activity log the
+    Local Model tab already polls.
+    """
+
+    def _restart() -> Dict[str, Any]:
+        try:
+            from agent import local_model_status
+
+            local_model_status.record("restart", "requested from dashboard")
+        except Exception:
+            pass
+        try:
+            from agent.llama_cpp_adapter import unload_model
+
+            unload_model()
+        except Exception as exc:
+            return {"ok": False, "error": f"unload failed: {exc}"}
+
+        def _rewarm() -> None:
+            try:
+                from agent.local_model_manager import ensure_local_model_weights
+
+                cfg = load_config() or {}
+                ensure_local_model_weights(cfg)
+                from agent import local_model_status
+
+                local_model_status.record("restart", "weights verified; will reload on next use")
+            except Exception as exc:  # noqa: BLE001 — background, log-only
+                try:
+                    from agent import local_model_status
+
+                    local_model_status.record("restart", f"rewarm failed: {exc}", level="error")
+                except Exception:
+                    pass
+
+        threading.Thread(target=_rewarm, name="localmodel-rewarm", daemon=True).start()
+        return {"ok": True}
+
+    return await asyncio.to_thread(_restart)
+
+
+@app.get("/api/diagnose")
+async def get_diagnose():
+    """Offline health check — same checks the background monitor runs."""
+    return await asyncio.to_thread(_run_zeb_diagnostics)
+
+
+@app.post("/api/diagnose/repair")
+async def post_diagnose_repair():
+    """Trigger self-healing. Running the checks *is* the repair (they fix
+    what they safely can in place), so this returns the post-repair state."""
+    return await asyncio.to_thread(_run_zeb_diagnostics)
+
+
+def _run_zeb_diagnostics() -> Dict[str, Any]:
+    """Run ``gateway.self_healing.run_health_checks`` and shape for the UI.
+
+    Pure-Python checks (disk, sqlite, YAML, local-model liveness) that need
+    no AI provider and no network; several self-repair as they run.
+    """
+    try:
+        from gateway.self_healing import run_health_checks
+
+        results = run_health_checks()
+        checks = [
+            {
+                "component": r.component,
+                "status": r.status,
+                "message": r.message,
+                "repaired": bool(r.repaired),
+            }
+            for r in results
+        ]
+        counts = {"ok": 0, "degraded": 0, "critical": 0, "repaired": 0}
+        for c in checks:
+            counts[c["status"]] = counts.get(c["status"], 0) + 1
+            if c["repaired"]:
+                counts["repaired"] += 1
+        overall = (
+            "critical"
+            if counts["critical"]
+            else ("degraded" if counts["degraded"] else "ok")
+        )
+        return {"checks": checks, "summary": counts, "overall": overall, "offline": True}
+    except Exception as exc:
+        return {
+            "checks": [],
+            "summary": {},
+            "overall": "unknown",
+            "offline": True,
+            "error": str(exc),
+        }
+
+
+@app.get("/api/repos")
+async def list_saved_repos(q: Optional[str] = None):
+    """Saved open-source GitHub repos (searchable with ?q=)."""
+    try:
+        from zeb_chat.stores import RepoStore
+
+        repos = await asyncio.to_thread(lambda: RepoStore().list(query=q or ""))
+        return {"repos": repos}
+    except Exception as exc:
+        return {"repos": [], "error": str(exc)}
+
+
+@app.post("/api/repos")
+async def add_saved_repo(request: Request):
+    try:
+        from zeb_chat.stores import RepoStore
+
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="body must be an object")
+        if not body.get("full_name") and body.get("name"):
+            body["full_name"] = body["name"]
+        if not str(body.get("full_name") or "").strip():
+            raise HTTPException(status_code=400, detail="full_name required")
+        added = await asyncio.to_thread(lambda: RepoStore().add(body))
+        if added is None:
+            raise HTTPException(status_code=400, detail="invalid repo")
+        return added
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.delete("/api/repos/{rid}")
+async def delete_saved_repo(rid: str):
+    try:
+        from zeb_chat.stores import RepoStore
+
+        ok = await asyncio.to_thread(lambda: RepoStore().delete(rid))
+        return {"ok": bool(ok)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.post("/api/repos/scan")
+async def scan_github_repos(request: Request):
+    """Describe a need → search GitHub → save matching open-source repos.
+
+    Every result is saved into the RepoStore (de-duped) so found repos show
+    up in the saved list immediately, ready for integration.
+    """
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be an object")
+    query = str(body.get("query", "") or body.get("q", "") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query required")
+
+    def _scan() -> Dict[str, Any]:
+        try:
+            from zeb_chat.github_scan import scan
+
+            result = scan(query, limit=int(body.get("limit") or 10))
+        except Exception as exc:
+            return {"results": [], "added": [], "error": str(exc)}
+        added = []
+        try:
+            from zeb_chat.stores import RepoStore
+
+            store = RepoStore()
+            for repo in result.get("results", []):
+                saved = store.add(repo)
+                if saved:
+                    added.append(saved)
+        except Exception:
+            pass
+        return {
+            "results": result.get("results", []),
+            "added": added,
+            "error": result.get("error", ""),
+        }
+
+    return await asyncio.to_thread(_scan)
 
 
 # ---------------------------------------------------------------------------
@@ -5060,7 +5418,24 @@ async def set_env_var(body: EnvVarUpdate, profile: Optional[str] = None):
     try:
         with _profile_scope(body.profile or profile):
             save_env_value(body.key, body.value)
-        return {"ok": True, "key": body.key}
+        # ZebOS: pasting a provider API key makes that provider the default
+        # chat model when none is configured yet. The local backbone keeps
+        # running in the background (brain + autonomy); the provider handles
+        # user-facing chat for speed. Best-effort — key save never fails on it.
+        default_model_set = ""
+        if (body.value or "").strip():
+            try:
+                default_model_set = await asyncio.to_thread(
+                    _maybe_adopt_provider_default_model,
+                    body.key,
+                    body.profile or profile,
+                )
+            except Exception:
+                _log.debug("provider default-model adoption skipped", exc_info=True)
+        resp = {"ok": True, "key": body.key}
+        if default_model_set:
+            resp["default_model_set"] = default_model_set
+        return resp
     except ValueError as exc:
         # save_env_value raises ValueError for invalid names and for keys
         # on the denylist (LD_PRELOAD, PATH, PYTHONPATH, …). Surface the
@@ -5070,6 +5445,53 @@ async def set_env_var(body: EnvVarUpdate, profile: Optional[str] = None):
     except Exception:
         _log.exception("PUT /api/env failed")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+def _maybe_adopt_provider_default_model(env_key: str, profile: Optional[str]) -> str:
+    """If no main chat model is configured, adopt the pasted key's provider.
+
+    Maps the env var to its catalog provider, resolves that provider's
+    recommended/curated default model, and writes it as the main model —
+    only when the main model is currently unset, so a user's explicit model
+    choice is never overridden by pasting another key. Returns the
+    "provider/model" string that was set, or "" when nothing changed.
+    """
+    meta = _catalog_provider_env_metadata().get(env_key) or {}
+    provider = str(meta.get("provider") or "").strip().lower()
+    if not provider:
+        return ""
+
+    with _profile_scope(profile):
+        cfg = load_config() or {}
+        model_cfg = cfg.get("model", "")
+        if isinstance(model_cfg, dict):
+            current = str(model_cfg.get("default") or model_cfg.get("name") or "").strip()
+        else:
+            current = str(model_cfg or "").strip()
+        if current:
+            return ""  # user already chose a model — leave it alone
+
+    # Resolve the provider's first curated model (same source the Models
+    # page picker uses). Outside the profile scope: inventory loading can be
+    # slow and must not hold the scope lock.
+    model = ""
+    try:
+        from zeb_cli.inventory import build_models_payload, load_picker_context
+
+        payload = build_models_payload(load_picker_context())
+        for row in payload.get("providers", []):
+            if str(row.get("slug", "")).lower() == provider:
+                models = row.get("models") or []
+                model = str(models[0]) if models else ""
+                break
+    except Exception:
+        model = ""
+    if not model:
+        return ""
+
+    with _profile_scope(profile):
+        _apply_model_assignment_sync("main", provider, model, "", "", "")
+    return f"{provider}/{model}"
 
 
 # Live credential probes keyed by env var. Each entry is (method, url, auth)
@@ -14100,8 +14522,9 @@ def mount_spa(application: FastAPI):
 # Built-in dashboard themes — label + description only.  The actual color
 # definitions live in the frontend (web/src/themes/presets.ts).
 _BUILTIN_DASHBOARD_THEMES = [
-    {"name": "default",       "label": "Zeb Teal",         "description": "Classic dark teal — the canonical Zeb look"},
-    {"name": "default-large", "label": "Zeb Teal (Large)", "description": "Zeb Teal with bigger fonts and roomier spacing"},
+    {"name": "default",       "label": "Zeb Dark",         "description": "ZebOS signature — near-black, minimal, precise"},
+    {"name": "default-large", "label": "Zeb Dark (Large)", "description": "Zeb Dark with bigger fonts and roomier spacing"},
+    {"name": "zeb-teal",      "label": "Zeb Teal",         "description": "Classic dark teal — the original Zeb look"},
     {"name": "nous-blue",     "label": "Nous Blue",           "description": "Light mode — vivid Nous-blue accents on cream canvas"},
     {"name": "midnight",      "label": "Midnight",            "description": "Deep blue-violet with cool accents"},
     {"name": "ember",     "label": "Ember",          "description": "Warm crimson and bronze — forge vibes"},
