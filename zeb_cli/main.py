@@ -11903,33 +11903,25 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
 
 
 def cmd_chatui(args):
-    """Start the clean chat-only web UI (zeb_chat/) — key-gated, no terminal."""
-    # Precedence: explicit --host flag > ZEB_CHAT_HOST env > 0.0.0.0 default.
-    # The default stays 0.0.0.0 so remote/VPS dashboards keep working; set
-    # ZEB_CHAT_HOST=127.0.0.1 to bind loopback-only. A non-loopback bind logs a
-    # prominent exposure warning at startup (see log_api_key_banner).
+    """Start the ZebOS React dashboard (zeb_cli/web_server.py)."""
     host = getattr(args, "host", None) or os.environ.get("ZEB_CHAT_HOST", "").strip() or "0.0.0.0"
-    port = int(getattr(args, "port", 8000) or 8000)
+    port = int(getattr(args, "port", 9119) or 9119)
     try:
-        from zeb_chat.server import run_server
+        from zeb_cli.web_server import start_server
     except ImportError:
-        # fastapi/uvicorn not present — lazy-install the web extra (the same
-        # deps the dashboard uses) and retry, mirroring zeb_cli/web_server.py.
-        # In the Docker image these are baked via the [web] extra, so this is a
-        # no-op there; it's the fallback for slimmer installs.
         try:
             from tools.lazy_deps import ensure as _lazy_ensure
 
             _lazy_ensure("tool.dashboard", prompt=False)
-            from zeb_chat.server import run_server
+            from zeb_cli.web_server import start_server
         except Exception as exc:
             print(
-                "Chat UI requires fastapi and uvicorn.\n"
+                "Dashboard requires fastapi and uvicorn.\n"
                 f"Install with: {sys.executable} -m pip install 'fastapi' 'uvicorn[standard]'\n"
                 f"({exc})"
             )
             sys.exit(1)
-    run_server(host=host, port=port)
+    start_server(host=host, port=port, open_browser=True)
 
 
 def cmd_dashboard(args):
