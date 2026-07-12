@@ -62,3 +62,41 @@ def test_verify_key_true_false_empty():
     assert ak.verify_key("", "abc") is False
     assert ak.verify_key("abc", "") is False
     assert ak.verify_key(None, "abc") is False
+
+
+# --------------------------------------------------------------------------
+# Secure-by-default startup banner (P0-2)
+# --------------------------------------------------------------------------
+def test_banner_prints_key_only_on_first_generation(capsys, monkeypatch):
+    monkeypatch.delenv("ZEB_CHAT_LOG_KEY", raising=False)
+    ak.log_api_key_banner("supersecretkey", "127.0.0.1", 8000, source="generated")
+    out = capsys.readouterr().out
+    assert "supersecretkey" in out  # first boot: shown once
+
+
+def test_banner_hides_key_on_restart(capsys, monkeypatch):
+    monkeypatch.delenv("ZEB_CHAT_LOG_KEY", raising=False)
+    ak.log_api_key_banner("supersecretkey", "127.0.0.1", 8000, source="file")
+    out = capsys.readouterr().out
+    assert "supersecretkey" not in out  # never re-logged
+    assert "sha256:" in out  # fingerprint instead
+    assert "cat " in out  # retrieval hint
+
+
+def test_banner_opt_in_shows_key(capsys, monkeypatch):
+    monkeypatch.setenv("ZEB_CHAT_LOG_KEY", "1")
+    ak.log_api_key_banner("supersecretkey", "127.0.0.1", 8000, source="file")
+    assert "supersecretkey" in capsys.readouterr().out
+
+
+def test_banner_warns_on_nonloopback_bind(capsys, monkeypatch):
+    monkeypatch.delenv("ZEB_CHAT_LOG_KEY", raising=False)
+    ak.log_api_key_banner("k", "0.0.0.0", 8000, source="file")
+    out = capsys.readouterr().out
+    assert "SECURITY" in out and "non-loopback" in out
+
+
+def test_banner_no_warning_on_loopback(capsys, monkeypatch):
+    monkeypatch.delenv("ZEB_CHAT_LOG_KEY", raising=False)
+    ak.log_api_key_banner("k", "127.0.0.1", 8000, source="file")
+    assert "SECURITY" not in capsys.readouterr().out

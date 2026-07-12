@@ -342,6 +342,7 @@ def create_app() -> FastAPI:
 
     api_key, source = resolve_or_create_api_key()
     app.state.api_key = api_key
+    app.state.api_key_source = source
     logger.info("Zeb Chat API key resolved (source=%s)", source)
 
     @app.get("/health")
@@ -483,7 +484,12 @@ def _prefetch_local_model() -> None:
 def run_server(host: str = "0.0.0.0", port: int = 8000) -> None:
     """Build the app, log the API key banner, and run uvicorn."""
     app = create_app()
-    log_api_key_banner(app.state.api_key, host, port)
+    log_api_key_banner(
+        app.state.api_key,
+        host,
+        port,
+        source=getattr(app.state, "api_key_source", "generated"),
+    )
 
     # Start fetching the local backbone weights now so the first message
     # doesn't have to wait for the whole download.

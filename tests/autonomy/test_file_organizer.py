@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from zeb_autonomy.base import BotContext
-from zeb_autonomy.bots.file_organizer import FileOrganizerBot
+from zeb_autonomy.bots.file_organizer import FileOrganizerBot, undo_last_organize
 
 
 def _ctx(config: dict, zeb_home: Path) -> BotContext:
@@ -46,13 +46,38 @@ def test_no_target_is_noop(tmp_path):
     assert res.notify is False
 
 
-def test_organizes_into_categories_and_protects(tmp_path):
+def _live_config(target: Path) -> dict:
+    # Real moving is now opt-in: the bot is dry-run by default.
+    return {"autonomy": {"file_organizer": {"target": str(target), "dry_run": False}}}
+
+
+def test_default_is_dry_run_safe(tmp_path):
+    """Out of the box (no dry_run key) the bot must PLAN, never move real files."""
     target = tmp_path / "inbox"
     target.mkdir()
     _seed(target)
     before = _count_all_files(target)
 
     config = {"autonomy": {"file_organizer": {"target": str(target)}}}
+    bot = FileOrganizerBot()
+    res = bot.run(_ctx(config, tmp_path))
+
+    assert res.ok is True
+    assert res.details["dry_run"] is True  # safe default
+    assert res.details["moved"] == 6  # planned
+    # nothing physically moved
+    assert (target / "essay.md").is_file()
+    assert not (target / "documents").exists()
+    assert _count_all_files(target) == before
+
+
+def test_organizes_into_categories_and_protects(tmp_path):
+    target = tmp_path / "inbox"
+    target.mkdir()
+    _seed(target)
+    before = _count_all_files(target)
+
+    config = _live_config(target)
     bot = FileOrganizerBot()
     res = bot.run(_ctx(config, tmp_path))
 
@@ -84,7 +109,7 @@ def test_idempotent_second_run(tmp_path):
     target = tmp_path / "inbox"
     target.mkdir()
     _seed(target)
-    config = {"autonomy": {"file_organizer": {"target": str(target)}}}
+    config = _live_config(target)
     bot = FileOrganizerBot()
 
     bot.run(_ctx(config, tmp_path))
@@ -92,6 +117,38 @@ def test_idempotent_second_run(tmp_path):
     # second run finds nothing loose to move
     assert res2.details["moved"] == 0
     assert res2.notify is False
+
+
+def test_real_moves_are_journaled_and_undoable(tmp_path):
+    target = tmp_path / "inbox"
+    target.mkdir()
+    _seed(target)
+    before = _count_all_files(target)
+
+    bot = FileOrganizerBot()
+    res = bot.run(_ctx(_live_config(target), tmp_path))
+    assert res.details["moved"] == 6
+    assert (target / "documents" / "essay.md").is_file()
+    assert not (target / "essay.md").exists()
+
+    # A journal was written recording every real move.
+    journal = tmp_path / "autonomy" / "move_journal.jsonl"
+    assert journal.is_file()
+    assert len([l for l in journal.read_text().splitlines() if l.strip()]) == 6
+
+    # Undo restores every file to its original location and clears the journal.
+    stats = undo_last_organize(tmp_path)
+    assert stats["undone"] == 6
+    assert stats["remaining"] == 0
+    assert (target / "essay.md").is_file()
+    assert not (target / "documents" / "essay.md").exists()
+    assert _count_all_files(target) == before
+    assert not journal.exists()
+
+
+def test_undo_no_journal_is_noop(tmp_path):
+    stats = undo_last_organize(tmp_path)
+    assert stats == {"undone": 0, "skipped": 0, "remaining": 0}
 
 
 def test_dry_run_plans_without_moving(tmp_path):
@@ -120,7 +177,11 @@ def test_protect_glob(tmp_path):
     (target / "move_me.md").write_text("y")
     config = {
         "autonomy": {
-            "file_organizer": {"target": str(target), "protect": ["keep_*"]}
+            "file_organizer": {
+                "target": str(target),
+                "protect": ["keep_*"],
+                "dry_run": False,
+            }
         }
     }
     bot = FileOrganizerBot()

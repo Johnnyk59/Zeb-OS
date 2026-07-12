@@ -11904,7 +11904,11 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
 
 def cmd_chatui(args):
     """Start the clean chat-only web UI (zeb_chat/) — key-gated, no terminal."""
-    host = getattr(args, "host", "0.0.0.0") or "0.0.0.0"
+    # Precedence: explicit --host flag > ZEB_CHAT_HOST env > 0.0.0.0 default.
+    # The default stays 0.0.0.0 so remote/VPS dashboards keep working; set
+    # ZEB_CHAT_HOST=127.0.0.1 to bind loopback-only. A non-loopback bind logs a
+    # prominent exposure warning at startup (see log_api_key_banner).
+    host = getattr(args, "host", None) or os.environ.get("ZEB_CHAT_HOST", "").strip() or "0.0.0.0"
     port = int(getattr(args, "port", 8000) or 8000)
     try:
         from zeb_chat.server import run_server

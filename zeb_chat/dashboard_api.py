@@ -143,11 +143,92 @@ def _default_files_root() -> str:
     return os.getcwd()
 
 
+def _files_jail_root() -> str | None:
+    """Optional confinement root for all file endpoints (``ZEB_CHAT_FILES_ROOT``).
+
+    Off by default so the dashboard keeps its intended full-workspace browser.
+    When set, every file path — list, read, and write — is resolved with
+    symlinks/`..` collapsed and rejected unless it stays under this root.
+    """
+    root = os.environ.get("ZEB_CHAT_FILES_ROOT", "").strip()
+    if not root:
+        return None
+    try:
+        return os.path.realpath(root)
+    except Exception:
+        return None
+
+
+def _enforce_jail(target: str) -> None:
+    """Raise 403 if a jail is configured and ``target`` escapes it."""
+    root = _files_jail_root()
+    if root is None:
+        return
+    real = os.path.realpath(target)
+    if real != root and not real.startswith(root + os.sep):
+        raise HTTPException(status_code=403, detail="path is outside the allowed root")
+
+
+# Realpath prefixes and basenames that a write must never touch, even with a
+# valid key. This is defense-in-depth: the read/browse surface stays open (a
+# personal server file manager), but WRITES to credentials, shell startup
+# files, cron/systemd, and the OS tree are refused so a leaked key cannot be
+# escalated into code execution by planting a payload.
+_WRITE_DENY_PREFIXES = (
+    "/etc", "/boot", "/sys", "/proc", "/dev", "/run/systemd",
+    "/var/spool/cron", "/usr/lib/systemd", "/lib/systemd",
+)
+_WRITE_DENY_BASENAMES = {
+    ".bashrc", ".bash_profile", ".bash_login", ".profile", ".zshrc",
+    ".zprofile", ".zshenv", ".zlogin", "authorized_keys", "known_hosts",
+    "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "sudoers", "crontab",
+    ".netrc", ".pgpass",
+}
+# Path components that flag a sensitive directory regardless of depth.
+_WRITE_DENY_COMPONENTS = {".ssh", ".gnupg"}
+
+
+def _reject_dangerous_write(target: str) -> None:
+    """Raise 403 if ``target`` resolves to a write that could grant code exec.
+
+    Blocks: the OS tree (/etc, /boot, systemd, cron), any ``.ssh``/``.gnupg``
+    directory, shell startup files, SSH keys, and Zeb's own secret files
+    (``.env`` and the chat api_key). Uses realpath so symlinks and ``..`` can't
+    dodge the check.
+    """
+    real = os.path.realpath(target)
+    base = os.path.basename(real)
+    parts = set(real.split(os.sep))
+
+    if base in _WRITE_DENY_BASENAMES:
+        raise HTTPException(status_code=403, detail=f"refusing to write protected file: {base}")
+    if parts & _WRITE_DENY_COMPONENTS:
+        raise HTTPException(status_code=403, detail="refusing to write inside a credentials directory")
+    for pfx in _WRITE_DENY_PREFIXES:
+        if real == pfx or real.startswith(pfx + os.sep):
+            raise HTTPException(status_code=403, detail=f"refusing to write under {pfx}")
+    if ".git" + os.sep + "hooks" in real:
+        raise HTTPException(status_code=403, detail="refusing to write a git hook")
+    # Zeb's own secrets: the .env and the chat api_key file.
+    try:
+        from zeb_cli.config import get_env_path
+
+        if real == os.path.realpath(str(get_env_path())):
+            raise HTTPException(status_code=403, detail="refusing to overwrite Zeb's .env")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    if base == "api_key" and (os.sep + "chat" + os.sep) in real:
+        raise HTTPException(status_code=403, detail="refusing to overwrite the chat api_key")
+
+
 @router.get("/api/files")
 def list_files(request: Request, path: str | None = None):
     require_key(request)
     try:
         target = os.path.abspath(path or _default_files_root())
+        _enforce_jail(target)
         entries = []
         try:
             names = os.listdir(target)
@@ -165,6 +246,8 @@ def list_files(request: Request, path: str | None = None):
         entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
         entries = entries[:1000]
         return {"path": target, "parent": os.path.dirname(target), "entries": entries}
+    except HTTPException:
+        raise
     except Exception as exc:
         return {"path": path or "", "parent": "", "entries": [], "error": str(exc)}
 
@@ -176,6 +259,7 @@ def read_file(request: Request, path: str | None = None):
         if not path:
             return {"path": "", "content": "", "truncated": False, "error": "path required"}
         target = os.path.abspath(path)
+        _enforce_jail(target)
         with open(target, "rb") as fh:
             raw = fh.read(200_000 + 1)
         if b"\x00" in raw:
@@ -184,6 +268,8 @@ def read_file(request: Request, path: str | None = None):
         raw = raw[:200_000]
         content = raw.decode("utf-8", errors="replace")
         return {"path": target, "content": content, "truncated": truncated}
+    except HTTPException:
+        raise
     except Exception as exc:
         return {"path": path or "", "content": "", "truncated": False, "error": str(exc)}
 
@@ -200,6 +286,10 @@ async def write_file(request: Request):
         if not isinstance(content, str):
             raise HTTPException(status_code=400, detail="content must be a string")
         target = os.path.abspath(path)
+        # Defense in depth: refuse writes that could plant a code-exec payload,
+        # and honor the optional workspace jail.
+        _enforce_jail(target)
+        _reject_dangerous_write(target)
         with open(target, "w", encoding="utf-8") as fh:
             fh.write(content)
         return {"ok": True, "path": target}

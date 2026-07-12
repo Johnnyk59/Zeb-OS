@@ -86,24 +86,56 @@ def verify_key(candidate: str, expected: str) -> bool:
     return hmac.compare_digest(str(candidate), str(expected))
 
 
-def log_api_key_banner(key: str, host: str, port: int) -> None:
-    """Log a prominent, boxed banner with the API key and connection URL.
+def chat_api_key_path(zeb_home=None) -> Path:
+    """Location of the persisted chat API key file."""
+    home = Path(zeb_home) if zeb_home is not None else _default_zeb_home()
+    return home / "chat" / "api_key"
 
-    Uses both ``print()`` and ``logger.info`` so the key is visible regardless
-    of logging configuration (e.g. in Docker logs).
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"}
+
+
+def log_api_key_banner(
+    key: str, host: str, port: int, *, source: str = "generated"
+) -> None:
+    """Log a startup banner — secure by default.
+
+    The raw key is only printed when it was just *generated* (first boot, so
+    there is no other way to learn it) or when the operator explicitly opts in
+    with ``ZEB_CHAT_LOG_KEY=1``. Otherwise the banner shows only a short
+    fingerprint plus the on-disk path, so restarts don't keep re-emitting a
+    live host credential into ``docker logs``/journald/log shippers. When the
+    server binds a non-loopback interface, a loud exposure warning is added.
     """
+    import hashlib
+    import os
+
     url = f"http://{host}:{port}"
-    lines = [
-        "",
-        "=" * 68,
-        "  ZEB CHAT",
-        "-" * 68,
-        f"  ZEB CHAT API KEY: {key}",
-        "",
-        f"  Open {url} and paste this key to start chatting.",
-        "=" * 68,
-        "",
-    ]
+    show_key = source == "generated" or _truthy(os.environ.get("ZEB_CHAT_LOG_KEY"))
+    fingerprint = hashlib.sha256(str(key).encode("utf-8")).hexdigest()[:12]
+
+    lines = ["", "=" * 68, "  ZEB CHAT", "-" * 68]
+    if show_key:
+        lines += [f"  ZEB CHAT API KEY: {key}", ""]
+        if source == "generated":
+            lines.append(f"  (saved to {chat_api_key_path()} — shown once)")
+    else:
+        lines += [
+            f"  API key fingerprint: sha256:{fingerprint}",
+            f"  Retrieve it with:  cat {chat_api_key_path()}",
+            "  (set ZEB_CHAT_LOG_KEY=1 to print the key here instead)",
+        ]
+    lines += ["", f"  Open {url} and paste your key to start chatting."]
+
+    if host not in _LOOPBACK_HOSTS:
+        lines += [
+            "-" * 68,
+            "  ⚠ SECURITY: bound to a non-loopback interface — the dashboard is",
+            "    reachable from the network with FULL file read/write access.",
+            "    Put it behind a firewall/VPN/TLS, or set ZEB_CHAT_HOST=127.0.0.1.",
+        ]
+    lines += ["=" * 68, ""]
+
     banner = "\n".join(lines)
     try:
         print(banner, flush=True)
@@ -111,3 +143,7 @@ def log_api_key_banner(key: str, host: str, port: int) -> None:
         pass
     for line in lines:
         logger.info(line)
+
+
+def _truthy(v: str | None) -> bool:
+    return str(v or "").strip().lower() in ("1", "true", "yes", "on")
