@@ -123,21 +123,59 @@ def test_files_read_binary(client, tmp_path):
     assert res.json().get("binary") is True
 
 
-def test_models_shape(client):
+def test_models_shape(client, monkeypatch):
+    # With no provider connected, the local backbone is the fallback default
+    # and is present as a background option.
+    monkeypatch.setattr(
+        "zeb_chat.dashboard_api._connected_provider_ids", lambda: {"local-model"}
+    )
+    monkeypatch.setattr(
+        "zeb_chat.dashboard_api.get_env_value_prefer_dotenv", lambda k: "", raising=False
+    )
     res = client.get("/api/models", headers=AUTH)
     assert res.status_code == 200
     body = res.json()
-    assert "current" in body
     assert isinstance(body["available"], list)
-    assert "connected" in body
-    # The local backbone is ALWAYS present, first, and the priority default —
-    # Zeb works with zero keys out of the box.
-    assert body["default"] == "local"
-    assert body["current"] == "local"
+    assert isinstance(body["groups"], list)
+    assert body["local_available"] is True
     first = body["available"][0]
     assert first["id"] == "local"
     assert first["local"] is True
-    assert first["priority"] is True
+    assert first.get("background") is True
+
+
+def test_detect_provider_from_key():
+    from zeb_chat.dashboard_api import _detect_provider_from_key
+
+    assert _detect_provider_from_key("sk-ant-abc123") == "anthropic"
+    assert _detect_provider_from_key("sk-or-xyz") == "openrouter"
+    assert _detect_provider_from_key("AIzaSyABC") == "google"
+    assert _detect_provider_from_key("gsk_abc") == "groq"
+    assert _detect_provider_from_key("xai-abc") == "xai"
+    assert _detect_provider_from_key("sk-proj-abc") == "openai"
+    assert _detect_provider_from_key("random") == ""
+
+
+def test_add_key_connects_provider_and_groups_models(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZEB_HOME", str(tmp_path))
+    # Add an Anthropic-looking key: detected, connected, models fetched.
+    r = client.post(
+        "/api/keys", headers=AUTH, json={"key": "sk-ant-" + "x" * 40, "label": "claude"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["provider"] == "anthropic"
+    assert isinstance(body["models"], list) and body["models"]  # at least the default
+
+    # /api/models now reports the provider as connected, default a provider
+    # model (NOT local), and groups the provider with its models.
+    d = client.get("/api/models", headers=AUTH).json()
+    assert d["connected"] is True
+    assert d["default"].startswith("anthropic/")
+    provs = {g["provider"] for g in d["groups"]}
+    assert "anthropic" in provs
+    # local is still available as a background option
+    assert any(m.get("local") for m in d["available"])
 
 
 def test_skills_stacks(client):
@@ -514,7 +552,7 @@ def test_anthropic_lifecycle(client, tmp_path, monkeypatch):
 
     # Once connected it is surfaced as a selectable model in the chat dropdown.
     models = client.get("/api/models", headers=AUTH).json()
-    assert any(m.get("id") == "anthropic" for m in models["available"])
+    assert any(m.get("provider") == "anthropic" for m in models["available"])
 
     # Disconnect clears it.
     assert client.post("/api/anthropic/disconnect", headers=AUTH).json()["connected"] is False
@@ -552,7 +590,8 @@ def test_onboard_provider_saves_key_and_connects(client, tmp_path, monkeypatch):
     )
     assert res.status_code == 200
     body = res.json()
-    assert body["ok"] is True and body["default_model"] == "openai"
+    assert body["ok"] is True and body["provider"] == "openai"
+    assert isinstance(body["default_model"], str) and body["default_model"]
     # Persisted to the provider's standard env var.
     import os
 

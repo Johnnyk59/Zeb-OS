@@ -285,6 +285,10 @@
     #app.split .composer{position:relative;z-index:41;background:var(--bg);}
     #app.split .composer{background:linear-gradient(180deg,rgba(10,10,11,0) 0%,var(--bg) 22%);}
     #app.split #brainStatus{bottom:22px;font-size:11px;letter-spacing:3px;}
+    /* Message bubbles are pinned to the LEFT ~46% so no text overlaps the
+       brain on the right ~54%. The column overrides the centered layout. */
+    #app.split .chat-scroll,
+    #app.split .chat-scroll.centered{max-width:46vw;width:46vw;margin:0;align-self:flex-start;}
   }
 
   /* ===== NEW CHAT + RECENT CHATS POPOVER ===== */
@@ -583,20 +587,41 @@ async function loadModels(){
   out.push(buildAnthropicCard());
   let d={};
   try{d=await api('/api/models');}catch(e){out.push(inlineErr(e.message));return out;}
-  const cur=d.current||d.active||d.model||'';
-  const list=toArr(d,['available','models','list']);
-  if(!list.length){
-    out.push(emptyState('&#9673;','No models connected. Add a provider key in the API Keys tab (or Zeb runs its local backbone by default).'));
-    return out;
+  const cur=d.current||d.default||'';
+  const groups=toArr(d,['groups']);
+  const list=toArr(d,['available']);
+
+  if(!groups.length){
+    out.push(emptyState('&#9673;','No providers connected yet. Add a provider key in the API Keys tab — its models will appear here. Until then, Zeb runs on its local backbone.'));
   }
-  list.forEach(m=>{const name=typeof m==='string'?m:(m.name||m.id||'');
-    const prov=(typeof m==='object'&&m.provider)?m.provider:'';
-    const r=el('div','row');const g=el('div','grow');g.appendChild(el('div','title',name));
-    if(prov)g.appendChild(el('div','meta',prov));
-    r.appendChild(g);
-    if(typeof m==='object'&&m.subscription)r.appendChild(el('span','badge v','subscription'));
-    if((typeof m==='object'&&m.id===cur)||name===cur)r.appendChild(el('span','badge on','current'));
-    out.push(r);});
+  // One collapsible stack per connected provider, listing its models.
+  groups.forEach(g=>{
+    const models=(g.models&&g.models.length)?g.models:(g.default?[g.default]:[]);
+    const wrap=el('div','stack');
+    const head=el('div','stack-head');
+    head.innerHTML='<span class="caret">&#9660;</span><span class="sname">'+esc(g.name||g.provider)+'</span>';
+    head.appendChild(el('span','badge v',String(models.length)));
+    head.onclick=()=>wrap.classList.toggle('collapsed');
+    const body=el('div','stack-body');
+    models.forEach(m=>{
+      const r=el('div','row');const gg=el('div','grow');gg.style.cursor='default';
+      gg.appendChild(el('div','title',m));
+      r.appendChild(gg);
+      if((g.provider+'/'+m)===cur)r.appendChild(el('span','badge on','default'));
+      else if(m===g.default)r.appendChild(el('span','badge','provider default'));
+      body.appendChild(r);
+    });
+    wrap.appendChild(head);wrap.appendChild(body);out.push(wrap);
+  });
+  // The always-on local backbone, shown as a background option.
+  const localItem=list.find(m=>m.local);
+  if(localItem){
+    const r=el('div','row');const g=el('div','grow');g.style.cursor='default';
+    g.appendChild(el('div','title',localItem.name||'Zeb Local'));
+    g.appendChild(el('div','meta','background · powers the thinking brain, always on'));
+    r.appendChild(g);r.appendChild(el('span','badge','background'));
+    out.push(r);
+  }
   return out;
 }
 
@@ -831,22 +856,38 @@ async function openFile(full,dir){
 async function renderKeys(){
   showData('API Keys');const b=$('#dataBody');b.innerHTML='';
   const form=el('div');
-  form.innerHTML='<div class="label" style="margin-bottom:8px">Add a key</div>';
+  form.innerHTML='<div class="label" style="margin-bottom:8px">Add a provider key</div>'+
+    '<div class="meta" style="margin-bottom:10px">Paste an API key — the provider is auto-detected, connected, and its models appear in the chat selector and Models tab. Choose a provider to override detection.</div>';
   const kv=el('div','kv');
-  const ki=el('input','field');ki.placeholder='API key value';ki.type='text';ki.autocomplete='off';
-  const li=el('input','field');li.placeholder='Label';li.style.maxWidth='200px';
-  const add=el('button','btn btn-accent','Add');
-  kv.appendChild(ki);kv.appendChild(li);kv.appendChild(add);
-  form.appendChild(kv);b.appendChild(form);
+  const psel=document.createElement('select');psel.className='field';psel.style.maxWidth='170px';
+  psel.innerHTML='<option value="auto">Auto-detect</option>';
+  const ki=el('input','field');ki.placeholder='Paste API key';ki.type='password';ki.autocomplete='off';ki.spellcheck=false;
+  const add=el('button','btn btn-accent','Add & connect');
+  kv.appendChild(psel);kv.appendChild(ki);kv.appendChild(add);
+  form.appendChild(kv);
+  const status=el('div','meta');status.style.margin='6px 2px 0';form.appendChild(status);
+  b.appendChild(form);
+  // Populate the provider override menu.
+  try{const d=await api('/api/providers');(d.providers||[]).forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;psel.appendChild(o);});}catch(e){}
   const doAdd=async()=>{
-    const key=ki.value.trim(),label=li.value.trim();
+    const key=ki.value.trim(),provider=psel.value;
     if(!key){ki.focus();return;}
-    add.disabled=true;
-    try{await api('/api/keys',{method:'POST',body:JSON.stringify({key,label})});ki.value='';li.value='';listKeys();}
-    catch(e){alert(e.message);}finally{add.disabled=false;}
+    add.disabled=true;status.textContent='Connecting…';
+    try{
+      const r=await api('/api/keys',{method:'POST',body:JSON.stringify({key,label:'',provider})});
+      ki.value='';
+      if(r&&r.provider){
+        status.innerHTML='✓ Connected <b class="cur-model">'+esc(r.provider)+'</b>'+((r.models&&r.models.length)?(' · '+r.models.length+' model'+(r.models.length>1?'s':'')):'')+'. It’s now the default chat model.';
+        localStorage.removeItem(LS_MODEL);  // adopt the new provider default
+        await loadModelSelector();
+      }else{
+        status.textContent='Key saved. Provider not recognized — pick one from the menu to connect it for chat.';
+      }
+      listKeys();
+    }catch(e){status.textContent='';alert(e.message);}finally{add.disabled=false;}
   };
   add.onclick=doAdd;
-  [ki,li].forEach(inp=>inp.addEventListener('keydown',e=>{if(e.key==='Enter')doAdd();}));
+  ki.addEventListener('keydown',e=>{if(e.key==='Enter')doAdd();});
   const holder=el('div');holder.id='keysList';holder.style.marginTop='18px';b.appendChild(holder);
   listKeys();
 }
@@ -1101,10 +1142,10 @@ async function saveOnboard(skip){
     if(key){
       try{
         await api('/api/onboard/provider',{method:'POST',body:JSON.stringify({provider,key})});
-        // Make the connected provider the default chat model; local stays the
-        // background/thinking engine behind the brain visualization.
-        selectedModel=provider;localStorage.setItem(LS_MODEL,provider);
-        loadModelSelector();
+        // Adopt the newly connected provider's default model for chat; local
+        // stays the background/thinking engine behind the brain visualization.
+        localStorage.removeItem(LS_MODEL);
+        await loadModelSelector();
       }catch(e){if(err){err.textContent=e.message;}return;}  // stay open on a bad key
     }
   }
@@ -1183,21 +1224,48 @@ function restoreChatState(){
   }catch(e){}
 }
 
-/* Model selector: local backbone is the default/priority; connected API
-   providers appear as optional per-request backups. */
+/* Parse a selector value into a provider + model. "local"/"" => local
+   backbone; "openai/gpt-4o" => {provider:openai, model:gpt-4o}; a bare
+   "openai" => provider with its default model. */
+function parseModel(sel){
+  if(!sel||sel==='local'||sel==='local-model')return {provider:null,model:null};
+  const i=sel.indexOf('/');
+  if(i>0)return {provider:sel.slice(0,i),model:sel.slice(i+1)};
+  return {provider:sel,model:null};
+}
+/* Model selector: connected providers + their models come first (chat
+   defaults to a provider for speed/quality); the local backbone is listed
+   last as a background option (it powers the thinking brain). */
 async function loadModelSelector(){
   const sel=$('#modelSel');if(!sel)return;
   try{
     const d=await api('/api/models');
+    const groups=toArr(d,['groups']);
     const list=toArr(d,['available']);
     sel.innerHTML='';
-    list.forEach(m=>{
-      const o=document.createElement('option');
-      o.value=m.id;
-      o.textContent=(m.local?'⚡ ':'')+(m.name||m.id)+(m.priority?' — default':'');
-      sel.appendChild(o);
+    groups.forEach(g=>{
+      const og=document.createElement('optgroup');og.label=g.name||g.provider;
+      const models=(g.models&&g.models.length)?g.models:(g.default?[g.default]:[]);
+      if(models.length){
+        models.forEach(m=>{const o=document.createElement('option');o.value=g.provider+'/'+m;o.textContent=m;og.appendChild(o);});
+      }else{
+        const o=document.createElement('option');o.value=g.provider;o.textContent=g.name||g.provider;og.appendChild(o);
+      }
+      sel.appendChild(og);
     });
-    if(!list.some(m=>m.id===selectedModel))selectedModel='local';
+    const localItem=list.find(m=>m.local);
+    if(localItem){
+      const og=document.createElement('optgroup');og.label='Local · background';
+      const o=document.createElement('option');o.value='local';o.textContent='⚡ '+(localItem.name||'Zeb Local');og.appendChild(o);
+      sel.appendChild(og);
+    }
+    // Keep the user's stored choice when still valid; otherwise adopt the
+    // server default (a provider model when one is connected, else local).
+    const ids=[...sel.options].map(o=>o.value);
+    const stored=localStorage.getItem(LS_MODEL);
+    if(stored&&ids.includes(stored))selectedModel=stored;
+    else selectedModel=(d.default&&ids.includes(d.default))?d.default:(ids[0]||'local');
+    localStorage.setItem(LS_MODEL,selectedModel);
     sel.value=selectedModel;
     sel.onchange=()=>{selectedModel=sel.value||'local';localStorage.setItem(LS_MODEL,selectedModel);};
   }catch(e){/* keep local-only */}
@@ -1273,21 +1341,44 @@ async function handleSlashCommand(text){
   input.focus();return true;
 }
 
+/* Server-side persistence: every conversation is backed by a saved session so
+   messages survive closing and reopening ZebOS (not just a browser reload). */
+async function ensureSession(firstText){
+  if(currentSession)return currentSession;
+  try{
+    const title=(firstText||'New Chat').slice(0,60);
+    const s=await api('/api/sessions',{method:'POST',body:JSON.stringify({title})});
+    currentSession=s&&(s.id!=null?s.id:s.session_id);
+    if(currentSession&&title)$('#chatTitle').textContent=title;
+    saveChatState();
+  }catch(e){/* fall back to localStorage-only persistence */}
+  return currentSession;
+}
+async function appendToSession(role,content){
+  if(!currentSession)return;
+  try{await api('/api/sessions/'+currentSession+'/messages',{method:'POST',body:JSON.stringify({role,content})});}
+  catch(e){/* localStorage still holds it */}
+}
+
 async function sendMsg(){
   const text=input.value.trim();
   if(!text||awaiting)return;
   input.value='';input.style.height='auto';
   if(await handleSlashCommand(text))return;
   history.push({role:'user',content:text});addMsgNode('user',text);saveChatState();
+  await ensureSession(text);appendToSession('user',text);
   awaiting=true;sendBtn.disabled=true;Brain.setTarget(1.0);showTyping();
   try{
-    // Local backbone is the default: only send a provider when the user has
-    // explicitly picked a remote in the model selector.
+    // Chat uses the selected PROVIDER model for speed/quality; the local
+    // backbone answers only when explicitly picked ("local"). The local model
+    // keeps running in the background regardless (it drives the brain).
+    const pm=parseModel(selectedModel);
     const payload={message:text,history:history.slice(0,-1)};
-    if(selectedModel&&selectedModel!=='local'&&selectedModel!=='local-model')payload.provider=selectedModel;
+    if(pm.provider){payload.provider=pm.provider;if(pm.model)payload.model=pm.model;}
     const d=await api('/api/chat',{method:'POST',body:JSON.stringify(payload)});
     const reply=(d&&(d.reply!=null?d.reply:d.content))||'(no reply)';
     hideTyping();history.push({role:'assistant',content:reply});addMsgNode('assistant',reply);saveChatState();
+    appendToSession('assistant',reply);
     if(Voice.active)Voice.speak(reply);
   }catch(e){hideTyping();addMsgNode('assistant','⚠ '+e.message);}
   finally{awaiting=false;sendBtn.disabled=false;Brain.setTarget(null);input.focus();}
@@ -1449,12 +1540,27 @@ function boot(){
   Voice.init();
   Brain.init();
   restoreChatState();       // return to the same conversation, not a new one
-  loadModelSelector();      // populate the chat model dropdown (local default)
+  loadModelSelector();      // populate the chat model dropdown (provider default)
   renderMessages();
+  syncSessionFromServer();  // authoritative reload so messages survive reopen
   showChat();setActive('sessions');
   pollStatus();
-  maybeOnboard();           // first-boot identity questions
+  maybeOnboard();           // first-boot provider + identity setup
   input.focus();
+}
+/* Reconcile the restored chat with its saved server session so a full
+   close/reopen (not just a browser reload) still shows every message. */
+async function syncSessionFromServer(){
+  if(!currentSession)return;
+  try{
+    const s=await api('/api/sessions/'+currentSession);
+    const msgs=s.messages||s.history||[];
+    if(msgs.length){
+      history=msgs.map(m=>({role:m.role,content:m.content}));
+      if(s.title)$('#chatTitle').textContent=s.title;
+      renderMessages();saveChatState();
+    }
+  }catch(e){/* keep the localStorage copy */}
 }
 </script>
 

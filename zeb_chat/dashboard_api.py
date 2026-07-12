@@ -330,6 +330,9 @@ def models(request: Request):
         local_name = "Zeb Local · " + local_model_display_name(cfg)
     except Exception:
         pass
+    # The always-on local backbone. It stays available as a background option,
+    # but it is NO LONGER the default when a provider is connected: provider
+    # models answer chat for speed/quality, local powers the thinking brain.
     available: list[dict] = [
         {
             "id": "local",
@@ -337,62 +340,81 @@ def models(request: Request):
             "provider": "local-model",
             "connected": True,
             "local": True,
-            "priority": True,
+            "priority": False,
+            "background": True,
         }
     ]
 
-    # Connected remote providers (optional, user-selectable backups).
-    connected = False
-    seen_ids = {"local"}
+    # Which remote providers are connected (api key in env, or an Anthropic
+    # subscription token).
+    provider_ids: list[str] = []
     try:
-        connected_ids = _connected_provider_ids()
-        # local-model is always in that set; the "real remote connected"
-        # signal is anything beyond it.
-        remotes = sorted(pid for pid in connected_ids if pid != "local-model")
-        connected = bool(remotes)
-        for pid in remotes:
-            available.append(
-                {
-                    "id": pid,
-                    "name": pid,
-                    "provider": pid,
-                    "connected": True,
-                    "local": False,
-                    "priority": False,
-                }
-            )
-            seen_ids.add(pid)
+        provider_ids = sorted(
+            pid for pid in _connected_provider_ids() if pid != "local-model"
+        )
     except Exception:
-        connected = False
-
-    # An Anthropic subscription (OAuth token) bills to plan credits rather than
-    # a metered key, and isn't picked up by the api-key provider scan above, so
-    # surface it explicitly as a selectable remote when connected.
+        provider_ids = []
     try:
         from zeb_cli.config import get_env_value_prefer_dotenv
 
         if (get_env_value_prefer_dotenv("CLAUDE_CODE_OAUTH_TOKEN") or "").strip():
-            if "anthropic" not in seen_ids:
-                available.append(
-                    {
-                        "id": "anthropic",
-                        "name": "Anthropic (subscription)",
-                        "provider": "anthropic",
-                        "connected": True,
-                        "local": False,
-                        "priority": False,
-                        "subscription": True,
-                    }
-                )
-            connected = True
+            if "anthropic" not in provider_ids:
+                provider_ids.append("anthropic")
     except Exception:
         pass
 
+    connected = bool(provider_ids)
+    groups: list[dict] = []
+    default_model = "local"  # falls back to local only when no provider connected
+
+    for pid in provider_ids:
+        try:
+            pmodels = _provider_models(pid)
+            pdefault = _provider_default_model(pid) or (pmodels[0] if pmodels else "")
+            disp = _provider_display_name(pid)
+            if pmodels:
+                for m in pmodels:
+                    available.append(
+                        {
+                            "id": f"{pid}/{m}",
+                            "name": m,
+                            "provider": pid,
+                            "provider_name": disp,
+                            "model": m,
+                            "connected": True,
+                            "local": False,
+                            "priority": False,
+                        }
+                    )
+            else:
+                available.append(
+                    {
+                        "id": pid,
+                        "name": disp,
+                        "provider": pid,
+                        "provider_name": disp,
+                        "model": pdefault,
+                        "connected": True,
+                        "local": False,
+                        "priority": False,
+                    }
+                )
+            groups.append(
+                {"provider": pid, "name": disp, "models": pmodels, "default": pdefault}
+            )
+            # The first connected provider's default becomes the chat default.
+            if default_model == "local":
+                default_model = f"{pid}/{pdefault}" if pdefault else pid
+        except Exception:
+            continue
+
     return {
-        "current": "local",
-        "default": "local",
+        "current": default_model,
+        "default": default_model,
         "available": available,
+        "groups": groups,
         "connected": connected,
+        "local_available": True,
     }
 
 
@@ -630,7 +652,173 @@ async def onboard_provider(request: Request):
         os.environ[env_var] = key
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
-    return {"ok": True, "provider": provider, "default_model": provider}
+    # Warm the model list so the selector/Models tab populate immediately.
+    models = _provider_models(provider, force=True)
+    return {
+        "ok": True,
+        "provider": provider,
+        "default_model": _provider_default_model(provider),
+        "models": models,
+    }
+
+
+# --------------------------------------------------------------------------
+# Provider model discovery — detect a key's provider and list its models
+# --------------------------------------------------------------------------
+import threading as _threading  # noqa: E402
+import time as _time  # noqa: E402
+
+_PROVIDER_DISPLAY = {p["id"]: p["name"] for p in ONBOARD_PROVIDERS}
+
+# Base URL + auth style for a live GET .../models. Everything here is
+# fail-open: a network/auth failure just falls back to the models.dev catalog
+# and then the provider's curated default, never an error.
+_PROVIDER_META: dict[str, dict] = {
+    "openai": {"base": "https://api.openai.com/v1", "auth": "bearer"},
+    "anthropic": {"base": "https://api.anthropic.com/v1", "auth": "anthropic"},
+    "google": {"base": "https://generativelanguage.googleapis.com/v1beta", "auth": "google"},
+    "together": {"base": "https://api.together.xyz/v1", "auth": "bearer"},
+    "mistral": {"base": "https://api.mistral.ai/v1", "auth": "bearer"},
+    "groq": {"base": "https://api.groq.com/openai/v1", "auth": "bearer"},
+    "deepseek": {"base": "https://api.deepseek.com/v1", "auth": "bearer"},
+    "xai": {"base": "https://api.x.ai/v1", "auth": "bearer"},
+    "openrouter": {"base": "https://openrouter.ai/api/v1", "auth": "bearer"},
+    "fireworks": {"base": "https://api.fireworks.ai/inference/v1", "auth": "bearer"},
+}
+
+
+def _detect_provider_from_key(key: str) -> str:
+    """Best-effort provider id from a key's prefix (empty if ambiguous/unknown)."""
+    k = (key or "").strip()
+    if k.startswith("sk-ant-"):
+        return "anthropic"
+    if k.startswith("sk-or-"):
+        return "openrouter"
+    if k.startswith("AIza"):
+        return "google"
+    if k.startswith("gsk_"):
+        return "groq"
+    if k.startswith("xai-"):
+        return "xai"
+    if k.startswith("sk-"):  # openai + several openai-compatible; default to openai
+        return "openai"
+    return ""
+
+
+def _provider_display_name(provider: str) -> str:
+    return _PROVIDER_DISPLAY.get(provider) or provider.capitalize()
+
+
+def _provider_key(provider: str) -> str:
+    """The stored API key for a provider (checks its env var), or ''."""
+    env = _ONBOARD_ENV_BY_ID.get(provider)
+    if not env:
+        return ""
+    try:
+        from zeb_cli.config import get_env_value_prefer_dotenv
+
+        return (get_env_value_prefer_dotenv(env) or "").strip()
+    except Exception:
+        return ""
+
+
+def _fetch_provider_models_live(provider: str, key: str) -> list[str]:
+    """GET the provider's /models with the key. Fail-open → []."""
+    meta = _PROVIDER_META.get(provider)
+    if not meta or not key:
+        return []
+    try:
+        import httpx
+
+        base = meta["base"].rstrip("/")
+        auth = meta["auth"]
+        if auth == "anthropic":
+            r = httpx.get(
+                base + "/models",
+                headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+                timeout=6.0,
+            )
+        elif auth == "google":
+            r = httpx.get(base + "/models", params={"key": key}, timeout=6.0)
+        else:
+            r = httpx.get(base + "/models", headers={"Authorization": "Bearer " + key}, timeout=6.0)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        ids: list[str] = []
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            for m in data["data"]:
+                mid = m.get("id") if isinstance(m, dict) else None
+                if mid:
+                    ids.append(str(mid))
+        elif isinstance(data, dict) and isinstance(data.get("models"), list):  # google
+            for m in data["models"]:
+                nm = (m.get("name", "") if isinstance(m, dict) else "").split("/")[-1]
+                if nm:
+                    ids.append(nm)
+        return ids
+    except Exception:
+        return []
+
+
+_models_cache: dict[str, dict] = {}
+_models_cache_lock = _threading.Lock()
+_MODELS_TTL = 300.0
+
+
+def _provider_models(provider: str, force: bool = False) -> list[str]:
+    """Models for a connected provider: live fetch → models.dev → default.
+
+    Cached for _MODELS_TTL so the frequently-polled /api/models and the chat
+    selector don't refetch on every call. Always fail-open.
+    """
+    now = _time.time()
+    if not force:
+        with _models_cache_lock:
+            ent = _models_cache.get(provider)
+            if ent and (now - ent["ts"] < _MODELS_TTL):
+                return list(ent["models"])
+
+    models = _fetch_provider_models_live(provider, _provider_key(provider))
+    if not models:
+        try:
+            from agent.models_dev import list_provider_models
+
+            models = list_provider_models(provider) or []
+        except Exception:
+            models = []
+    if not models:
+        d = _provider_default_model(provider)
+        models = [d] if d else []
+
+    seen: set = set()
+    out: list[str] = []
+    for m in models:
+        if m and m not in seen:
+            seen.add(m)
+            out.append(m)
+        if len(out) >= 40:
+            break
+    with _models_cache_lock:
+        _models_cache[provider] = {"models": out, "ts": now}
+    return out
+
+
+def _provider_default_model(provider: str) -> str:
+    """The provider's default model id (curated), or '' if unknown."""
+    try:
+        from zeb_cli.models import get_default_model_for_provider
+
+        d = (get_default_model_for_provider(provider) or "").strip()
+        if d:
+            return d
+    except Exception:
+        pass
+    with _models_cache_lock:
+        ent = _models_cache.get(provider)
+    if ent and ent["models"]:
+        return ent["models"][0]
+    return ""
 
 
 # --------------------------------------------------------------------------
@@ -724,13 +912,14 @@ def _connected_provider_ids() -> set:
     except Exception:
         pass
     try:
-        from zeb_cli.auth import PROVIDER_REGISTRY, get_env_value
+        from zeb_cli.auth import PROVIDER_REGISTRY
+        from zeb_cli.config import get_env_value_prefer_dotenv
 
         for pid, pconf in PROVIDER_REGISTRY.items():
             for env_var in getattr(pconf, "api_key_env_vars", []) or []:
                 if env_var == "CLAUDE_CODE_OAUTH_TOKEN":
                     continue
-                if get_env_value(env_var):
+                if (get_env_value_prefer_dotenv(env_var) or "").strip():
                     ids.add(str(pid).strip().lower())
                     break
     except Exception:
@@ -1196,6 +1385,14 @@ def list_keys(request: Request):
 
 @router.post("/api/keys")
 async def create_key(request: Request):
+    """Store a key and, when it maps to a known provider, connect it live.
+
+    Adding a key here does more than vault it: the provider is detected from
+    the key prefix (or an explicit ``provider`` in the body), the key is saved
+    to that provider's standard env var so it counts as connected, and its
+    model list is fetched and returned. The chat selector and Models tab then
+    show the provider and its models immediately.
+    """
     require_key(request)
     try:
         from zeb_chat.stores import ApiKeyStore
@@ -1204,7 +1401,30 @@ async def create_key(request: Request):
         key = str(body.get("key", "") or "").strip()
         if not key:
             raise HTTPException(status_code=400, detail="key required")
-        return ApiKeyStore().add(key, str(body.get("label", "") or ""))
+
+        provider = str(body.get("provider", "") or "").strip().lower()
+        if provider in ("", "auto"):
+            provider = _detect_provider_from_key(key)
+
+        stored = ApiKeyStore().add(key, str(body.get("label", "") or ""))
+        result = dict(stored) if isinstance(stored, dict) else {"ok": True}
+
+        connected_provider = ""
+        models: list[str] = []
+        env_var = _ONBOARD_ENV_BY_ID.get(provider)
+        if env_var:
+            try:
+                from zeb_cli.config import save_env_value
+
+                save_env_value(env_var, key)
+                os.environ[env_var] = key
+                connected_provider = provider
+                models = _provider_models(provider, force=True)
+            except Exception:
+                pass
+        result["provider"] = connected_provider
+        result["models"] = models
+        return result
     except HTTPException:
         raise
     except Exception as exc:
