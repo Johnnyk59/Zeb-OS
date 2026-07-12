@@ -28,9 +28,38 @@ def _reset_singleton():
 
     m._loaded_model = None
     m._loaded_model_path = None
+    m._loaded_model_key = None
     yield
     m._loaded_model = None
     m._loaded_model_path = None
+    m._loaded_model_key = None
+
+
+class TestSingletonCacheKey:
+    """The process-wide model must key on (path, n_ctx), not path alone."""
+
+    def test_same_path_same_ctx_reuses(self, monkeypatch):
+        import agent.llama_cpp_adapter as m
+
+        inst = MagicMock()
+        fake = _fake_llama_module(inst)
+        monkeypatch.setattr(m, "_get_llama_cpp_sdk", lambda: fake)
+        a = m._load_model("/w.gguf", n_ctx=65536, n_gpu_layers=0)
+        b = m._load_model("/w.gguf", n_ctx=65536, n_gpu_layers=0)
+        assert a is b
+        assert fake.Llama.call_count == 1  # loaded once
+
+    def test_same_path_different_ctx_reloads(self, monkeypatch):
+        import agent.llama_cpp_adapter as m
+
+        fake = _fake_llama_module(MagicMock())
+        monkeypatch.setattr(m, "_get_llama_cpp_sdk", lambda: fake)
+        m._load_model("/w.gguf", n_ctx=4096, n_gpu_layers=0)
+        m._load_model("/w.gguf", n_ctx=65536, n_gpu_layers=0)
+        # A different n_ctx must NOT silently reuse the 4096 instance.
+        assert fake.Llama.call_count == 2
+        _, kwargs = fake.Llama.call_args
+        assert kwargs["n_ctx"] == 65536
 
 
 class TestTranslateResponse:

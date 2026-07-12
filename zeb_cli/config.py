@@ -963,7 +963,11 @@ DEFAULT_CONFIG = {
         "self_improvement": {"interval_hours": 12, "notify": False},
         # Nightly file organizer (feature 9). target="" = disabled (safe default;
         # reorganizing an unspecified tree is never done automatically).
-        "file_organizer": {"daily_hour": 3, "target": "", "protect": [], "dry_run": False},
+        # dry_run defaults True: even with a target set, the bot only PLANS
+        # moves until the user explicitly opts in with dry_run: false. Real
+        # moves are journaled to autonomy/move_journal.jsonl and reversible via
+        # undo_last_organize(). An autonomous file mover is never one-way.
+        "file_organizer": {"daily_hour": 3, "target": "", "protect": [], "dry_run": True},
         # File index roots (features 4/8). Empty = index the current working dir.
         "file_index": {"roots": []},
     },

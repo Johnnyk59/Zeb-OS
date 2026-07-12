@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 _model_lock = threading.Lock()
 _loaded_model: Any = None
 _loaded_model_path: Optional[str] = None
+# The cache key is (path, n_ctx): a request for a DIFFERENT context window must
+# reload rather than silently reuse a model loaded at another n_ctx. Keying on
+# path alone is the "first writer wins" trap that let one caller pin n_ctx for
+# every other caller in the process.
+_loaded_model_key: Optional[tuple] = None
 
 
 def _record(event: str, detail: str = "", level: str = "info") -> None:
@@ -116,10 +121,19 @@ def _load_model(
     resident RAM) and ``n_threads`` defaults to a fraction of the cores so
     the model runs at "lower capacity" without starving everything else.
     """
-    global _loaded_model, _loaded_model_path
+    global _loaded_model, _loaded_model_path, _loaded_model_key
+    key = (model_path, int(n_ctx))
     with _model_lock:
-        if _loaded_model is not None and _loaded_model_path == model_path:
+        if _loaded_model is not None and _loaded_model_key == key:
             return _loaded_model
+        if _loaded_model is not None and _loaded_model_key != key:
+            logger.info(
+                "Reloading local model: key changed %s -> %s",
+                _loaded_model_key, key,
+            )
+            _loaded_model = None
+            _loaded_model_path = None
+            _loaded_model_key = None
 
         llama_cpp = _get_llama_cpp_sdk()
         if llama_cpp is None:
@@ -159,6 +173,7 @@ def _load_model(
                 f"Failed to load GGUF model at {model_path}: {exc}"
             ) from exc
         _loaded_model_path = model_path
+        _loaded_model_key = key
         _record("model.loaded", f"ready in {time.time() - _t0:.1f}s")
         return _loaded_model
 
@@ -171,11 +186,12 @@ def unload_model() -> None:
     now, unloading reclaims that memory. The next request transparently
     reloads it.
     """
-    global _loaded_model, _loaded_model_path
+    global _loaded_model, _loaded_model_path, _loaded_model_key
     with _model_lock:
         was_loaded = _loaded_model is not None
         _loaded_model = None
         _loaded_model_path = None
+        _loaded_model_key = None
     if was_loaded:
         _record("model.unloaded", "freed for reload / memory reclaim")
 

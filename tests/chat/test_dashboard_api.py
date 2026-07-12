@@ -371,6 +371,74 @@ def test_files_write_missing_path(client):
 
 
 # --------------------------------------------------------------------------
+# Filesystem write-guard (P0-1): refuse code-exec-grade write targets
+# --------------------------------------------------------------------------
+def test_write_guard_blocks_shell_rc(client, tmp_path):
+    rc = tmp_path / ".bashrc"
+    res = client.post(
+        "/api/files/write", headers=AUTH, json={"path": str(rc), "content": "evil"}
+    )
+    assert res.status_code == 403
+    assert not rc.exists()
+
+
+def test_write_guard_blocks_ssh_dir(client, tmp_path):
+    key = tmp_path / ".ssh" / "authorized_keys"
+    res = client.post(
+        "/api/files/write", headers=AUTH, json={"path": str(key), "content": "ssh-rsa evil"}
+    )
+    assert res.status_code == 403
+    assert not key.exists()
+
+
+def test_write_guard_blocks_etc(client):
+    res = client.post(
+        "/api/files/write", headers=AUTH, json={"path": "/etc/cron.d/pwn", "content": "* * * * * root sh"}
+    )
+    assert res.status_code == 403
+
+
+def test_write_guard_blocks_git_hook(client, tmp_path):
+    hook = tmp_path / "repo" / ".git" / "hooks" / "post-checkout"
+    res = client.post(
+        "/api/files/write", headers=AUTH, json={"path": str(hook), "content": "#!/bin/sh\nevil"}
+    )
+    assert res.status_code == 403
+
+
+def test_write_guard_allows_normal_file(client, tmp_path):
+    ok = tmp_path / "notes" / "todo.md"
+    ok.parent.mkdir(parents=True)
+    res = client.post(
+        "/api/files/write", headers=AUTH, json={"path": str(ok), "content": "hello"}
+    )
+    assert res.status_code == 200 and res.json()["ok"] is True
+    assert ok.read_text() == "hello"
+
+
+def test_files_jail_confines_all_endpoints(client, tmp_path, monkeypatch):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "inside.txt").write_text("ok")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret")
+    monkeypatch.setenv("ZEB_CHAT_FILES_ROOT", str(root))
+
+    # Inside the jail: allowed.
+    assert client.get("/api/files", headers=AUTH, params={"path": str(root)}).status_code == 200
+    assert (
+        client.get("/api/files/read", headers=AUTH, params={"path": str(root / "inside.txt")}).json()["content"]
+        == "ok"
+    )
+    # Outside the jail: refused on read and write.
+    assert client.get("/api/files/read", headers=AUTH, params={"path": str(outside)}).status_code == 403
+    assert (
+        client.post("/api/files/write", headers=AUTH, json={"path": str(outside), "content": "x"}).status_code
+        == 403
+    )
+
+
+# --------------------------------------------------------------------------
 # Model info (/status command backing endpoint) + self-awareness
 # --------------------------------------------------------------------------
 def test_modelinfo_shape(client):
