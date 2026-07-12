@@ -1,47 +1,87 @@
 #!/command/with-contenv sh
 # shellcheck shell=sh
-# Auto-generate basic-auth credentials for the dashboard when it will
-# bind to a non-loopback address and no auth provider is configured.
-# Credentials are printed to container logs so the operator can read
-# them with `docker logs`.
+# Ensure the dashboard has login credentials when it binds to a
+# non-loopback address, persist them to a file in the data volume, and
+# print them in a large, unmissable box in the container logs.
+#
+# A public link (Cloudflare quick tunnel) is printed separately by the
+# zeb-tunnel service once it connects — look for "YOUR DASHBOARD LINK".
 
 case "${ZEB_DASHBOARD:-}" in
     1|true|TRUE|True|yes|YES|Yes) ;;
     *) exit 0 ;;
 esac
 
-# Already configured — nothing to do.
-[ -n "${ZEB_DASHBOARD_BASIC_AUTH_USERNAME:-}" ] && exit 0
+# OAuth deployments manage their own credentials — leave them alone.
 [ -n "${ZEB_DASHBOARD_OAUTH_CLIENT_ID:-}" ] && exit 0
 
 dash_host="${ZEB_DASHBOARD_HOST:-0.0.0.0}"
+dash_port="${ZEB_DASHBOARD_PORT:-9119}"
+
+# Loopback binds don't engage the auth gate — no credentials needed.
 case "$dash_host" in
     127.0.0.1|localhost|::1) exit 0 ;;
 esac
 
-# Generate a random 20-char password (url-safe base64, trimmed).
-gen_pw="$(head -c 15 /dev/urandom | base64 | tr -d '=+/' | head -c 20)"
-[ -z "$gen_pw" ] && gen_pw="zebos-$(date +%s)"
+user="${ZEB_DASHBOARD_BASIC_AUTH_USERNAME:-}"
+pw="${ZEB_DASHBOARD_BASIC_AUTH_PASSWORD:-}"
 
-# Persist to the s6 env dir so every service inherits them.
-s6_envdir="/run/s6/container_environment"
-if [ -d "$s6_envdir" ]; then
-    printf '%s' "admin"   > "${s6_envdir}/ZEB_DASHBOARD_BASIC_AUTH_USERNAME"
-    printf '%s' "$gen_pw"  > "${s6_envdir}/ZEB_DASHBOARD_BASIC_AUTH_PASSWORD"
+if [ -z "$user" ] && [ -z "$pw" ]; then
+    # Nothing configured — generate a username/password pair.
+    user="admin"
+    pw="$(head -c 15 /dev/urandom | base64 | tr -d '=+/' | head -c 20)"
+    [ -z "$pw" ] && pw="zebos-$(date +%s)"
+
+    # Persist to the s6 env dir so every service inherits them.
+    s6_envdir="/run/s6/container_environment"
+    if [ -d "$s6_envdir" ]; then
+        printf '%s' "$user" > "${s6_envdir}/ZEB_DASHBOARD_BASIC_AUTH_USERNAME"
+        printf '%s' "$pw"   > "${s6_envdir}/ZEB_DASHBOARD_BASIC_AUTH_PASSWORD"
+    fi
+    export ZEB_DASHBOARD_BASIC_AUTH_USERNAME="$user"
+    export ZEB_DASHBOARD_BASIC_AUTH_PASSWORD="$pw"
+else
+    [ -z "$user" ] && user="admin"
 fi
 
-# Also export for any process spawned from this script chain.
-export ZEB_DASHBOARD_BASIC_AUTH_USERNAME="admin"
-export ZEB_DASHBOARD_BASIC_AUTH_PASSWORD="$gen_pw"
+# Persist to a plain-text file in the data volume so the operator can
+# retrieve the credentials later even after the boot logs scroll away:
+#   docker exec <container> cat /opt/data/DASHBOARD_LOGIN.txt
+cred_file="/opt/data/DASHBOARD_LOGIN.txt"
+if [ -d /opt/data ]; then
+    {
+        echo "ZebOS Dashboard login"
+        echo "Username: $user"
+        echo "Password: $pw"
+        echo "Port:     $dash_port"
+        echo "Saved:    $(date -u '+%Y-%m-%d %H:%M:%SZ')"
+    } > "$cred_file" 2>/dev/null || true
+    chmod 600 "$cred_file" 2>/dev/null || true
+fi
+
+# ---- big, unmissable credentials box ---------------------------------
+rule=$(printf '%68s' '' | tr ' ' '=')
+line() { printf '|%-68s|\n' "$1"; }
 
 echo ""
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  ZebOS Dashboard — auto-generated credentials              ║"
-echo "║                                                            ║"
-echo "║  Username:  admin                                          ║"
-printf '║  Password:  %-46s  ║\n' "$gen_pw"
-echo "║                                                            ║"
-echo "║  Set ZEB_DASHBOARD_BASIC_AUTH_USERNAME and                  ║"
-echo "║  ZEB_DASHBOARD_BASIC_AUTH_PASSWORD to use your own.         ║"
-echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
+printf '+%s+\n' "$rule"
+line ""
+line "    ZEBOS DASHBOARD  --  LOGIN CREDENTIALS"
+line ""
+line "    ------------------------------------------------------------"
+line ""
+line "      USERNAME:   $user"
+line "      PASSWORD:   $pw"
+line ""
+line "    ------------------------------------------------------------"
+line ""
+line "    Also saved to: $cred_file"
+line "    (docker exec <container> cat $cred_file)"
+line ""
+line "    A public link you can open from ANY device appears below"
+line "    once the tunnel connects. Look for:  YOUR DASHBOARD LINK"
+line ""
+printf '+%s+\n' "$rule"
+echo ""
 echo ""
