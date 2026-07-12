@@ -31,6 +31,25 @@ RUN apt-get update && \
     ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg gcc g++ make cmake python3-dev python3-venv libffi-dev libolm-dev procps git openssh-client docker-cli xz-utils && \
     rm -rf /var/lib/apt/lists/*
 
+# ---------- cloudflared (dashboard quick tunnel) ----------
+# Provides `cloudflared`, used by the zeb-tunnel s6 service to expose the
+# dashboard on a public https://<random>.trycloudflare.com URL with no
+# firewall rules, port-forwarding, or Cloudflare account. The raw host:port
+# bind is frequently unreachable (NAT / firewall / changing host IP), so the
+# tunnel is the reliable "give me a link that works from anywhere" path.
+# Multi-arch binary keyed on TARGETARCH (amd64 / arm64).
+ARG TARGETARCH
+RUN set -eu; \
+    case "${TARGETARCH:-amd64}" in \
+        amd64) cf_arch="amd64" ;; \
+        arm64) cf_arch="arm64" ;; \
+        *) echo "Unsupported TARGETARCH=${TARGETARCH} for cloudflared" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 3 -o /usr/local/bin/cloudflared \
+        "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}"; \
+    chmod +x /usr/local/bin/cloudflared; \
+    /usr/local/bin/cloudflared --version
+
 # ---------- s6-overlay install ----------
 # s6-overlay provides supervision for the main zeb process, the dashboard,
 # and per-profile gateways. /init becomes PID 1 below — see ENTRYPOINT.

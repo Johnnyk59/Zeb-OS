@@ -1,0 +1,98 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Cloudflare quick tunnel for the dashboard.
+#
+# Exposes the local dashboard on a public https://<random>.trycloudflare.com
+# URL that works from ANY device with no firewall rules, port-forwarding, or
+# Cloudflare account. This is the zero-config "give me a link that works"
+# path — the raw host:port bind often isn't reachable (NAT / firewall / the
+# host IP changed), so the tunnel is the reliable way in.
+#
+# Enabled automatically whenever the dashboard is enabled. Set ZEB_TUNNEL=0
+# to disable and rely on the direct host:port bind instead.
+#
+# The dashboard is still password-protected behind the tunnel (the auth gate
+# requires the basic-auth credentials printed by 016-dashboard-auto-auth), so
+# a public URL does not mean an open dashboard.
+
+# Only run when the dashboard itself is enabled.
+case "${ZEB_DASHBOARD:-}" in
+    1|true|TRUE|True|yes|YES|Yes) ;;
+    *) exit 0 ;;
+esac
+
+# Opt-out switch (default on).
+case "${ZEB_TUNNEL:-1}" in
+    0|false|FALSE|False|no|NO|No)
+        echo "[tunnel] ZEB_TUNNEL disabled — skipping public link." >&2
+        exit 0
+        ;;
+esac
+
+if ! command -v cloudflared >/dev/null 2>&1; then
+    echo "[tunnel] cloudflared is not installed in this image; no public link." >&2
+    exit 0
+fi
+
+port="${ZEB_DASHBOARD_PORT:-9119}"
+target="http://localhost:${port}"
+user="${ZEB_DASHBOARD_BASIC_AUTH_USERNAME:-admin}"
+pw="${ZEB_DASHBOARD_BASIC_AUTH_PASSWORD:-(see DASHBOARD_LOGIN.txt)}"
+
+rule=$(printf '%68s' '' | tr ' ' '=')
+line() { printf '|%-68s|\n' "$1"; }
+
+print_link_box() {
+    _url="$1"
+    echo ""
+    echo ""
+    printf '+%s+\n' "$rule"
+    line ""
+    line "    ****  YOUR DASHBOARD LINK  ****"
+    line ""
+    line "    ------------------------------------------------------------"
+    line ""
+    line "      OPEN THIS FROM ANY DEVICE:"
+    line ""
+    line "      $_url"
+    line ""
+    line "    ------------------------------------------------------------"
+    line ""
+    line "      USERNAME:   $user"
+    line "      PASSWORD:   $pw"
+    line ""
+    line "    (link may take ~10 seconds to become reachable)"
+    line ""
+    printf '+%s+\n' "$rule"
+    echo ""
+    echo ""
+}
+
+echo "[tunnel] starting Cloudflare quick tunnel -> ${target}"
+
+# Clean up cloudflared (and this process group) on stop so a service
+# restart doesn't leave an orphaned tunnel behind.
+trap 'kill 0 2>/dev/null' TERM INT
+
+last_url=""
+
+# cloudflared prints the assigned URL to its logs. Pipe its output through a
+# reader that (a) passes everything through to the container logs and
+# (b) reprints the URL in a big box the moment it appears. Keeping the
+# pipeline in the foreground lets s6 supervise it and restart on exit.
+cloudflared tunnel --no-autoupdate --url "$target" 2>&1 | \
+    while IFS= read -r cf_line; do
+        printf '%s\n' "$cf_line"
+        case "$cf_line" in
+            *trycloudflare.com*)
+                url=$(printf '%s\n' "$cf_line" \
+                    | grep -oE 'https://[a-zA-Z0-9._-]+\.trycloudflare\.com' \
+                    | head -n1)
+                if [ -n "$url" ] && [ "$url" != "$last_url" ]; then
+                    last_url="$url"
+                    printf '%s' "$url" > /opt/data/DASHBOARD_URL.txt 2>/dev/null || true
+                    print_link_box "$url"
+                fi
+                ;;
+        esac
+    done

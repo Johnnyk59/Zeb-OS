@@ -1,0 +1,16 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Tunnel finish script. Companion to ./run. When the tunnel is disabled
+# (ZEB_DASHBOARD off, ZEB_TUNNEL falsy, or cloudflared missing), ./run
+# exits 0 immediately; exiting 125 here tells s6-supervise the service has
+# permanently failed (do not restart), so the slot reports down. When
+# enabled, exit non-125 so s6 restarts cloudflared on crash.
+case "${ZEB_DASHBOARD:-}" in
+    1|true|TRUE|True|yes|YES|Yes) ;;
+    *) exit 125 ;;
+esac
+case "${ZEB_TUNNEL:-1}" in
+    0|false|FALSE|False|no|NO|No) exit 125 ;;
+esac
+command -v cloudflared >/dev/null 2>&1 || exit 125
+exit 0
