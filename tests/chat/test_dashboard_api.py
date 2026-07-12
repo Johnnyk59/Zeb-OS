@@ -525,3 +525,40 @@ def test_anthropic_requires_key(client):
     assert client.get("/api/anthropic/status").status_code == 401
     assert client.post("/api/anthropic/connect").status_code == 401
     assert client.post("/api/anthropic/disconnect").status_code == 401
+
+
+# --------------------------------------------------------------------------
+# First-run provider onboarding
+# --------------------------------------------------------------------------
+def test_list_providers_shape(client):
+    res = client.get("/api/providers", headers=AUTH)
+    assert res.status_code == 200
+    providers = res.json()["providers"]
+    assert len(providers) == 10  # top ten
+    ids = {p["id"] for p in providers}
+    assert {"openai", "anthropic", "google", "together"} <= ids
+    for p in providers:
+        assert p["id"] and p["name"]
+
+
+def test_onboard_provider_saves_key_and_connects(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZEB_HOME", str(tmp_path))
+    # Unknown provider / missing key are rejected.
+    assert client.post("/api/onboard/provider", headers=AUTH, json={"provider": "nope", "key": "x"}).status_code == 400
+    assert client.post("/api/onboard/provider", headers=AUTH, json={"provider": "openai", "key": ""}).status_code == 400
+
+    res = client.post(
+        "/api/onboard/provider", headers=AUTH, json={"provider": "openai", "key": "sk-test-123456"}
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True and body["default_model"] == "openai"
+    # Persisted to the provider's standard env var.
+    import os
+
+    assert os.environ.get("OPENAI_API_KEY") == "sk-test-123456"
+
+
+def test_onboard_provider_requires_key(client):
+    assert client.get("/api/providers").status_code == 401
+    assert client.post("/api/onboard/provider").status_code == 401

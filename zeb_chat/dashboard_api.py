@@ -577,6 +577,63 @@ def anthropic_disconnect(request: Request):
 
 
 # --------------------------------------------------------------------------
+# First-run provider onboarding — pick a provider + paste a key
+# --------------------------------------------------------------------------
+# The ten most common providers offered at first run. `id` matches the runtime
+# provider id the chat pipeline resolves; `env` is where the key is persisted so
+# _connected_provider_ids() detects it and the chat dropdown lists it.
+ONBOARD_PROVIDERS: list[dict] = [
+    {"id": "openai", "name": "OpenAI", "env": "OPENAI_API_KEY"},
+    {"id": "anthropic", "name": "Anthropic (Claude)", "env": "ANTHROPIC_API_KEY"},
+    {"id": "google", "name": "Google (Gemini)", "env": "GEMINI_API_KEY"},
+    {"id": "together", "name": "Together AI", "env": "TOGETHER_API_KEY"},
+    {"id": "mistral", "name": "Mistral", "env": "MISTRAL_API_KEY"},
+    {"id": "groq", "name": "Groq", "env": "GROQ_API_KEY"},
+    {"id": "deepseek", "name": "DeepSeek", "env": "DEEPSEEK_API_KEY"},
+    {"id": "xai", "name": "xAI (Grok)", "env": "XAI_API_KEY"},
+    {"id": "openrouter", "name": "OpenRouter", "env": "OPENROUTER_API_KEY"},
+    {"id": "fireworks", "name": "Fireworks AI", "env": "FIREWORKS_API_KEY"},
+]
+_ONBOARD_ENV_BY_ID = {p["id"]: p["env"] for p in ONBOARD_PROVIDERS}
+
+
+@router.get("/api/providers")
+def list_providers(request: Request):
+    """The provider menu shown at first run (id + display name)."""
+    require_key(request)
+    return {"providers": [{"id": p["id"], "name": p["name"]} for p in ONBOARD_PROVIDERS]}
+
+
+@router.post("/api/onboard/provider")
+async def onboard_provider(request: Request):
+    """Persist a first-run provider key so chat can use it for fast responses.
+
+    The local GGUF backbone keeps running in the background (it powers the
+    always-on "thinking" brain visualization); this simply sets the provider
+    the user-facing chat prefers for speed and quality. The key is saved to the
+    provider's standard env var, so the existing connected-provider detection
+    and chat runtime pick it up with no further wiring.
+    """
+    require_key(request)
+    body = await _json_body(request)
+    provider = str(body.get("provider", "") or "").strip().lower()
+    key = str(body.get("key", "") or "").strip()
+    if provider not in _ONBOARD_ENV_BY_ID:
+        raise HTTPException(status_code=400, detail="unknown provider")
+    if not key:
+        raise HTTPException(status_code=400, detail="key required")
+    env_var = _ONBOARD_ENV_BY_ID[provider]
+    try:
+        from zeb_cli.config import save_env_value
+
+        save_env_value(env_var, key)
+        os.environ[env_var] = key
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "provider": provider, "default_model": provider}
+
+
+# --------------------------------------------------------------------------
 # Cron
 # --------------------------------------------------------------------------
 @router.get("/api/cron")
