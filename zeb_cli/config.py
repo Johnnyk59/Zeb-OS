@@ -961,6 +961,23 @@ DEFAULT_CONFIG = {
         },
         # Self-improvement loop (feature 7) — persona/style evolution every 12h.
         "self_improvement": {"interval_hours": 12, "notify": False},
+        # Self-evolution engine — the 24/7 custom-model development loop. Each
+        # tick it harvests training pairs from recent chats, caches reasoning
+        # for faster thinking, benchmarks backbone latency, and (when a trainer
+        # is configured) fine-tunes new generations. trainer_cmd="" keeps it in
+        # data-collection mode: it accumulates the dataset under
+        # autonomy/evolution/ so a fine-tune is one config change away, and
+        # never pretends training happened. When set, the dataset path is
+        # appended as the final argument to the command.
+        "self_evolution": {
+            "enabled": True,
+            "interval_minutes": 30,
+            "trainer_cmd": "",
+            "trainer_timeout_seconds": 3600,
+        },
+        # Self-review engine — keeps the 6h/12h/24h "what did I accomplish"
+        # reviews current so the dashboard buttons always show fresh summaries.
+        "self_review": {"enabled": True, "interval_hours": 2},
         # Nightly file organizer (feature 9). target="" = disabled (safe default;
         # reorganizing an unspecified tree is never done automatically).
         # dry_run defaults True: even with a target set, the bot only PLANS

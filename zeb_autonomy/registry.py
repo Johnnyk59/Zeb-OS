@@ -107,12 +107,38 @@ def build_scheduler(
         hour = int(_cfg(config, "autonomy", "file_organizer", "daily_hour", default=3) or 3)
         sched.register(FileOrganizerBot(), daily_hour=max(0, min(23, hour)))
 
+    # Self-evolution engine — the 24/7 custom-model development loop (data
+    # harvest, response-cache speed-up, latency measurement, fine-tune
+    # generations). Runs frequently so the model keeps improving.
+    def _evolution() -> None:
+        from zeb_autonomy.self_evolution import SelfEvolutionBot
+
+        if not _cfg(config, "autonomy", "self_evolution", "enabled", default=True):
+            return
+        mins = float(
+            _cfg(config, "autonomy", "self_evolution", "interval_minutes", default=30) or 30
+        )
+        sched.register(SelfEvolutionBot(), interval_seconds=mins * 60)
+
+    # Self-review engine — keeps the 6h/12h/24h reviews current.
+    def _review() -> None:
+        from zeb_autonomy.self_review import ReviewBot
+
+        if not _cfg(config, "autonomy", "self_review", "enabled", default=True):
+            return
+        hrs = float(
+            _cfg(config, "autonomy", "self_review", "interval_hours", default=2) or 2
+        )
+        sched.register(ReviewBot(), interval_seconds=hrs * 3600)
+
     _try(_decision, "decision_engine")
     _try(_memory, "memory_learning")
     _try(_sync, "state_sync")
     _try(_knowledge, "knowledge_firehose")
     _try(_improve, "self_improvement")
     _try(_organizer, "file_organizer")
+    _try(_evolution, "self_evolution")
+    _try(_review, "self_review")
 
     return sched
 

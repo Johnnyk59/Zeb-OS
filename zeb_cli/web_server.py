@@ -2808,6 +2808,95 @@ async def restart_local_model():
     return await asyncio.to_thread(_restart)
 
 
+@app.get("/api/localmodel/reviews")
+async def get_model_reviews():
+    """The three persisted self-reviews (6h / 12h / 24h)."""
+
+    def _load() -> Dict[str, Any]:
+        try:
+            from zeb_autonomy.self_review import load_reviews
+
+            return {"reviews": load_reviews()}
+        except Exception as exc:
+            return {"reviews": [], "error": str(exc)}
+
+    return await asyncio.to_thread(_load)
+
+
+@app.post("/api/localmodel/reviews")
+async def post_model_review(request: Request):
+    """Kick a self-review generation for one window; returns immediately.
+
+    The local model writes the review in the background (it can take a while);
+    the panel polls ``GET /api/localmodel/reviews`` to see the finished text.
+    """
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be an object")
+    window = str(body.get("window") or "24h").strip().lower()
+
+    def _kick() -> Dict[str, Any]:
+        try:
+            from zeb_autonomy import self_review
+
+            if window not in self_review.WINDOWS:
+                return {"error": f"invalid window {window!r}", "window": window}
+            cfg = load_config() or {}
+            return self_review.kick_review(window, config=cfg)
+        except Exception as exc:
+            return {"error": str(exc), "window": window}
+
+    return await asyncio.to_thread(_kick)
+
+
+@app.get("/api/localmodel/evolution")
+async def get_evolution_status():
+    """Self-evolution engine manifest: generations, dataset, cache, speed-up."""
+
+    def _status() -> Dict[str, Any]:
+        try:
+            from zeb_autonomy.self_evolution import status
+
+            return status()
+        except Exception as exc:
+            return {"enabled": False, "error": str(exc)}
+
+    return await asyncio.to_thread(_status)
+
+
+@app.get("/api/brain/status")
+async def get_brain_status():
+    """Live brain-activity label for the dashboard's status pill.
+
+    Reports what Zeb's *background* mind is doing right now — "learning"
+    while the autonomy / self-evolution / self-review engines run, else
+    "idle" — sourced from the process-local :mod:`zeb_autonomy.activity`
+    beacon (TTL-decayed, so a hung bot can't pin it). The chat page merges
+    this with its own live "thinking"/"processing" turn state, which wins
+    when a chat turn is in flight.
+    """
+
+    def _snapshot() -> Dict[str, Any]:
+        out: Dict[str, Any] = {"status": "idle", "detail": "", "loaded": False}
+        try:
+            from zeb_autonomy import activity
+
+            beacon = activity.get()
+            out["status"] = beacon.get("status", "idle")
+            out["detail"] = beacon.get("detail", "")
+        except Exception:
+            pass
+        try:
+            from agent.llama_cpp_adapter import is_model_loaded
+
+            out["loaded"] = bool(is_model_loaded())
+        except Exception:
+            pass
+        return out
+
+    return await asyncio.to_thread(_snapshot)
+
+
 @app.get("/api/diagnose")
 async def get_diagnose():
     """Offline health check — same checks the background monitor runs."""
@@ -2861,14 +2950,74 @@ def _run_zeb_diagnostics() -> Dict[str, Any]:
         }
 
 
+def _norm_skill_key(s: str) -> str:
+    return str(s or "").strip().lower().replace("_", "-").replace(" ", "-")
+
+
+def _installed_skill_names() -> set[str]:
+    """Normalized names of every skill currently available to the agent."""
+    try:
+        from tools.skills_tool import _find_all_skills
+
+        return {_norm_skill_key(s.get("name", "")) for s in _find_all_skills(skip_disabled=False)}
+    except Exception:
+        return set()
+
+
+def _match_repo_skills(full_name: str, skill_keys: set[str]) -> list[str]:
+    """Skills whose name matches this repo's short name (owner/REPO → REPO)."""
+    short = _norm_skill_key(str(full_name).split("/")[-1])
+    if not short:
+        return []
+    # Exact match, or the repo drops a common skill-repo prefix/suffix.
+    candidates = {short}
+    for affix in ("skill-", "-skill", "zeb-", "awesome-"):
+        if short.startswith(affix):
+            candidates.add(short[len(affix):])
+        if short.endswith(affix):
+            candidates.add(short[: -len(affix)])
+    return sorted(skill_keys & candidates)
+
+
+def _enrich_repos(repos: list) -> tuple[list, dict]:
+    """Annotate each repo with extracted/skills and compute sidebar totals."""
+    skill_keys = _installed_skill_names()
+    extracted = 0
+    enabled_count = 0
+    for r in repos:
+        matched = _match_repo_skills(r.get("full_name", ""), skill_keys)
+        r["skills"] = matched
+        r["extracted"] = bool(matched)
+        if matched:
+            extracted += 1
+        if r.get("enabled", True):
+            enabled_count += 1
+    totals = {
+        "total": len(repos),
+        "enabled_count": enabled_count,
+        "extracted": extracted,
+    }
+    return repos, totals
+
+
 @app.get("/api/repos")
 async def list_saved_repos(q: Optional[str] = None):
-    """Saved open-source GitHub repos (searchable with ?q=)."""
+    """Saved open-source GitHub repos (searchable with ?q=).
+
+    Each repo is annotated with whether its skills have been *extracted*
+    (a matching skill is installed) and the skill names it maps to, so the
+    sidebar can show the extracted/enabled counts and wire toggles to real
+    skill visibility.
+    """
     try:
         from zeb_chat.stores import RepoStore
 
-        repos = await asyncio.to_thread(lambda: RepoStore().list(query=q or ""))
-        return {"repos": repos}
+        def _work() -> Dict[str, Any]:
+            repos = RepoStore().list(query=q or "")
+            repos, totals = _enrich_repos(repos)
+            return {"repos": repos, **totals}
+
+        return await asyncio.to_thread(_work)
     except Exception as exc:
         return {"repos": [], "error": str(exc)}
 
@@ -2904,6 +3053,89 @@ async def delete_saved_repo(rid: str):
         return {"ok": bool(ok)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+@app.post("/api/repos/{rid}/enabled")
+async def set_repo_enabled(rid: str, request: Request):
+    """Enable/disable a repo — and its extracted skills along with it.
+
+    This is where the sidebar connects to the skill-loading pipeline:
+    disabling a repo removes its matching skills from the active set (adds
+    them to the disabled list); enabling puts them back. The repo's own
+    flag persists either way.
+    """
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be an object")
+    enabled = bool(body.get("enabled", True))
+
+    def _work() -> Dict[str, Any]:
+        from zeb_chat.stores import RepoStore
+
+        entry = RepoStore().set_enabled(rid, enabled)
+        if entry is None:
+            return {"ok": False, "error": "repo not found"}
+        # Cascade to matching skills so "repo off" actually stops loading them.
+        toggled = 0
+        try:
+            from zeb_cli.skills_config import get_disabled_skills, save_disabled_skills
+            from tools.skills_tool import _find_all_skills
+
+            names_by_key = {
+                _norm_skill_key(s.get("name", "")): s.get("name", "")
+                for s in _find_all_skills(skip_disabled=False)
+            }
+            matched_keys = _match_repo_skills(entry.get("full_name", ""), set(names_by_key))
+            if matched_keys:
+                config = load_config()
+                disabled = get_disabled_skills(config)
+                for key in matched_keys:
+                    real = names_by_key.get(key)
+                    if not real:
+                        continue
+                    if enabled:
+                        if real in disabled:
+                            disabled.discard(real)
+                            toggled += 1
+                    else:
+                        if real not in disabled:
+                            disabled.add(real)
+                            toggled += 1
+                if toggled:
+                    save_disabled_skills(config, disabled)
+                    _clear_skills_prompt_cache()
+        except Exception:
+            pass
+        return {"ok": True, "enabled": enabled, "skills_toggled": toggled}
+
+    return await asyncio.to_thread(_work)
+
+
+@app.post("/api/repos/sync")
+async def sync_repos():
+    """Reconcile the tracked-repo list with the agent's installed skills.
+
+    Ensures every repo carries the ``enabled`` flag, recomputes which repos
+    have been *extracted* (a matching skill is installed), and returns the
+    fresh totals for the sidebar header. Idempotent and safe to call anytime.
+    """
+
+    def _work() -> Dict[str, Any]:
+        from zeb_chat.stores import RepoStore
+
+        store = RepoStore()
+        repos = store.list()
+        added = 0
+        # Normalize legacy entries so the enabled flag is always present.
+        for r in repos:
+            if "enabled" not in r:
+                store.set_enabled(r.get("id", ""), True)
+                added += 1
+        repos = store.list()
+        _, totals = _enrich_repos(repos)
+        return {"ok": True, "added": added, **totals}
+
+    return await asyncio.to_thread(_work)
 
 
 @app.post("/api/repos/scan")

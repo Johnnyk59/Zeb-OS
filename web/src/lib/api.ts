@@ -319,6 +319,7 @@ export const api = {
   getStatus: () => fetchJSON<StatusResponse>("/api/status"),
   // ZebOS panels ---------------------------------------------------------
   getLocalModel: () => fetchJSON<LocalModelStatus>("/api/localmodel"),
+  getBrainStatus: () => fetchJSON<BrainStatus>("/api/brain/status"),
   restartLocalModel: () =>
     fetchJSON<{ ok: boolean; error?: string }>("/api/localmodel/restart", {
       method: "POST",
@@ -326,10 +327,32 @@ export const api = {
   getDiagnose: () => fetchJSON<DiagnoseResponse>("/api/diagnose"),
   runDiagnoseRepair: () =>
     fetchJSON<DiagnoseResponse>("/api/diagnose/repair", { method: "POST" }),
+  // Local-model self-reviews (6h / 12h / 24h)
+  getModelReviews: () =>
+    fetchJSON<ModelReviewsResponse>("/api/localmodel/reviews"),
+  generateModelReview: (window: "6h" | "12h" | "24h") =>
+    fetchJSON<ModelReview & { error?: string }>("/api/localmodel/reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ window }),
+    }),
+  // Self-evolution engine
+  getEvolution: () => fetchJSON<EvolutionStatus>("/api/localmodel/evolution"),
   getRepos: (q = "") =>
     fetchJSON<ReposResponse>(
       q ? `/api/repos?q=${encodeURIComponent(q)}` : "/api/repos",
     ),
+  setRepoEnabled: (rid: string, enabled: boolean) =>
+    fetchJSON<{ ok: boolean; enabled: boolean; skills_toggled?: number }>(
+      `/api/repos/${encodeURIComponent(rid)}/enabled`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      },
+    ),
+  syncRepos: () =>
+    fetchJSON<RepoSyncResponse>("/api/repos/sync", { method: "POST" }),
   addRepo: (repo: { full_name: string; url?: string; description?: string }) =>
     fetchJSON<SavedRepo & { error?: string }>("/api/repos", {
       method: "POST",
@@ -1702,6 +1725,49 @@ export interface LocalModelStatus {
   active: boolean;
 }
 
+/** Live brain-activity label from ``GET /api/brain/status``. */
+export interface BrainStatus {
+  status: "idle" | "thinking" | "processing" | "learning" | string;
+  detail: string;
+  loaded: boolean;
+}
+
+/** One persisted self-review window from ``GET /api/localmodel/reviews``. */
+export interface ModelReview {
+  window: "6h" | "12h" | "24h" | string;
+  window_hours: number;
+  markdown: string;
+  generated_at: number | null;
+  generating: boolean;
+  stale: boolean;
+}
+
+export interface ModelReviewsResponse {
+  reviews: ModelReview[];
+  error?: string;
+}
+
+/** Self-evolution engine manifest from ``GET /api/localmodel/evolution``. */
+export interface EvolutionStatus {
+  enabled: boolean;
+  generation: number;
+  dataset_examples: number;
+  dataset_bytes: number;
+  cache_entries: number;
+  cache_hits: number;
+  cache_misses: number;
+  cache_hit_rate: number;
+  latency_baseline_ms: number | null;
+  latency_current_ms: number | null;
+  speedup_pct: number | null;
+  trainer_available: boolean;
+  training_state: string;
+  last_tick: number | null;
+  last_trained: number | null;
+  notes: string;
+  events: Array<{ ts?: number; event?: string; detail?: string }>;
+}
+
 export interface DiagnoseCheck {
   component: string;
   status: "ok" | "degraded" | "critical" | string;
@@ -1725,10 +1791,30 @@ export interface SavedRepo {
   stars?: number;
   language?: string;
   added_at?: number;
+  /** Whether this repo's extracted skills are active in the agent. */
+  enabled?: boolean;
+  /** True when a skill matching this repo is installed in the agent. */
+  extracted?: boolean;
+  /** "manual" | "scan" | "skills-sync" — where the entry came from. */
+  source?: string;
+  /** Skill names extracted from this repo (skills-sync entries). */
+  skills?: string[];
 }
 
 export interface ReposResponse {
   repos: SavedRepo[];
+  /** Totals for the sidebar header (all + enabled counts). */
+  total?: number;
+  enabled_count?: number;
+  extracted?: number;
+  error?: string;
+}
+
+export interface RepoSyncResponse {
+  ok: boolean;
+  added: number;
+  total: number;
+  extracted: number;
   error?: string;
 }
 

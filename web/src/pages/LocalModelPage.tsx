@@ -8,17 +8,43 @@
  * a wedged model without touching the rest of the server.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, Cpu, Database, HardDrive, RotateCw, Wifi } from "lucide-react";
+import {
+  Activity,
+  BrainCircuit,
+  Cpu,
+  Database,
+  FileText,
+  Gauge,
+  HardDrive,
+  RotateCw,
+  Sparkles,
+  Wifi,
+  Zap,
+} from "lucide-react";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
+import { Markdown } from "@/components/Markdown";
 import { api } from "@/lib/api";
-import type { LocalModelStatus } from "@/lib/api";
+import type {
+  EvolutionStatus,
+  LocalModelStatus,
+  ModelReview,
+} from "@/lib/api";
 
 const POLL_MS = 2500;
+
+function fmtAgo(ts?: number | null): string {
+  if (!ts) return "never";
+  const secs = Date.now() / 1000 - ts;
+  if (secs < 60) return "just now";
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${(secs / 3600).toFixed(1)}h ago`;
+  return `${(secs / 86400).toFixed(1)}d ago`;
+}
 
 function fmtBytes(n?: number): string {
   if (!n || n <= 0) return "—";
@@ -35,6 +61,10 @@ export default function LocalModelPage() {
   const [status, setStatus] = useState<LocalModelStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [restarting, setRestarting] = useState(false);
+  const [evolution, setEvolution] = useState<EvolutionStatus | null>(null);
+  const [reviews, setReviews] = useState<ModelReview[]>([]);
+  const [activeWindow, setActiveWindow] = useState<"6h" | "12h" | "24h">("6h");
+  const [genWindow, setGenWindow] = useState<string | null>(null);
   const { toast, showToast } = useToast();
   // Previous net counters → live bandwidth (bytes/s) between polls.
   const prevNetRef = useRef<{ ts: number; sent: number; recv: number } | null>(null);
@@ -74,6 +104,51 @@ export default function LocalModelPage() {
     return () => clearInterval(id);
   }, [load]);
 
+  // Evolution manifest + persisted reviews poll on a slower cadence.
+  const loadEvolution = useCallback(async () => {
+    try {
+      setEvolution(await api.getEvolution());
+    } catch {
+      /* keep last */
+    }
+  }, []);
+  const loadReviews = useCallback(async () => {
+    try {
+      const res = await api.getModelReviews();
+      setReviews(res.reviews ?? []);
+    } catch {
+      /* keep last */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadEvolution();
+    void loadReviews();
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      void loadEvolution();
+      void loadReviews();
+    }, 6000);
+    return () => clearInterval(id);
+  }, [loadEvolution, loadReviews]);
+
+  const handleGenerateReview = async (window: "6h" | "12h" | "24h") => {
+    setActiveWindow(window);
+    setGenWindow(window);
+    try {
+      const r = await api.generateModelReview(window);
+      if (r.error) showToast(r.error, "error");
+      else showToast(`Generating ${window} review…`, "success");
+      // The model writes in the background; poll picks up the result.
+      void loadReviews();
+    } catch (e) {
+      showToast(`Review failed: ${e}`, "error");
+    } finally {
+      // Clear the local spinner shortly; server ``generating`` flag takes over.
+      setTimeout(() => setGenWindow(null), 1500);
+    }
+  };
+
   const handleRestart = async () => {
     setRestarting(true);
     try {
@@ -100,6 +175,7 @@ export default function LocalModelPage() {
   }
 
   const s = status;
+  const activeReview = reviews.find((r) => r.window === activeWindow);
   const stateLabel = s?.loaded
     ? "Active"
     : s?.download?.active
@@ -185,6 +261,175 @@ export default function LocalModelPage() {
           sub={`context ${fmtCtx(s?.ctx ?? 0)}`}
         />
       </div>
+
+      {/* Self-evolution engine — Zeb building its own faster brain */}
+      <Card>
+        <CardContent className="flex flex-col gap-4 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm uppercase tracking-[0.1em] text-text-secondary">
+              <BrainCircuit className="h-4 w-4" /> Self-evolution engine
+            </div>
+            <Badge
+              className={
+                evolution?.enabled
+                  ? "bg-[#a884ff]/15 text-[#a884ff]"
+                  : "bg-midground/10 text-text-secondary"
+              }
+            >
+              {evolution?.enabled ? "Evolving 24/7" : "Idle"}
+            </Badge>
+          </div>
+          <span className="text-xs text-text-tertiary">
+            Runs continuously: harvests training data from every chat, caches
+            repeat reasoning for faster thinking, measures latency, and fine-tunes
+            new generations when a trainer is configured.
+          </span>
+
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <EvoStat
+              icon={<Sparkles className="h-4 w-4" />}
+              label="Generation"
+              value={`#${evolution?.generation ?? 0}`}
+              sub={evolution?.training_state ?? "collecting"}
+            />
+            <EvoStat
+              icon={<Database className="h-4 w-4" />}
+              label="Training data"
+              value={`${(evolution?.dataset_examples ?? 0).toLocaleString()}`}
+              sub="examples harvested"
+            />
+            <EvoStat
+              icon={<Zap className="h-4 w-4" />}
+              label="Effective speed-up"
+              value={
+                evolution?.speedup_pct != null
+                  ? `${evolution.speedup_pct}%`
+                  : "—"
+              }
+              sub={`cache ${Math.round((evolution?.cache_hit_rate ?? 0) * 100)}% hit`}
+            />
+            <EvoStat
+              icon={<Gauge className="h-4 w-4" />}
+              label="Latency"
+              value={
+                evolution?.latency_current_ms != null
+                  ? `${Math.round(evolution.latency_current_ms)}ms`
+                  : "—"
+              }
+              sub={
+                evolution?.latency_baseline_ms != null
+                  ? `baseline ${Math.round(evolution.latency_baseline_ms)}ms`
+                  : "measuring…"
+              }
+            />
+          </div>
+
+          {evolution?.notes ? (
+            <div className="rounded-[var(--radius)] border border-current/10 bg-midground/[0.04] px-3 py-2 text-xs text-text-secondary">
+              {evolution.notes}
+              {!evolution.trainer_available ? (
+                <span className="mt-1 block text-text-tertiary">
+                  No trainer backend configured — set{" "}
+                  <code className="font-mono">
+                    autonomy.self_evolution.trainer_cmd
+                  </code>{" "}
+                  to fine-tune custom generations from the collected data.
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="flex items-center justify-between text-xs text-text-tertiary">
+            <span>Last cycle {fmtAgo(evolution?.last_tick)}</span>
+            <span>
+              {(evolution?.cache_hits ?? 0).toLocaleString()} cache hits ·{" "}
+              {(evolution?.cache_entries ?? 0).toLocaleString()} cached
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Self-reviews — Zeb summarizes its own work */}
+      <Card>
+        <CardContent className="flex flex-col gap-4 p-5">
+          <div className="flex items-center gap-2 text-sm uppercase tracking-[0.1em] text-text-secondary">
+            <FileText className="h-4 w-4" /> Self-reviews
+          </div>
+          <span className="-mt-2 text-xs text-text-tertiary">
+            Zeb writes and keeps these current automatically. Click to
+            regenerate one now.
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {(["6h", "12h", "24h"] as const).map((w) => {
+              const r = reviews.find((x) => x.window === w);
+              const busy = genWindow === w || r?.generating;
+              return (
+                <Button
+                  key={w}
+                  ghost={activeWindow !== w}
+                  size="sm"
+                  onClick={() => {
+                    setActiveWindow(w);
+                    void handleGenerateReview(w);
+                  }}
+                  prefix={busy ? <Spinner /> : <RotateCw className="h-3.5 w-3.5" />}
+                  className="uppercase"
+                >
+                  {w === "6h"
+                    ? "Six-hour"
+                    : w === "12h"
+                      ? "Twelve-hour"
+                      : "Twenty-four-hour"}{" "}
+                  review
+                </Button>
+              );
+            })}
+          </div>
+
+          {/* Window tabs */}
+          <div className="flex gap-1 border-b border-current/10">
+            {(["6h", "12h", "24h"] as const).map((w) => (
+              <button
+                key={w}
+                onClick={() => setActiveWindow(w)}
+                className={
+                  "px-3 py-1.5 text-xs uppercase tracking-[0.1em] transition-colors " +
+                  (activeWindow === w
+                    ? "border-b-2 border-midground text-midground"
+                    : "text-text-tertiary hover:text-text-secondary")
+                }
+              >
+                {w}
+              </button>
+            ))}
+          </div>
+
+          <div className="min-h-24 rounded-[var(--radius)] border border-current/10 bg-midground/[0.03] p-4">
+            {activeReview?.generating ? (
+              <div className="flex items-center gap-2 text-sm text-text-secondary">
+                <Spinner /> Zeb is writing the {activeWindow} review…
+              </div>
+            ) : activeReview?.markdown ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                  {activeReview.stale ? (
+                    <Badge className="bg-warning/15 text-warning">Stale</Badge>
+                  ) : (
+                    <Badge className="bg-success/15 text-success">Current</Badge>
+                  )}
+                  <span>generated {fmtAgo(activeReview.generated_at)}</span>
+                </div>
+                <Markdown content={activeReview.markdown} />
+              </div>
+            ) : (
+              <span className="text-sm text-text-tertiary">
+                No {activeWindow} review yet — click the button above to have Zeb
+                write one.
+              </span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Download progress, when active */}
       {s?.download?.active ? (
@@ -277,5 +522,30 @@ function MetricCard({
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+/** Compact stat tile for the self-evolution grid (borderless, denser). */
+function EvoStat({
+  icon,
+  label,
+  value,
+  sub,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sub?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1 rounded-[var(--radius)] border border-current/10 bg-midground/[0.04] p-3">
+      <div className="flex items-center gap-1.5 text-[0.65rem] uppercase tracking-[0.1em] text-text-tertiary">
+        {icon} {label}
+      </div>
+      <span className="font-mono text-lg text-midground">{value}</span>
+      {sub ? (
+        <span className="truncate text-[0.65rem] text-text-tertiary">{sub}</span>
+      ) : null}
+    </div>
   );
 }
