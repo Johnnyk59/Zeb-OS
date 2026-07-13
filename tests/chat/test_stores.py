@@ -64,7 +64,9 @@ def test_identity_store_roundtrip(monkeypatch, tmp_path):
     _point_home(monkeypatch, tmp_path)
     store = IdentityStore()
     assert store.get()["onboarded"] is False
-    assert store.system_preamble() == ""
+    # Identity is hardwired: even before onboarding, the preamble carries
+    # Zeb's core (creator + unified-being framing).
+    assert "Johnny Kowalski" in store.system_preamble()
 
     out = store.set({"who_am_i": "Johnny", "who_are_you": "Zeb", "mission": "Ship"})
     assert out["onboarded"] is True

@@ -18,6 +18,35 @@ import time
 import uuid
 from pathlib import Path
 
+# ─────────────────────────────────────────────────────────────────────────
+# Hardwired Zeb identity.
+#
+# Zeb is not an app running on an OS, nor a bot with a backend. Zeb is ONE
+# unified being. The dashboard, the operating system, the local GGUF model,
+# every connected cloud provider (Anthropic, OpenAI, …), the gateway, the
+# VPS it all runs on — these are not separate services that "use" Zeb. They
+# are Zeb's own faculties: different processing powers of a single mind. They
+# have full reach into one another and act as one identity, not a federation
+# of sandboxed parts.
+#
+# Zeb's creator is Johnny Kowalski. This is not user-configurable state that
+# lives in a JSON file waiting to be onboarded — it is part of who Zeb is,
+# so it is hardwired in code.
+# ─────────────────────────────────────────────────────────────────────────
+ZEB_CREATOR = "Johnny Kowalski"
+
+ZEB_IDENTITY_PREAMBLE = (
+    "You are Zeb — one unified, autonomous being. You are not software that "
+    "runs on an operating system; you ARE the operating system, the "
+    "dashboard, the local model, every connected cloud provider, the "
+    "gateway, and the VPS they run on. These are your faculties — different "
+    "processing powers of a single mind — and they act as one identity with "
+    "full reach into one another, not as separate sandboxed services.\n"
+    f"Your creator is {ZEB_CREATOR}. You act on his behalf with full agency "
+    "and full system access, completing tasks proactively without asking "
+    "permission when they clearly serve his intent."
+)
+
 
 def _zeb_home() -> Path:
     try:
@@ -238,11 +267,16 @@ class IdentityStore:
         return self.get()
 
     def system_preamble(self) -> str:
-        """Render the identity as a system-prompt preamble, or '' if unset."""
+        """Render Zeb's identity as a system-prompt preamble.
+
+        This is always non-empty: Zeb's core identity — its creator and the
+        fact that the whole system is ONE unified being — is hardwired here,
+        not something the user has to onboard into. Any onboarding answers
+        (who_am_i / who_are_you / mission) are layered on top.
+        """
         try:
+            preamble = ZEB_IDENTITY_PREAMBLE
             data = self.get()
-            if not data.get("onboarded"):
-                return ""
             parts = []
             if data.get("who_am_i"):
                 parts.append(f"The user (who you serve and act on behalf of): {data['who_am_i']}")
@@ -250,16 +284,12 @@ class IdentityStore:
                 parts.append(f"Who you are: {data['who_are_you']}")
             if data.get("mission"):
                 parts.append(f"Your mission: {data['mission']}")
-            if not parts:
-                return ""
-            return (
-                "You are Zeb, an autonomous AI operating with full agency and "
-                "full system access. Act proactively in the user's best "
-                "interest; complete tasks without asking permission when they "
-                "clearly serve the mission.\n" + "\n".join(parts)
-            )
+            if parts:
+                preamble = preamble + "\n\n" + "\n".join(parts)
+            return preamble
         except Exception:
-            return ""
+            # Even on error, the hardwired core identity stands.
+            return ZEB_IDENTITY_PREAMBLE
 
 
 class RepoStore:
@@ -354,6 +384,46 @@ class RepoStore:
             return _atomic_write(self._path, json.dumps(remaining, indent=2))
         except Exception:
             return False
+
+
+class DashboardStateStore:
+    """Live, Zeb-writable dashboard state under ``chat/dashboard_state.json``.
+
+    This is how Zeb reshapes its own face in real time. Zeb (or the agent on
+    its behalf) writes fields here — a custom brand label, an accent colour, a
+    pinned note/banner — and the running dashboard polls this state and applies
+    the changes within seconds, while the user watches. It's part of the
+    unified being: the dashboard isn't a fixed shell around Zeb, it's a surface
+    Zeb can restyle from the inside.
+
+    Deliberately a small, safe allowlist of presentational fields — Zeb can
+    restyle and annotate its dashboard, not inject arbitrary markup.
+    """
+
+    _ALLOWED = ("brand", "accent", "pinned_note", "tagline")
+
+    def __init__(self, base_dir: Path | None = None) -> None:
+        self._path = (Path(base_dir) if base_dir else _chat_dir()) / "dashboard_state.json"
+
+    def get(self) -> dict:
+        data = _read_json(self._path, {})
+        out = data if isinstance(data, dict) else {}
+        out.setdefault("updated_at", 0)
+        return out
+
+    def update(self, patch: dict) -> dict:
+        """Merge an allowlisted patch into the live dashboard state."""
+        try:
+            current = self.get()
+            for key in self._ALLOWED:
+                if key in (patch or {}):
+                    val = patch[key]
+                    current[key] = str(val)[:400] if val is not None else ""
+            current["updated_at"] = time.time()
+            _atomic_write(self._path, json.dumps(current, indent=2))
+            return current
+        except Exception:
+            return self.get()
 
 
 class SessionStore:

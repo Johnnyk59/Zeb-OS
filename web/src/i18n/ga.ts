@@ -50,12 +50,12 @@ export const ga: Translations = {
   },
 
   app: {
-    brand: "ZebOS",
-    brandShort: "ZO",
+    brand: "Zeb",
+    brandShort: "Z",
     closeNavigation: "Dún an nascleanúint",
     closeModelTools: "Dún an samhail agus na huirlisí",
     footer: {
-      org: "ZebOS",
+      org: "Zeb",
     },
     activeSessionsLabel: "Seisiúin gníomhacha:",
     gatewayStatusLabel: "Stádas an gateway:",

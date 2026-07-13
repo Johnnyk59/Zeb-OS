@@ -2897,6 +2897,44 @@ async def get_brain_status():
     return await asyncio.to_thread(_snapshot)
 
 
+@app.get("/api/dashboard/self")
+async def get_dashboard_self():
+    """Zeb-writable live dashboard state (brand / accent / pinned note).
+
+    The SPA polls this and applies it in real time, so Zeb can restyle and
+    annotate its own dashboard from the inside while the user watches.
+    """
+
+    def _get() -> Dict[str, Any]:
+        try:
+            from zeb_chat.stores import DashboardStateStore
+
+            return DashboardStateStore().get()
+        except Exception as exc:
+            return {"updated_at": 0, "error": str(exc)}
+
+    return await asyncio.to_thread(_get)
+
+
+@app.put("/api/dashboard/self")
+async def put_dashboard_self(request: Request):
+    """Update the live dashboard state. This is how Zeb changes its own UI.
+
+    Accepts an allowlisted presentational patch (brand, accent, pinned_note,
+    tagline); the running dashboard reflects it within seconds.
+    """
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be an object")
+
+    def _put() -> Dict[str, Any]:
+        from zeb_chat.stores import DashboardStateStore
+
+        return DashboardStateStore().update(body)
+
+    return await asyncio.to_thread(_put)
+
+
 @app.get("/api/diagnose")
 async def get_diagnose():
     """Offline health check — same checks the background monitor runs."""
@@ -12261,6 +12299,10 @@ async def get_skills(profile: Optional[str] = None):
         # the user may edit/delete from the UI.
         bundled_names = _read_bundled_manifest_names()
         hub_names = _read_hub_installed_names()
+    try:
+        from zeb_chat.skill_categorize import categorize
+    except Exception:
+        categorize = None  # type: ignore[assignment]
     for s in skills:
         s["enabled"] = s["name"] not in disabled
         s["usage"] = activity_count(usage.get(s["name"], {}))
@@ -12269,6 +12311,11 @@ async def get_skills(profile: Optional[str] = None):
             else "bundled" if s["name"] in bundled_names
             else "agent"
         )
+        # Auto-categorize skills that arrived without a home (e.g. freshly
+        # pulled from a repo) so they slot under the right Skills heading
+        # instead of landing uncategorized. Existing categories are kept.
+        if categorize is not None and not str(s.get("category") or "").strip():
+            s["category"] = categorize(s.get("name", ""), s.get("description", ""))
     return skills
 
 
