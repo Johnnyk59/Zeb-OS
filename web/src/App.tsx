@@ -16,7 +16,6 @@ import {
   NavLink,
   Navigate,
   useLocation,
-  useNavigate,
 } from "react-router-dom";
 import {
   Activity,
@@ -26,7 +25,6 @@ import {
   Code,
   Cpu,
   Database,
-  Download,
   Eye,
   FolderOpen,
   FileText,
@@ -41,7 +39,6 @@ import {
   Plug,
   Puzzle,
   Radio,
-  RotateCw,
   Settings,
   Shield,
   ShieldCheck,
@@ -58,20 +55,15 @@ import { Button } from "@nous-research/ui/ui/components/button";
 import { SelectionSwitcher } from "@nous-research/ui/ui/components/selection-switcher";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Typography } from "@nous-research/ui/ui/components/typography/index";
-import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { SidebarFooter } from "@/components/SidebarFooter";
-import { SidebarStatusStrip, gatewayLine } from "@/components/SidebarStatusStrip";
 import { useBelowBreakpoint } from "@nous-research/ui/hooks/use-below-breakpoint";
 import { useSidebarStatus } from "@/hooks/useSidebarStatus";
-import { AuthWidget } from "@/components/AuthWidget";
 import { PageHeaderProvider } from "@/contexts/PageHeaderProvider";
 import { ProfileProvider } from "@/contexts/ProfileProvider";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { ProfileSwitcher } from "@/components/ProfileSwitcher";
 import { ProfileScopeBanner } from "@/components/ProfileScopeBanner";
-import { useSystemActions } from "@/contexts/useSystemActions";
-import type { SystemAction } from "@/contexts/system-actions-context";
 import ConfigPage from "@/pages/ConfigPage";
 import DiagnosePage from "@/pages/DiagnosePage";
 import DocsPage from "@/pages/DocsPage";
@@ -95,8 +87,6 @@ import WebhooksPage from "@/pages/WebhooksPage";
 import SystemPage from "@/pages/SystemPage";
 import ChatPage from "@/pages/ChatPage";
 import ZebChatPage from "@/pages/ZebChatPage";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useI18n } from "@/i18n";
 import type { Translations } from "@/i18n/types";
 import { PluginPage, PluginSlot, usePlugins } from "@/plugins";
@@ -104,7 +94,7 @@ import type { PluginManifest } from "@/plugins";
 import { useTheme } from "@/themes";
 import { isDashboardEmbeddedChatEnabled } from "@/lib/dashboard-flags";
 import { api } from "@/lib/api";
-import type { StatusResponse, UpdateCheckResponse } from "@/lib/api";
+import type { DashboardSelfState } from "@/lib/api";
 
 function RootRedirect() {
   return <Navigate to="/sessions" replace />;
@@ -215,7 +205,6 @@ const BUILTIN_NAV_CONFIG: NavItem[] = [
   { path: "/webhooks", label: "Webhooks", icon: Webhook },
   { path: "/channels", label: "Channels", icon: Radio },
   { path: "/mcp", label: "MCP", icon: Plug },
-  { path: "/plugins", labelKey: "plugins", label: "Plugins", icon: Puzzle },
   { path: "/logs", labelKey: "logs", label: "Logs", icon: FileText },
   { path: "/config", labelKey: "config", label: "Config", icon: Settings },
 ];
@@ -300,12 +289,13 @@ function partitionSidebarNav(
   const merged = buildNavItems(builtIn, manifests);
   const builtinPaths = new Set(builtIn.map((i) => i.path));
   const coreItems: NavItem[] = [];
-  const pluginItems: NavItem[] = [];
   for (const item of merged) {
     if (builtinPaths.has(item.path)) coreItems.push(item);
-    else pluginItems.push(item);
   }
-  return { coreItems, pluginItems };
+  // Clean slate: plugin-provided tabs (e.g. Kanban) are kept OUT of the
+  // sidebar. Their routes still resolve by URL, but the nav shows only Zeb's
+  // own functional surfaces — no plugin clutter.
+  return { coreItems, pluginItems: [] };
 }
 
 function buildRoutes(
@@ -401,6 +391,31 @@ export default function App() {
   const isDesktopCollapsed = collapsed && !isMobile;
   const tooltipWarmRef = useRef(0);
   const sidebarStatus = useSidebarStatus();
+
+  // Live dashboard state Zeb can rewrite in real time (brand, tagline, a
+  // pinned note). Polled so Zeb's own edits — Zeb reshaping its own face —
+  // show up within a few seconds while the user is watching.
+  const [dashSelf, setDashSelf] = useState<DashboardSelfState>({});
+  useEffect(() => {
+    let alive = true;
+    const poll = () => {
+      if (document.hidden) return;
+      api
+        .getDashboardSelf()
+        .then((s) => {
+          if (alive) setDashSelf(s || {});
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+  const brandName =
+    (dashSelf.brand && dashSelf.brand.trim()) || t.app.brand || "Zeb";
   const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const isChatRoute = normalizedPath === "/chat";
@@ -602,8 +617,12 @@ export default function App() {
               >
                 <PluginSlot name="header-left" />
 
+                {/* One name. This whole system — dashboard, OS, local model,
+                    every connected provider, the VPS — IS Zeb. Not "ZebOS",
+                    not a tool that runs Zeb: one unified being. The label is
+                    live: Zeb can rename its own brand via /api/dashboard/self. */}
                 <Typography className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.14em] text-midground uppercase">
-                  ZebOS
+                  {brandName}
                 </Typography>
               </div>
 
@@ -698,56 +717,17 @@ export default function App() {
               )}
             </nav>
 
-            <SidebarSystemActions
-              collapsed={isDesktopCollapsed}
-              onNavigate={closeMobile}
-              status={sidebarStatus}
-              tooltipWarmRef={tooltipWarmRef}
-            />
-
-            <div
-              className={cn(
-                "flex shrink-0 items-center gap-2",
-                "px-3 py-2",
-                "border-t border-current/20",
-                isDesktopCollapsed
-                  ? "lg:flex-col lg:items-start lg:gap-3 lg:py-3"
-                  : "justify-between",
-              )}
-            >
-              <div
-                className={cn(
-                  "flex min-w-0 items-center gap-2",
-                  isDesktopCollapsed && "lg:flex-col lg:items-start",
-                )}
-              >
-                <PluginSlot name="header-right" />
-
-                <SidebarIconWithTooltip
-                  collapsed={isDesktopCollapsed}
-                  label={t.theme?.switchTheme ?? "Switch theme"}
-                  tooltipWarmRef={tooltipWarmRef}
-                >
-                  <ThemeSwitcher collapsed={isDesktopCollapsed} dropUp />
-                </SidebarIconWithTooltip>
-
-                <SidebarIconWithTooltip
-                  collapsed={isDesktopCollapsed}
-                  label={t.language.switchTo}
-                  tooltipWarmRef={tooltipWarmRef}
-                >
-                  <LanguageSwitcher collapsed={isDesktopCollapsed} dropUp />
-                </SidebarIconWithTooltip>
-              </div>
-            </div>
-
+            {/* Clean sidebar — only functional navigation remains. The admin
+                actions panel (restart/update), sign-out, theme toggle (Zeb is
+                always dark), and language selector were intentionally removed:
+                Zeb is one being with one look, on a single-user box. Just a
+                minimal live-status strip stays at the bottom. */}
             <div
               className={cn(
                 "flex shrink-0 flex-col",
                 isDesktopCollapsed && "lg:hidden",
               )}
             >
-              <AuthWidget />
               <SidebarFooter status={sidebarStatus} />
             </div>
           </aside>
@@ -763,6 +743,16 @@ export default function App() {
               )}
             >
               <PluginSlot name="pre-main" />
+              {/* Live pinned note — Zeb can post a message to itself/the user
+                  via /api/dashboard/self and it appears here within seconds. */}
+              {dashSelf.pinned_note && dashSelf.pinned_note.trim() ? (
+                <div className="m-3 flex items-start gap-2 rounded-[var(--radius)] border border-[#a884ff]/30 bg-[#a884ff]/10 px-3 py-2 text-sm text-[#c4a9ff]">
+                  <span className="mt-0.5 shrink-0 font-mono text-[0.65rem] uppercase tracking-[0.12em] opacity-70">
+                    {brandName}
+                  </span>
+                  <span className="min-w-0">{dashSelf.pinned_note}</span>
+                </div>
+              ) : null}
               <div
                 className={cn(
                   "w-full min-w-0",
@@ -1046,368 +1036,6 @@ function SidebarConfigGroup({
   );
 }
 
-function SidebarSystemActions({
-  collapsed,
-  onNavigate,
-  status,
-  tooltipWarmRef,
-}: SidebarSystemActionsProps) {
-  const { t } = useI18n();
-  const navigate = useNavigate();
-  const { activeAction, isBusy, isRunning, pendingAction, runAction } =
-    useSystemActions();
-  const canUpdateZeb = status?.can_update_zeb === true;
-  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
-  const [updateConfirmOpen, setUpdateConfirmOpen] = useState(false);
-  const [updateConfirmInfo, setUpdateConfirmInfo] =
-    useState<UpdateCheckResponse | null>(null);
-  const [updateConfirmChecking, setUpdateConfirmChecking] = useState(false);
-
-  useEffect(() => {
-    if (!updateConfirmOpen) {
-      setUpdateConfirmInfo(null);
-      return;
-    }
-    let cancelled = false;
-    setUpdateConfirmChecking(true);
-    api
-      .checkZebUpdate(false)
-      .then((info) => {
-        if (!cancelled) setUpdateConfirmInfo(info);
-      })
-      .catch(() => {
-        if (!cancelled) setUpdateConfirmInfo(null);
-      })
-      .finally(() => {
-        if (!cancelled) setUpdateConfirmChecking(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [updateConfirmOpen]);
-
-  const updateConfirmDescription = useMemo(() => {
-    if (updateConfirmInfo?.behind && updateConfirmInfo.behind > 0) {
-      const cmd = updateConfirmInfo.update_command;
-      const n = updateConfirmInfo.behind;
-      return `This will run 'zeb update' (${cmd}) and pull ${n} new commit${n === 1 ? "" : "s"}. The gateway restarts when the update finishes; the current session keeps its prompt cache until then.`;
-    }
-    const cmd = updateConfirmInfo?.update_command ?? "zeb update";
-    return (
-      t.status.updateZebConfirmMessage ??
-      `This will run 'zeb update' (${cmd}) and restart the gateway when it finishes.`
-    );
-  }, [t.status.updateZebConfirmMessage, updateConfirmInfo]);
-
-  const items: SystemActionItem[] = [
-    {
-      action: "restart",
-      icon: RotateCw,
-      label: t.status.restartGateway,
-      runningLabel: t.status.restartingGateway,
-      spin: true,
-    },
-  ];
-  if (canUpdateZeb) {
-    items.push({
-      action: "update",
-      icon: Download,
-      label: t.status.updateZeb,
-      runningLabel: t.status.updatingZeb,
-      spin: false,
-    });
-  }
-
-  const handleClick = (action: SystemAction) => {
-    if (isBusy) return;
-    if (action === "restart") {
-      setRestartConfirmOpen(true);
-      return;
-    }
-    if (action === "update") {
-      setUpdateConfirmOpen(true);
-      return;
-    }
-    void runAction(action);
-    navigate("/sessions");
-    onNavigate();
-  };
-
-  const confirmRestart = () => {
-    setRestartConfirmOpen(false);
-    void runAction("restart");
-    navigate("/sessions");
-    onNavigate();
-  };
-
-  const confirmUpdate = () => {
-    setUpdateConfirmOpen(false);
-    void runAction("update");
-    navigate("/sessions");
-    onNavigate();
-  };
-
-  return (
-    <>
-    <div
-      className={cn(
-        "shrink-0 flex flex-col",
-        "border-t border-current/10",
-        "py-1",
-      )}
-    >
-      <span
-        className={cn(
-          "px-5 pt-0.5 pb-0.5",
-          "font-sans text-display text-xs tracking-[0.12em] text-text-tertiary",
-          collapsed && "lg:hidden",
-        )}
-      >
-        {t.app.system}
-      </span>
-
-      <div className={cn(collapsed && "lg:hidden")}>
-        <SidebarStatusStrip status={status} />
-      </div>
-
-      <GatewayDot collapsed={collapsed} status={status} tooltipWarmRef={tooltipWarmRef} />
-
-      <ul className="flex flex-col">
-        {items.map((item) => (
-          <SystemActionButton
-            key={item.action}
-            collapsed={collapsed}
-            disabled={isBusy && !(pendingAction === item.action || (activeAction === item.action && isRunning))}
-            tooltipWarmRef={tooltipWarmRef}
-            isPending={pendingAction === item.action}
-            isRunning={activeAction === item.action && isRunning && pendingAction !== item.action}
-            item={item}
-            onClick={() => handleClick(item.action)}
-          />
-        ))}
-      </ul>
-    </div>
-
-    <ConfirmDialog
-      cancelLabel={t.common.cancel}
-      confirmLabel={t.status.restartGateway}
-      description={
-        t.status.restartGatewayConfirmMessage ??
-        "This restarts the Zeb gateway process. Connected channels and active sessions will reconnect afterward."
-      }
-      loading={pendingAction === "restart"}
-      onCancel={() => setRestartConfirmOpen(false)}
-      onConfirm={confirmRestart}
-      open={restartConfirmOpen}
-      title={
-        t.status.restartGatewayConfirmTitle ?? `${t.status.restartGateway}?`
-      }
-    />
-
-    <ConfirmDialog
-      cancelLabel={t.common.cancel}
-      confirmLabel={t.status.updateZebConfirmNow ?? "Update now"}
-      description={
-        updateConfirmChecking ? t.common.loading : updateConfirmDescription
-      }
-      loading={pendingAction === "update" || updateConfirmChecking}
-      onCancel={() => setUpdateConfirmOpen(false)}
-      onConfirm={confirmUpdate}
-      open={updateConfirmOpen}
-      title={t.status.updateZebConfirmTitle ?? `${t.status.updateZeb}?`}
-    />
-    </>
-  );
-}
-
-function SystemActionButton({
-  collapsed,
-  disabled,
-  isPending,
-  isRunning: isActionRunning,
-  item,
-  onClick,
-  tooltipWarmRef,
-}: SystemActionButtonProps) {
-  const { icon: Icon, label, runningLabel, spin } = item;
-  const [hovered, setHovered] = useState(false);
-  const [tooltipAnchor, setTooltipAnchor] = useState<HTMLElement | null>(null);
-  const busy = isPending || isActionRunning;
-  const displayLabel = isActionRunning ? runningLabel : label;
-  const showTooltip = (event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>) => {
-    setHovered(true);
-    setTooltipAnchor(event.currentTarget);
-  };
-  const hideTooltip = () => {
-    setHovered(false);
-    setTooltipAnchor(null);
-  };
-
-  return (
-    <li
-      onMouseEnter={collapsed ? showTooltip : undefined}
-      onMouseLeave={collapsed ? hideTooltip : undefined}
-    >
-      <button
-        onClick={onClick}
-        disabled={disabled}
-        aria-busy={busy}
-        aria-label={collapsed ? displayLabel : undefined}
-        onFocus={collapsed ? showTooltip : undefined}
-        onBlur={collapsed ? hideTooltip : undefined}
-        type="button"
-        className={cn(
-          "group/action relative flex w-full items-center gap-3",
-          "px-5 py-2.5",
-          "font-sans text-display text-xs tracking-[0.1em]",
-          "whitespace-nowrap transition-colors cursor-pointer",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground",
-          busy
-            ? "text-midground"
-            : "text-text-secondary hover:text-midground",
-          "disabled:text-text-disabled disabled:cursor-not-allowed",
-        )}
-      >
-        {isPending ? (
-          <Spinner className="shrink-0 text-[0.875rem]" />
-        ) : isActionRunning && spin ? (
-          <Spinner className="shrink-0 text-[0.875rem]" />
-        ) : (
-          <Icon
-            className={cn(
-              "h-3.5 w-3.5 shrink-0",
-              isActionRunning && !spin && "animate-pulse",
-            )}
-          />
-        )}
-
-        <span className={cn(
-          "truncate transition-opacity duration-300",
-          collapsed ? "lg:opacity-0" : "lg:opacity-100",
-        )}>
-          {displayLabel}
-        </span>
-
-        <span
-          aria-hidden
-          className="absolute inset-y-0.5 left-1.5 right-1.5 bg-midground opacity-0 pointer-events-none transition-opacity duration-200 group-hover/action:opacity-5"
-        />
-
-        {busy && (
-          <span
-            aria-hidden
-            className="absolute left-0 top-0 bottom-0 w-px bg-midground"
-          />
-        )}
-      </button>
-
-      {collapsed && hovered && tooltipAnchor && (
-        <SidebarTooltip anchor={tooltipAnchor} label={displayLabel} warmRef={tooltipWarmRef} />
-      )}
-    </li>
-  );
-}
-
-function SidebarIconWithTooltip({
-  children,
-  collapsed,
-  label,
-  tooltipWarmRef,
-}: SidebarIconWithTooltipProps) {
-  const [hovered, setHovered] = useState(false);
-  const [tooltipAnchor, setTooltipAnchor] = useState<HTMLElement | null>(null);
-  const showTooltip = (event: MouseEvent<HTMLDivElement>) => {
-    setHovered(true);
-    setTooltipAnchor(event.currentTarget);
-  };
-  const hideTooltip = () => {
-    setHovered(false);
-    setTooltipAnchor(null);
-  };
-
-  return (
-    <div
-      className={cn(
-        "relative w-fit",
-        collapsed && "group/icon",
-      )}
-      onMouseEnter={collapsed ? showTooltip : undefined}
-      onMouseLeave={collapsed ? hideTooltip : undefined}
-    >
-      {children}
-
-      {collapsed && (
-        <span
-          aria-hidden
-          className="absolute inset-y-0 inset-x-[-0.375rem] bg-midground opacity-0 pointer-events-none transition-opacity duration-200 group-hover/icon:opacity-5 hidden lg:block"
-        />
-      )}
-
-      {collapsed && hovered && tooltipAnchor && (
-        <SidebarTooltip anchor={tooltipAnchor} label={label} warmRef={tooltipWarmRef} />
-      )}
-    </div>
-  );
-}
-
-function GatewayDot({ collapsed, status, tooltipWarmRef }: GatewayDotProps) {
-  const { t } = useI18n();
-  const [hovered, setHovered] = useState(false);
-  const [tooltipAnchor, setTooltipAnchor] = useState<HTMLElement | null>(null);
-
-  const toneToColor: Record<string, string> = {
-    "text-success": "bg-success",
-    "text-warning": "bg-warning",
-    "text-destructive": "bg-destructive",
-    "text-muted-foreground": "bg-muted-foreground",
-  };
-
-  let color: string;
-  let label: string;
-
-  if (!status) {
-    color = "bg-midground/20";
-    label = t.status.gateway;
-  } else {
-    const gw = gatewayLine(status, t);
-    color = toneToColor[gw.tone] ?? "bg-muted-foreground";
-    label = `${t.status.gateway} ${gw.label}`;
-  }
-  const showTooltip = (event: MouseEvent<HTMLDivElement> | FocusEvent<HTMLDivElement>) => {
-    setHovered(true);
-    setTooltipAnchor(event.currentTarget);
-  };
-  const hideTooltip = () => {
-    setHovered(false);
-    setTooltipAnchor(null);
-  };
-
-  return (
-    <div
-      className={cn(
-        "hidden lg:flex py-3 pl-[1.625rem] transition-opacity duration-300",
-        collapsed ? "lg:opacity-100" : "lg:opacity-0 lg:h-0 lg:py-0 lg:overflow-hidden",
-      )}
-      role="status"
-      aria-label={label}
-      tabIndex={collapsed ? 0 : -1}
-      onMouseEnter={collapsed ? showTooltip : undefined}
-      onMouseLeave={collapsed ? hideTooltip : undefined}
-      onFocus={collapsed ? showTooltip : undefined}
-      onBlur={collapsed ? hideTooltip : undefined}
-    >
-      <span
-        aria-hidden
-        className={cn("h-1.5 w-1.5 rounded-full", color)}
-      />
-
-      {hovered && tooltipAnchor && (
-        <SidebarTooltip anchor={tooltipAnchor} label={label} warmRef={tooltipWarmRef} />
-      )}
-    </div>
-  );
-}
-
 function SidebarTooltip({ anchor, label, warmRef }: SidebarTooltipProps) {
   const rect = anchor.getBoundingClientRect();
   const sidebar = document.getElementById("app-sidebar");
@@ -1451,24 +1079,11 @@ function SidebarTooltip({ anchor, label, warmRef }: SidebarTooltipProps) {
 
 type TooltipWarmRef = React.RefObject<number>;
 
-interface GatewayDotProps {
-  collapsed: boolean;
-  status: StatusResponse | null;
-  tooltipWarmRef: TooltipWarmRef;
-}
-
 interface NavItem {
   icon: ComponentType<{ className?: string }>;
   label: string;
   labelKey?: string;
   path: string;
-}
-
-interface SidebarIconWithTooltipProps {
-  children: ReactNode;
-  collapsed: boolean;
-  label: string;
-  tooltipWarmRef: TooltipWarmRef;
 }
 
 interface SidebarNavLinkProps {
@@ -1479,33 +1094,9 @@ interface SidebarNavLinkProps {
   tooltipWarmRef: TooltipWarmRef;
 }
 
-interface SidebarSystemActionsProps {
-  collapsed: boolean;
-  onNavigate: () => void;
-  status: StatusResponse | null;
-  tooltipWarmRef: TooltipWarmRef;
-}
-
 interface SidebarTooltipProps {
   anchor: HTMLElement;
   label: string;
   warmRef?: TooltipWarmRef;
 }
 
-interface SystemActionButtonProps {
-  collapsed: boolean;
-  disabled: boolean;
-  isPending: boolean;
-  isRunning: boolean;
-  item: SystemActionItem;
-  onClick: () => void;
-  tooltipWarmRef: TooltipWarmRef;
-}
-
-interface SystemActionItem {
-  action: SystemAction;
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  runningLabel: string;
-  spin: boolean;
-}

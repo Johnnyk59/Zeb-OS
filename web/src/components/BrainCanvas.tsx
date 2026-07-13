@@ -80,11 +80,11 @@ export function BrainCanvas({
     let visible = true;
 
     // --- topology -----------------------------------------------------
-    // Denser network than the original 24: ~64 neurons make the brain feel
-    // like a real cortex rather than a sparse lattice, while staying light
-    // enough to hold 60fps (all the per-frame cost is gradients, capped
-    // below via the depth sort + signal ceiling).
-    const N = 64;
+    // A dense cortex: ~96 neurons make the brain read as a living network
+    // rather than a lattice, still holding 60fps (per-frame cost is gradients,
+    // capped by the depth sort + signal ceiling). This is a deliberate, large
+    // step up from the original sparse 24-node version.
+    const N = 96;
     const nodes: Node[] = [];
     const GA = Math.PI * (3 - Math.sqrt(5));
     for (let i = 0; i < N; i++) {
@@ -124,7 +124,7 @@ export function BrainCanvas({
       }
     }
     const signals: Signal[] = [];
-    const SIGNAL_CAP = 200;
+    const SIGNAL_CAP = 340;
 
     const emitFrom = (idx: number) => {
       nodes[idx].fire = 1;
@@ -150,34 +150,34 @@ export function BrainCanvas({
     };
 
     const step = (dt: number) => {
-      // Smoother energy easing — a touch snappier than before so bursts feel
-      // instant but idle settles calmly.
-      cur += (energyRef.current - cur) * Math.min(1, dt * 2.8);
-      // Faster spin: idle drifts, working whirls.
-      rot += dt * (0.07 + cur * 0.42);
+      // Snappy energy easing so thinking bursts feel instant.
+      cur += (energyRef.current - cur) * Math.min(1, dt * 3.2);
+      // Faster spin: idle drifts, working whirls hard.
+      rot += dt * (0.09 + cur * 0.58);
       tGlobal += dt;
       for (const n of nodes) {
-        const w = tGlobal * 0.7 + n.drift;
-        // Livelier micro-motion so the whole mesh breathes.
-        n.x = n.bx + Math.sin(w) * 0.034;
-        n.y = n.by + Math.cos(w * 0.9) * 0.034;
-        n.z = n.bz + Math.sin(w * 1.1) * 0.034;
-        n.fire = Math.max(0, n.fire - dt * 1.7);
+        const w = tGlobal * 0.85 + n.drift;
+        // Livelier micro-motion so the whole mesh visibly breathes.
+        n.x = n.bx + Math.sin(w) * 0.042;
+        n.y = n.by + Math.cos(w * 0.9) * 0.042;
+        n.z = n.bz + Math.sin(w * 1.1) * 0.042;
+        n.fire = Math.max(0, n.fire - dt * 1.9);
       }
-      // Much higher spontaneous firing rate, especially under load.
-      fireAcc += dt * (0.6 + cur * 7.0);
+      // High spontaneous firing rate — the net is always alive, and storms
+      // under load.
+      fireAcc += dt * (1.1 + cur * 11.0);
       while (fireAcc >= 1) {
         fireAcc -= 1;
         emitFrom((Math.random() * nodes.length) | 0);
       }
-      // Signals travel faster and chain more readily → a cascading, alive net.
-      const speed = 0.7 + cur * 2.4;
+      // Signals travel fast and chain readily → a cascading, electric net.
+      const speed = 0.95 + cur * 3.1;
       for (let i = signals.length - 1; i >= 0; i--) {
         const s = signals[i];
         s.t += dt * speed;
         if (s.t >= 1) {
-          nodes[s.to].fire = Math.min(1, nodes[s.to].fire + 0.75);
-          if (Math.random() < 0.3 + cur * 0.4) emitFrom(s.to);
+          nodes[s.to].fire = Math.min(1, nodes[s.to].fire + 0.8);
+          if (Math.random() < 0.34 + cur * 0.45) emitFrom(s.to);
           signals.splice(i, 1);
         }
       }
@@ -251,11 +251,11 @@ export function BrainCanvas({
         const pulse = 0.5 + 0.5 * Math.sin(tGlobal * (0.8 + cur * 1.4) + p.seed * 6.28);
         const depthN = (p.depth + 1) / 2;
         const base = scale * (0.008 + 0.013 * depthN) * p.persp;
-        const rr = base * (1 + pulse * 0.18 + p.fire * 0.85 + cur * 0.25);
-        const bright = Math.min(1, 0.3 + p.fire * 0.5 + cur * 0.18 + depthN * 0.14);
+        const rr = base * (1 + pulse * 0.2 + p.fire * 0.95 + cur * 0.28);
+        const bright = Math.min(1, 0.36 + p.fire * 0.55 + cur * 0.2 + depthN * 0.15);
 
-        // Wide soft halo.
-        const halo = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, rr * 4.2);
+        // Wide soft halo — a touch larger for a brighter bloom.
+        const halo = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, rr * 4.6);
         halo.addColorStop(0, `rgba(${NC[0]},${NC[1]},${NC[2]},${bright * 0.5})`);
         halo.addColorStop(0.5, `rgba(${NC[0]},${NC[1]},${NC[2]},${bright * 0.16})`);
         halo.addColorStop(1, `rgba(${NC[0]},${NC[1]},${NC[2]},0)`);

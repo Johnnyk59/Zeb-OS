@@ -320,6 +320,14 @@ export const api = {
   // ZebOS panels ---------------------------------------------------------
   getLocalModel: () => fetchJSON<LocalModelStatus>("/api/localmodel"),
   getBrainStatus: () => fetchJSON<BrainStatus>("/api/brain/status"),
+  // Live, Zeb-writable dashboard state (brand / accent / pinned note).
+  getDashboardSelf: () => fetchJSON<DashboardSelfState>("/api/dashboard/self"),
+  updateDashboardSelf: (patch: Partial<DashboardSelfState>) =>
+    fetchJSON<DashboardSelfState>("/api/dashboard/self", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }),
   restartLocalModel: () =>
     fetchJSON<{ ok: boolean; error?: string }>("/api/localmodel/restart", {
       method: "POST",
@@ -1730,6 +1738,15 @@ export interface BrainStatus {
   status: "idle" | "thinking" | "processing" | "learning" | string;
   detail: string;
   loaded: boolean;
+}
+
+/** Live dashboard state Zeb can rewrite (``/api/dashboard/self``). */
+export interface DashboardSelfState {
+  brand?: string;
+  accent?: string;
+  pinned_note?: string;
+  tagline?: string;
+  updated_at?: number;
 }
 
 /** One persisted self-review window from ``GET /api/localmodel/reviews``. */

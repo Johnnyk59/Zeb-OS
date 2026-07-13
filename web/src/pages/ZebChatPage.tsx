@@ -19,7 +19,16 @@
  * behaviour as the local backbone it visualizes.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CircleStop, Plus, Send, Wrench } from "lucide-react";
+import {
+  ChevronDown,
+  CircleStop,
+  Mic,
+  Plus,
+  Send,
+  Volume2,
+  VolumeX,
+  Wrench,
+} from "lucide-react";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { cn } from "@/lib/utils";
@@ -27,7 +36,9 @@ import { BrainCanvas } from "@/components/BrainCanvas";
 import { Markdown } from "@/components/Markdown";
 import { GatewayClient } from "@/lib/gatewayClient";
 import { useProfileScope } from "@/contexts/useProfileScope";
+import { useVoiceChat } from "@/hooks/useVoiceChat";
 import { api } from "@/lib/api";
+import type { ModelOptionsResponse } from "@/lib/api";
 
 interface ToolChip {
   id: string;
@@ -63,6 +74,8 @@ export default function ZebChatPage({
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [modelLabel, setModelLabel] = useState("");
+  const [modelOpts, setModelOpts] = useState<ModelOptionsResponse | null>(null);
+  const [switching, setSwitching] = useState(false);
   const [nonce, setNonce] = useState(0);
 
   const gwRef = useRef<GatewayClient | null>(null);
@@ -135,6 +148,41 @@ export default function ZebChatPage({
       .catch(() => setModelLabel(""));
   }, [nonce]);
 
+  // Available models (local + every connected provider) for the in-chat
+  // switcher. One dropdown, one click to change who's answering.
+  useEffect(() => {
+    api
+      .getModelOptions()
+      .then(setModelOpts)
+      .catch(() => setModelOpts(null));
+  }, [nonce]);
+
+  // Switch the main model on the fly. Value is "provider model".
+  const switchModel = useCallback(
+    async (value: string) => {
+      const [provider, model] = value.split(" ");
+      if (!provider || !model) return;
+      setSwitching(true);
+      try {
+        const res = await api.setModelAssignment({
+          scope: "main",
+          provider,
+          model,
+          confirm_expensive_model: true, // single-user box: no nag
+        });
+        if (res.ok) {
+          setModelLabel(`${provider}/${model}`);
+          setModelOpts((prev) => (prev ? { ...prev, provider, model } : prev));
+        }
+      } catch {
+        /* leave the label as-is on failure */
+      } finally {
+        setSwitching(false);
+      }
+    },
+    [],
+  );
+
   const appendAssistantDelta = useCallback((text: string) => {
     setMessages((msgs) => {
       const last = msgs[msgs.length - 1];
@@ -189,6 +237,8 @@ export default function ZebChatPage({
             if (!mine(ev.session_id)) return;
             setBusy(false);
             setThinking(false);
+            // Read the reply aloud when voice mode is on (no-op otherwise).
+            speakRef.current(ev.payload?.text ?? "");
             setMessages((msgs) => {
               const finalText = ev.payload?.text ?? "";
               const last = msgs[msgs.length - 1];
@@ -305,32 +355,44 @@ export default function ZebChatPage({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isActive]);
 
-  const send = useCallback(() => {
-    const text = input.trim();
-    const gw = gwRef.current;
-    if (!text || !gw || conn !== "open" || !sessionIdRef.current) return;
-    setInput("");
-    setBusy(true);
-    setMessages((msgs) => [
-      ...msgs,
-      { id: nextId(), role: "user", content: text },
-    ]);
-    gw.request("prompt.submit", {
-      session_id: sessionIdRef.current,
-      text,
-    }).catch((e) => {
-      setBusy(false);
+  const sendText = useCallback(
+    (raw: string) => {
+      const text = raw.trim();
+      const gw = gwRef.current;
+      if (!text || !gw || conn !== "open" || !sessionIdRef.current) return;
+      setInput("");
+      setBusy(true);
       setMessages((msgs) => [
         ...msgs,
-        {
-          id: nextId(),
-          role: "assistant",
-          content: e instanceof Error ? e.message : "Failed to send",
-          error: true,
-        },
+        { id: nextId(), role: "user", content: text },
       ]);
-    });
-  }, [input, conn]);
+      gw.request("prompt.submit", {
+        session_id: sessionIdRef.current,
+        text,
+      }).catch((e) => {
+        setBusy(false);
+        setMessages((msgs) => [
+          ...msgs,
+          {
+            id: nextId(),
+            role: "assistant",
+            content: e instanceof Error ? e.message : "Failed to send",
+            error: true,
+          },
+        ]);
+      });
+    },
+    [conn],
+  );
+
+  const send = useCallback(() => sendText(input), [sendText, input]);
+
+  // Voice chat — same gateway path, same permissions. A spoken utterance is
+  // sent exactly like a typed one; Zeb's replies are read back aloud when
+  // voice mode is on.
+  const voice = useVoiceChat((transcript) => sendText(transcript));
+  const speakRef = useRef(voice.speak);
+  speakRef.current = voice.speak;
 
   const interrupt = useCallback(() => {
     const gw = gwRef.current;
@@ -423,8 +485,41 @@ export default function ZebChatPage({
           </span>
           {statusDot}
         </div>
-        <div className="flex items-center gap-3">
-          {modelLabel ? (
+        <div className="flex items-center gap-2">
+          {/* In-chat model switcher — local model + every connected provider,
+              one click to change who answers. */}
+          {modelOpts?.providers?.length ? (
+            <div className="relative hidden items-center sm:flex">
+              <select
+                value={`${modelOpts.providers.find((p) => p.is_current)?.slug ?? modelOpts.provider ?? ""} ${modelOpts.model ?? ""}`}
+                onChange={(e) => void switchModel(e.target.value)}
+                disabled={switching}
+                aria-label="Select model"
+                className={cn(
+                  "max-w-52 appearance-none truncate rounded-[var(--radius)]",
+                  "border border-current/15 bg-midground/[0.04] py-1 pl-2.5 pr-7",
+                  "font-mono text-xs text-text-secondary",
+                  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground/50",
+                  "disabled:opacity-60",
+                )}
+              >
+                {modelOpts.providers.map((p) => (
+                  <optgroup key={p.slug} label={p.name}>
+                    {(p.models ?? []).map((m) => (
+                      <option key={`${p.slug}-${m}`} value={`${p.slug} ${m}`}>
+                        {m}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              {switching ? (
+                <Spinner className="pointer-events-none absolute right-2 text-[0.6rem]" />
+              ) : (
+                <ChevronDown className="pointer-events-none absolute right-2 h-3.5 w-3.5 text-text-tertiary" />
+              )}
+            </div>
+          ) : modelLabel ? (
             <span className="hidden truncate font-mono text-xs text-text-tertiary sm:block">
               {modelLabel}
             </span>
@@ -553,6 +648,48 @@ export default function ZebChatPage({
               "disabled:cursor-not-allowed disabled:opacity-60",
             )}
           />
+          {/* Voice chat — talk to Zeb in real time. Same session, same
+              permissions as text. The mic sends what you say; the speaker
+              toggles Zeb reading its replies back aloud. */}
+          {voice.supported ? (
+            <>
+              <Button
+                type="button"
+                ghost
+                size="icon"
+                onClick={voice.toggleVoiceMode}
+                aria-label={voice.voiceMode ? "Mute Zeb's voice" : "Let Zeb speak"}
+                title={voice.voiceMode ? "Voice replies on" : "Voice replies off"}
+                className={
+                  voice.voiceMode ? "text-[#40e8dc]" : "text-text-tertiary"
+                }
+              >
+                {voice.voiceMode ? (
+                  <Volume2 className="h-4 w-4" />
+                ) : (
+                  <VolumeX className="h-4 w-4" />
+                )}
+              </Button>
+              <Button
+                type="button"
+                ghost={!voice.listening}
+                size="icon"
+                onClick={() =>
+                  voice.listening ? voice.stopListening() : voice.startListening()
+                }
+                disabled={conn !== "open"}
+                aria-label={voice.listening ? "Stop listening" : "Talk to Zeb"}
+                title="Talk to Zeb"
+                className={
+                  voice.listening
+                    ? "animate-pulse bg-destructive/15 text-destructive"
+                    : "text-midground"
+                }
+              >
+                <Mic className="h-4 w-4" />
+              </Button>
+            </>
+          ) : null}
           {busy ? (
             <Button
               type="button"

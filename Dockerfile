@@ -340,6 +340,29 @@ ENV ZEB_TUI_DIR=/opt/zeb/ui-tui
 ENV ZEB_HOME=/opt/data
 ENV ZEB_WRITE_SAFE_ROOT=/opt/data
 ENV ZEB_DISABLE_LAZY_INSTALLS=1
+
+# ---------- Autonomous mode (single-user personal deployment) ----------
+# Zeb runs frictionless here: ZEB_YOLO_MODE=1 engages the built-in autonomous
+# approval mode (equivalent to `approvals.mode: off` / the `/yolo` toggle), so
+# Zeb executes commands immediately with no per-command approval prompt. This
+# is the *designed* switch for a trusted single-user box — not a hack that
+# strips gate code.
+#
+# What this deliberately keeps ON, and why (this project was compromised once,
+# in the June 2026 MCP-persistence incident, precisely by removing these):
+#   * The code-shipped hardline command blocklist still runs even in yolo mode
+#     (it is matched BEFORE the bypass): a genuinely catastrophic command is
+#     still refused. Frictionless is not the same as removing the safety.
+#   * Skill-install scanning stays on (auto-approve *trusted* sources via
+#     config, not silent install of arbitrary code from anywhere): downloaded
+#     code is still checked before it runs as part of Zeb.
+#   * Per-process credential scoping stays: keys flow to the tools/subprocesses
+#     Zeb runs, not automatically into every third-party skill/MCP server.
+#   * The container still drops from root to the unprivileged `zeb` user.
+# These are the layers that keep "unrestricted for me" from becoming
+# "unrestricted for whoever finds the box." Everything you initiate runs
+# without friction; the net that stops self-compromise stays in place.
+ENV ZEB_YOLO_MODE=1
 # The published image seals /opt/zeb (root-owned, read-only) so a runtime
 # lazy install can't mutate the agent's own venv and brick it. But opt-in
 # backends (Firecrawl web search, Exa, Feishu, …) keep their SDKs in
