@@ -33,6 +33,22 @@ logger = logging.getLogger(__name__)
 
 _LOG_PREFIX = "[AUTONOMY]"
 
+# Which brain-status label each bot lights up while it runs. Bots that read,
+# distill or train surface as "learning"; the rest as "processing". Anything
+# unlisted defaults to "processing". Drives the dashboard's live brain pill
+# via zeb_autonomy.activity → GET /api/brain/status.
+_BOT_ACTIVITY = {
+    "knowledge_firehose": "learning",
+    "self_improvement": "learning",
+    "memory_learning": "learning",
+    "self_evolution": "learning",
+    "self_review": "learning",
+    "review": "learning",
+    "decision": "processing",
+    "state_sync": "processing",
+    "file_organizer": "processing",
+}
+
 
 @dataclass
 class Job:
@@ -145,9 +161,25 @@ class AutonomyScheduler:
                 cfg = {}
 
         def _complete(prompt: str, *, system: str = "", max_tokens: int = 512, **kw: Any):
-            return local_llm.complete(
-                prompt, system=system, max_tokens=max_tokens, config=cfg, **kw
-            )
+            # Route reasoning through the self-evolution response cache so
+            # repeat/near-repeat questions return instantly — the real "faster
+            # thinking" win. Falls back to the raw backbone if the cache layer
+            # is unavailable.
+            try:
+                from zeb_autonomy import self_evolution
+
+                return self_evolution.cached_complete(
+                    prompt,
+                    system=system,
+                    max_tokens=max_tokens,
+                    config=cfg,
+                    zeb_home=self.zeb_home,
+                    **kw,
+                )
+            except Exception:
+                return local_llm.complete(
+                    prompt, system=system, max_tokens=max_tokens, config=cfg, **kw
+                )
 
         def _notify(message: str, level: str = "info", **details: Any) -> None:
             self.notifier.notify(message, level, source="autonomy", **details)
@@ -179,11 +211,25 @@ class AutonomyScheduler:
 
     def _run_one(self, job: Job, ctx: BotContext) -> BotResult:
         started = time.time()
+        # Light up the brain pill for the duration of this bot's run so the
+        # dashboard shows "Learning"/"Processing" that maps to real work.
+        try:
+            from zeb_autonomy import activity
+
+            activity.set(_BOT_ACTIVITY.get(job.name, "processing"), job.name)
+        except Exception:
+            activity = None  # type: ignore[assignment]
         try:
             result = job.bot.run(ctx)
         except Exception as exc:
             logger.warning("%s bot %r raised: %s", _LOG_PREFIX, job.name, exc, exc_info=True)
             result = BotResult.failed(job.name, f"raised: {exc}")
+        finally:
+            try:
+                if activity is not None:
+                    activity.clear()
+            except Exception:
+                pass
         elapsed = time.time() - started
         level = "info" if result.ok else "warning"
         logger.log(

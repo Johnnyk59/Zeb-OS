@@ -289,6 +289,8 @@ class RepoStore:
             "stars": int(repo.get("stars") or 0),
             "language": str(repo.get("language") or ""),
             "source": str(repo.get("source") or "manual"),
+            # New repos are active by default: their extracted skills load.
+            "enabled": bool(repo.get("enabled", True)),
             "added_at": time.time(),
         }
         try:
@@ -309,6 +311,9 @@ class RepoStore:
     def list(self, query: str = "") -> list:
         try:
             items = [e for e in self._load() if isinstance(e, dict)]
+            for e in items:
+                # Legacy entries predate the enabled flag — default them on.
+                e.setdefault("enabled", True)
             q = str(query or "").strip().lower()
             if q:
                 items = [
@@ -322,6 +327,23 @@ class RepoStore:
             return items
         except Exception:
             return []
+
+    def set_enabled(self, id: str, enabled: bool) -> dict | None:
+        """Flip a repo's enabled flag. Returns the updated entry, or None."""
+        try:
+            items = self._load()
+            updated = None
+            for e in items:
+                if e.get("id") == id:
+                    e["enabled"] = bool(enabled)
+                    updated = e
+                    break
+            if updated is None:
+                return None
+            _atomic_write(self._path, json.dumps(items, indent=2))
+            return updated
+        except Exception:
+            return None
 
     def delete(self, id: str) -> bool:
         try:

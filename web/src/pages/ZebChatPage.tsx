@@ -71,8 +71,56 @@ export default function ZebChatPage({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const { profile: scopedProfile } = useProfileScope();
 
-  // Brain energy: thinking beats streaming beats idle.
-  const energy = thinking ? 0.95 : busy ? 0.72 : 0.06;
+  // Background brain activity (autonomy / self-evolution / self-review),
+  // polled from the server. The live chat turn overrides it below.
+  const [bgStatus, setBgStatus] = useState<string>("idle");
+  useEffect(() => {
+    let alive = true;
+    const poll = () => {
+      if (document.hidden) return;
+      api
+        .getBrainStatus()
+        .then((s) => {
+          if (alive) setBgStatus(s.status || "idle");
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 4000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  // Live brain status pill. Chat-turn state wins; otherwise reflect the
+  // background mind ("Learning" while bots run), else Idle.
+  const brainStatus = useMemo<{ label: string; dot: string; text: string }>(() => {
+    if (conn === "connecting")
+      return { label: "Connecting", dot: "bg-warning", text: "text-warning" };
+    if (conn === "error" || conn === "closed")
+      return { label: "Offline", dot: "bg-destructive", text: "text-destructive" };
+    if (thinking)
+      return { label: "Thinking", dot: "bg-warning", text: "text-warning" };
+    if (busy)
+      return { label: "Processing", dot: "bg-[#40e8dc]", text: "text-[#40e8dc]" };
+    if (bgStatus === "learning")
+      return { label: "Learning", dot: "bg-[#a884ff]", text: "text-[#a884ff]" };
+    if (bgStatus === "processing" || bgStatus === "thinking")
+      return { label: "Processing", dot: "bg-[#40e8dc]", text: "text-[#40e8dc]" };
+    return { label: "Idle", dot: "bg-success/70", text: "text-text-secondary" };
+  }, [conn, thinking, busy, bgStatus]);
+
+  // Brain energy: thinking beats streaming beats background-learning beats idle.
+  const energy = thinking
+    ? 0.98
+    : busy
+      ? 0.78
+      : bgStatus === "learning"
+        ? 0.5
+        : bgStatus === "processing"
+          ? 0.32
+          : 0.06;
   const split = sidebarCollapsed;
 
   // Model label for the top bar (best-effort).
@@ -340,6 +388,31 @@ export default function ZebChatPage({
         }}
       >
         <BrainCanvas energy={energy} className="h-full w-full" />
+      </div>
+
+      {/* Brain status pill — real-time label of what Zeb is doing, floating
+          over the brain. Chat-turn state (Thinking/Processing) overrides the
+          background mind (Learning/Idle). */}
+      <div
+        aria-live="polite"
+        className={cn(
+          "pointer-events-none absolute z-30 flex items-center gap-2 rounded-full",
+          "border border-current/10 bg-background-base/70 px-3 py-1 backdrop-blur-md",
+          "font-mono text-[0.7rem] uppercase tracking-[0.14em] shadow-sm",
+          split ? "right-6 top-16" : "right-5 top-16",
+          brainStatus.text,
+        )}
+      >
+        <span
+          className={cn(
+            "h-1.5 w-1.5 rounded-full",
+            brainStatus.dot,
+            brainStatus.label !== "Idle" && brainStatus.label !== "Offline"
+              ? "animate-pulse"
+              : "",
+          )}
+        />
+        {brainStatus.label}
       </div>
 
       {/* Top bar — full width, floats above the brain */}

@@ -6,11 +6,22 @@
  * and saves every hit into the store (de-duped) ready for integration.
  */
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Github, Search, Star, Telescope, Trash2 } from "lucide-react";
+import {
+  Boxes,
+  ExternalLink,
+  Github,
+  RefreshCw,
+  Search,
+  Star,
+  Telescope,
+  Trash2,
+} from "lucide-react";
+import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import { Input } from "@nous-research/ui/ui/components/input";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Switch } from "@nous-research/ui/ui/components/switch";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { api } from "@/lib/api";
@@ -18,11 +29,18 @@ import type { SavedRepo } from "@/lib/api";
 
 export default function ReposPage() {
   const [repos, setRepos] = useState<SavedRepo[]>([]);
+  const [totals, setTotals] = useState<{
+    total: number;
+    enabled: number;
+    extracted: number;
+  }>({ total: 0, enabled: 0, extracted: 0 });
   const [query, setQuery] = useState("");
   const [scanQuery, setScanQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
   const { toast, showToast } = useToast();
 
   const load = useCallback(
@@ -31,6 +49,11 @@ export default function ReposPage() {
       try {
         const res = await api.getRepos(q);
         setRepos(res.repos ?? []);
+        setTotals({
+          total: res.total ?? (res.repos ?? []).length,
+          enabled: res.enabled_count ?? 0,
+          extracted: res.extracted ?? 0,
+        });
         if (res.error) showToast(res.error, "error");
       } catch (e) {
         showToast(`Failed to load repos: ${e}`, "error");
@@ -44,6 +67,48 @@ export default function ReposPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.syncRepos();
+      if (res.error) showToast(res.error, "error");
+      else
+        showToast(
+          `Synced — ${res.extracted}/${res.total} repos extracted`,
+          "success",
+        );
+      void load(query.trim());
+    } catch (e) {
+      showToast(`Sync failed: ${e}`, "error");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleToggle = async (repo: SavedRepo, enabled: boolean) => {
+    setToggling(repo.id);
+    // Optimistic flip so the switch feels instant.
+    setRepos((rs) => rs.map((r) => (r.id === repo.id ? { ...r, enabled } : r)));
+    setTotals((t) => ({ ...t, enabled: t.enabled + (enabled ? 1 : -1) }));
+    try {
+      const res = await api.setRepoEnabled(repo.id, enabled);
+      if (res.skills_toggled)
+        showToast(
+          `${enabled ? "Enabled" : "Disabled"} ${res.skills_toggled} skill${res.skills_toggled === 1 ? "" : "s"}`,
+          "success",
+        );
+    } catch (e) {
+      // Revert on failure.
+      setRepos((rs) =>
+        rs.map((r) => (r.id === repo.id ? { ...r, enabled: !enabled } : r)),
+      );
+      setTotals((t) => ({ ...t, enabled: t.enabled + (enabled ? -1 : 1) }));
+      showToast(`Toggle failed: ${e}`, "error");
+    } finally {
+      setToggling(null);
+    }
+  };
 
   const handleSearch = () => void load(query.trim());
 
@@ -121,13 +186,24 @@ export default function ReposPage() {
       <Card>
         <CardContent className="flex flex-col gap-3 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-sm uppercase tracking-[0.1em] text-text-secondary">
-              Saved repos {repos.length > 0 ? `(${repos.length})` : ""}
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm uppercase tracking-[0.1em] text-text-secondary">
+                GitHub repos
+              </span>
+              <Badge className="bg-midground/10 text-text-secondary">
+                {totals.total} tracked
+              </Badge>
+              <Badge className="bg-[#40e8dc]/15 text-[#40e8dc]">
+                {totals.extracted} extracted
+              </Badge>
+              <Badge className="bg-success/15 text-success">
+                {totals.enabled} enabled
+              </Badge>
+            </div>
             <div className="flex gap-2">
               <Input
-                className="w-56"
-                placeholder="Filter saved repos…"
+                className="w-52"
+                placeholder="Filter repos…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -139,6 +215,17 @@ export default function ReposPage() {
                 className="uppercase"
               >
                 Search
+              </Button>
+              <Button
+                ghost
+                onClick={handleSync}
+                disabled={syncing}
+                prefix={
+                  syncing ? <Spinner /> : <RefreshCw className="h-4 w-4" />
+                }
+                className="uppercase"
+              >
+                Sync
               </Button>
             </div>
           </div>
@@ -156,42 +243,72 @@ export default function ReposPage() {
               {repos.map((r) => (
                 <li
                   key={r.id}
-                  className="flex items-center justify-between gap-3 py-3"
+                  className={
+                    "flex items-center justify-between gap-3 py-3 transition-opacity " +
+                    (r.enabled === false ? "opacity-50" : "")
+                  }
                 >
                   <div className="flex min-w-0 flex-col gap-0.5">
-                    <a
-                      href={r.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-1.5 font-mono text-sm text-midground hover:underline"
-                    >
-                      {r.full_name}
-                      <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={r.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1.5 font-mono text-sm text-midground hover:underline"
+                      >
+                        {r.full_name}
+                        <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
+                      </a>
+                      {r.extracted ? (
+                        <Badge className="bg-[#40e8dc]/15 text-[#40e8dc]">
+                          <Boxes className="mr-1 h-3 w-3" /> extracted
+                        </Badge>
+                      ) : null}
+                    </div>
                     {r.description ? (
                       <span className="truncate text-xs text-text-secondary">
                         {r.description}
                       </span>
                     ) : null}
-                    <span className="flex items-center gap-3 text-xs text-text-tertiary">
+                    <span className="flex flex-wrap items-center gap-3 text-xs text-text-tertiary">
                       {r.language ? <span>{r.language}</span> : null}
                       {r.stars != null ? (
                         <span className="flex items-center gap-1">
                           <Star className="h-3 w-3" /> {r.stars}
                         </span>
                       ) : null}
+                      {r.skills && r.skills.length > 0 ? (
+                        <span className="font-mono">
+                          {r.skills.join(", ")}
+                        </span>
+                      ) : null}
                     </span>
                   </div>
-                  <Button
-                    ghost
-                    size="icon"
-                    aria-label={`Remove ${r.full_name}`}
-                    onClick={() => void handleDelete(r.id)}
-                    disabled={deleting === r.id}
-                    className="text-text-tertiary hover:text-destructive"
-                  >
-                    {deleting === r.id ? <Spinner /> : <Trash2 className="h-4 w-4" />}
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-3">
+                    {/* Enable/disable — cascades to the repo's extracted skills. */}
+                    <div className="flex items-center gap-1.5">
+                      {toggling === r.id ? <Spinner /> : null}
+                      <Switch
+                        checked={r.enabled !== false}
+                        onCheckedChange={(v) => void handleToggle(r, v)}
+                        aria-label={`${r.enabled !== false ? "Disable" : "Enable"} ${r.full_name}`}
+                      />
+                    </div>
+                    <Button
+                      ghost
+                      size="icon"
+                      aria-label={`Remove ${r.full_name}`}
+                      onClick={() => void handleDelete(r.id)}
+                      disabled={deleting === r.id}
+                      className="text-text-tertiary hover:text-destructive"
+                    >
+                      {deleting === r.id ? (
+                        <Spinner />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>
