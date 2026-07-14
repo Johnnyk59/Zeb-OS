@@ -120,6 +120,21 @@ def build_scheduler(
         )
         sched.register(SelfEvolutionBot(), interval_seconds=mins * 60)
 
+    # Always-on — hardwired keep-warm for the local model (never let it go cold)
+    # plus idle self-tasking when the user is away. On by default; runs often.
+    def _always_on() -> None:
+        from zeb_autonomy.bots.always_on import AlwaysOnBot
+
+        if not _cfg(config, "autonomy", "always_on", "enabled", default=True):
+            return
+        mins = float(
+            _cfg(config, "autonomy", "always_on", "interval_minutes", default=5) or 5
+        )
+        idle = float(
+            _cfg(config, "autonomy", "always_on", "idle_minutes", default=20) or 20
+        )
+        sched.register(AlwaysOnBot(idle_minutes=idle), interval_seconds=mins * 60)
+
     # Self-review engine — keeps the 6h/12h/24h reviews current.
     def _review() -> None:
         from zeb_autonomy.self_review import ReviewBot
@@ -138,6 +153,7 @@ def build_scheduler(
     _try(_improve, "self_improvement")
     _try(_organizer, "file_organizer")
     _try(_evolution, "self_evolution")
+    _try(_always_on, "always_on")
     _try(_review, "self_review")
 
     return sched
