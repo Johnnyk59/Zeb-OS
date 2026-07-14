@@ -98,34 +98,73 @@ print_link_box_multi() {
     echo ""
 }
 
-# ---------- named tunnel (permanent, your own domain) ----------
+# Renders the "your dashboard link(s)" box and drops DASHBOARD_URL.txt for
+# any comma-separated ZEB_TUNNEL_HOSTNAMES list, used by both named-tunnel
+# modes below.
+announce_named_hostnames() {
+    [ -n "${ZEB_TUNNEL_HOSTNAMES:-}" ] || return 0
+    urls=""
+    old_ifs="$IFS"
+    IFS=','
+    for h in $ZEB_TUNNEL_HOSTNAMES; do
+        h_trimmed=$(printf '%s' "$h" | sed 's/^ *//;s/ *$//')
+        [ -n "$h_trimmed" ] || continue
+        urls="${urls}https://${h_trimmed}
+"
+    done
+    IFS="$old_ifs"
+    [ -n "$urls" ] || return 0
+    printf '%s' "$urls" > /opt/data/DASHBOARD_URL.txt 2>/dev/null || true
+    # shellcheck disable=SC2046,SC2086
+    print_link_box_multi $(printf '%s' "$urls")
+}
+
+# ---------- named tunnel, local config (permanent, your own domain) -------
+# For a tunnel created with `cloudflared tunnel create <name>` on the CLI
+# (a "locally configured" tunnel — the normal case, and the one that does
+# NOT require migrating anything in the Cloudflare dashboard). Needs the
+# tunnel's UUID plus its credentials JSON file (written by `tunnel create`
+# to ~/.cloudflared/<uuid>.json) mounted read-only into the container.
+# DNS hostname -> tunnel routing is set up once via `cloudflared tunnel
+# route dns <name> <hostname>` on the host; ingress (which hostname goes to
+# which local service) is generated here from ZEB_TUNNEL_HOSTNAMES.
+if [ -n "${ZEB_TUNNEL_ID:-}" ] && [ -f "${ZEB_TUNNEL_CREDENTIALS_FILE:-/etc/zeb/cloudflared-credentials.json}" ]; then
+    creds="${ZEB_TUNNEL_CREDENTIALS_FILE:-/etc/zeb/cloudflared-credentials.json}"
+    cfg="/tmp/zeb-cloudflared-config.yml"
+
+    {
+        printf 'tunnel: %s\n' "$ZEB_TUNNEL_ID"
+        printf 'credentials-file: %s\n' "$creds"
+        printf 'ingress:\n'
+        if [ -n "${ZEB_TUNNEL_HOSTNAMES:-}" ]; then
+            old_ifs="$IFS"
+            IFS=','
+            for h in $ZEB_TUNNEL_HOSTNAMES; do
+                h_trimmed=$(printf '%s' "$h" | sed 's/^ *//;s/ *$//')
+                [ -n "$h_trimmed" ] || continue
+                printf '  - hostname: %s\n' "$h_trimmed"
+                printf '    service: %s\n' "$target"
+            done
+            IFS="$old_ifs"
+        fi
+        printf '  - service: http_status:404\n'
+    } > "$cfg"
+
+    echo "[tunnel] starting named Cloudflare tunnel (local config) -> ${target}"
+    announce_named_hostnames
+    exec cloudflared tunnel --no-autoupdate --config "$cfg" run
+fi
+
+# ---------- named tunnel, token (dashboard-managed ingress) ---------------
 # ZEB_TUNNEL_TOKEN comes from `cloudflared tunnel token <name>` on any
 # machine authenticated to your Cloudflare account. It's a self-contained
 # credential — no credentials.json file needs to be mounted into the
-# container. Which hostnames route to this tunnel is configured once in
-# the Cloudflare dashboard (Zero Trust > Networks > Tunnels > Public
-# Hostnames), so it survives container rebuilds untouched.
+# container — but it only works for tunnels whose ingress is managed from
+# the Cloudflare dashboard (Zero Trust > Networks > Connectors > Public
+# Hostname tab), not for tunnels still using a local config file.
 if [ -n "${ZEB_TUNNEL_TOKEN:-}" ]; then
-    echo "[tunnel] starting named Cloudflare tunnel -> ${target}"
-
-    if [ -n "${ZEB_TUNNEL_HOSTNAMES:-}" ]; then
-        urls=""
-        old_ifs="$IFS"
-        IFS=','
-        for h in $ZEB_TUNNEL_HOSTNAMES; do
-            h_trimmed=$(printf '%s' "$h" | sed 's/^ *//;s/ *$//')
-            [ -n "$h_trimmed" ] || continue
-            urls="${urls}https://${h_trimmed}
-"
-        done
-        IFS="$old_ifs"
-        if [ -n "$urls" ]; then
-            printf '%s' "$urls" > /opt/data/DASHBOARD_URL.txt 2>/dev/null || true
-            # shellcheck disable=SC2046,SC2086
-            print_link_box_multi $(printf '%s' "$urls")
-        fi
-    fi
-
+    echo "[tunnel] starting named Cloudflare tunnel (token) -> ${target}"
+    announce_named_hostnames
     exec cloudflared tunnel --no-autoupdate run --token "$ZEB_TUNNEL_TOKEN"
 fi
 
