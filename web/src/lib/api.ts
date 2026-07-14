@@ -328,6 +328,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     }),
+  getAgents: () => fetchJSON<{ agents: AgentRecord[] }>("/api/agents"),
   restartLocalModel: () =>
     fetchJSON<{ ok: boolean; error?: string }>("/api/localmodel/restart", {
       method: "POST",
@@ -1746,6 +1747,15 @@ export interface DashboardSelfState {
   accent?: string;
   pinned_note?: string;
   tagline?: string;
+  updated_at?: number;
+}
+
+/** A runtime-registered agent and the dashboard Zeb built for it. */
+export interface AgentRecord {
+  id: string;
+  label: string;
+  dashboard_url: string;
+  status: string;
   updated_at?: number;
 }
 

@@ -8,6 +8,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# The installer creates this account and gives it ownership of the checkout
+# plus ZEB_HOME. Zeb can evolve its workspace without running as root.
+User=zeb
+Group=zeb
 # Where the code lives (git checkout). Override via the install script.
 WorkingDirectory=/opt/zeb
 # Persistent state root — memory, sessions, skills, agent manifests, keys.
@@ -17,7 +21,8 @@ Environment=ZEB_DASHBOARD_HOST=0.0.0.0
 Environment=ZEB_DASHBOARD_PORT=9119
 # Load any secrets (API keys, IG_* creds, tunnel ids) from a root-only file.
 EnvironmentFile=-/etc/zeb/zeb.env
-ExecStart=/opt/zeb/.venv/bin/python -m zeb_chat
+# Serve the selected React dashboard and its in-process /api/ws gateway.
+ExecStart=/opt/zeb/.venv/bin/python -m zeb_cli.main dashboard --host 0.0.0.0 --port 9119 --no-open --skip-build
 # Auto-restart forever so Zeb comes back on crash and on boot.
 Restart=always
 RestartSec=3

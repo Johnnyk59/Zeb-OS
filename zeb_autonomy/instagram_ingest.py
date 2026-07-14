@@ -17,14 +17,19 @@ credentials below are set. It does not fake inbound content. When Zeb (or the
 user) connects a real Meta app, the same pipeline starts carrying real reels.
 
 Configuration (all via env / Zeb config, none hardwired):
-  IG_APP_ID, IG_APP_SECRET, IG_ACCESS_TOKEN, IG_BUSINESS_ACCOUNT_ID
+  IG_APP_ID, IG_APP_SECRET, IG_ACCESS_TOKEN, IG_BUSINESS_ACCOUNT_ID,
+  IG_VERIFY_TOKEN (and optionally IG_GRAPH_VERSION)
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 _REQUIRED_ENV = ("IG_APP_ID", "IG_APP_SECRET", "IG_ACCESS_TOKEN", "IG_BUSINESS_ACCOUNT_ID")
@@ -46,6 +51,22 @@ def _inbox_path() -> Path:
 def is_configured() -> bool:
     """True only when every required Meta credential is present."""
     return all(os.environ.get(k, "").strip() for k in _REQUIRED_ENV)
+
+
+def verify_webhook_token(token: str) -> bool:
+    """Validate Meta's webhook verification token."""
+    expected = os.environ.get("IG_VERIFY_TOKEN", "").strip()
+    return bool(expected and token and hmac.compare_digest(expected, str(token)))
+
+
+def verify_signature(raw_body: bytes, signature: str | None) -> bool:
+    """Validate Meta's ``X-Hub-Signature-256`` header."""
+    secret = os.environ.get("IG_APP_SECRET", "").strip()
+    supplied = str(signature or "").strip()
+    if not secret or not supplied.startswith("sha256="):
+        return False
+    digest = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(supplied.removeprefix("sha256="), digest)
 
 
 def status() -> dict:
@@ -102,9 +123,90 @@ def ingest_item(item: dict) -> dict:
 
         summary = f"[instagram] {norm['type']} from {norm['from'] or 'someone'}: {norm['caption'][:200]}".strip()
         SharedContextStore().append("user", summary, session="instagram", provider="instagram")
+        try:
+            from tui_gateway.server import broadcast_shared_context
+
+            broadcast_shared_context("user", summary, sid="instagram", provider="instagram")
+        except Exception:
+            pass
     except Exception:
         pass
     return norm
+
+
+def ingest_webhook(payload: dict) -> list[dict]:
+    """Normalize Instagram messaging events into the shared perception log."""
+    ingested: list[dict] = []
+    entries = payload.get("entry", []) if isinstance(payload, dict) else []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        for event in entry.get("messaging", []) or []:
+            if not isinstance(event, dict):
+                continue
+            message = event.get("message") or {}
+            if not isinstance(message, dict):
+                message = {}
+            sender = (event.get("sender") or {}).get("id", "")
+            attachments = message.get("attachments") or [{}]
+            for attachment in attachments:
+                attachment = attachment if isinstance(attachment, dict) else {}
+                media = attachment.get("payload") or {}
+                media = media if isinstance(media, dict) else {}
+                item = ingest_item(
+                    {
+                        "type": attachment.get("type") or "message",
+                        "from": sender,
+                        "url": media.get("url") or "",
+                        "caption": message.get("text") or "",
+                        "media_id": media.get("id") or "",
+                    }
+                )
+                item["raw"] = event
+                ingested.append(item)
+    return ingested
+
+
+def send_reply(recipient_id: str, text: str) -> dict:
+    """Send a text reply through Meta's Instagram Messaging API."""
+    recipient = str(recipient_id or "").strip()
+    message = str(text or "").strip()
+    if not recipient or not message:
+        return {"ok": False, "error": "recipient_id and text are required"}
+    if not is_configured():
+        return {"ok": False, "error": "Instagram credentials are not configured"}
+
+    version = os.environ.get("IG_GRAPH_VERSION", "v20.0").strip() or "v20.0"
+    endpoint = (
+        f"https://graph.facebook.com/{version}/"
+        f"{os.environ['IG_BUSINESS_ACCOUNT_ID'].strip()}/messages"
+    )
+    payload = json.dumps(
+        {
+            "recipient": {"id": recipient},
+            "message": {"text": message[:2000]},
+            "access_token": os.environ["IG_ACCESS_TOKEN"].strip(),
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            raw = response.read().decode("utf-8")
+        data = json.loads(raw) if raw else {}
+        return {"ok": True, "response": data}
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = exc.read().decode("utf-8")[:1000]
+        except Exception:
+            detail = str(exc)
+        return {"ok": False, "error": detail or str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def poll() -> list[dict]:
@@ -117,6 +219,7 @@ def poll() -> list[dict]:
     """
     if not is_configured():
         return []
-    # Real Graph API polling goes here once a Meta app is connected. Intentionally
-    # not stubbed with fake data.
+    # Instagram Messaging is webhook-driven; the webhook route calls
+    # ``ingest_webhook`` because there is no reliable inbox poll endpoint for
+    # shared reels.
     return []

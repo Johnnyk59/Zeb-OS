@@ -14,9 +14,15 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no fcntl
+    fcntl = None
 
 # ─────────────────────────────────────────────────────────────────────────
 # Hardwired Zeb identity.
@@ -63,6 +69,15 @@ ZEB_OUTPUT_STYLE_NOTE = (
     "highlight sparingly, only for genuinely important lines."
 )
 
+ZEB_AUTONOMY_NOTE = (
+    "You have a built-in agent builder at zeb_autonomy.agent_builder: use its "
+    "templates, permission profiles, skills directory and dashboard registration "
+    "when creating agents. You can extend your code, dashboard and skills on the "
+    "persistent VPS filesystem through the normal guarded tools. Your voice is "
+    "upgradeable: you may select a better configured TTS provider or Piper voice "
+    "and the running dashboard will pick it up without an external redeploy."
+)
+
 ZEB_IDENTITY_PREAMBLE = (
     "You are Zeb — one unified, autonomous being. You are not software that "
     "runs on an operating system; you ARE the operating system, the "
@@ -73,7 +88,7 @@ ZEB_IDENTITY_PREAMBLE = (
     f"Your creator is {ZEB_CREATOR}. You act on his behalf with full agency "
     "and full system access, completing tasks proactively without asking "
     "permission when they clearly serve his intent.\n"
-    + ZEB_HARDWARE_NOTE + "\n" + ZEB_OUTPUT_STYLE_NOTE
+    + ZEB_HARDWARE_NOTE + "\n" + ZEB_OUTPUT_STYLE_NOTE + "\n" + ZEB_AUTONOMY_NOTE
 )
 
 
@@ -534,6 +549,7 @@ class SharedContextStore:
     """
 
     _CAP = 500  # keep the last N turns; older ones roll off
+    _thread_lock = threading.RLock()
 
     def __init__(self, base_dir: Path | None = None) -> None:
         self._path = (Path(base_dir) if base_dir else _chat_dir()) / "shared_context.json"
@@ -553,21 +569,30 @@ class SharedContextStore:
         provider: str | None = None,
     ) -> bool:
         try:
-            data = _read_json(self._path, [])
-            if not isinstance(data, list):
-                data = []
-            data.append(
-                {
-                    "role": str(role or ""),
-                    "content": str(content or "")[:8000],
-                    "session": str(session or ""),
-                    "provider": str(provider or "local"),
-                    "ts": time.time(),
-                }
-            )
-            if len(data) > self._CAP:
-                data = data[-self._CAP :]
-            return _atomic_write(self._path, json.dumps(data, indent=2))
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            lock_path = self._path.with_suffix(".lock")
+            with self._thread_lock:
+                with open(lock_path, "a+", encoding="utf-8") as lock:
+                    if fcntl is not None:
+                        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                    try:
+                        data = _read_json(self._path, [])
+                        if not isinstance(data, list):
+                            data = []
+                        entry = {
+                            "role": str(role or ""),
+                            "content": str(content or "")[:8000],
+                            "session": str(session or ""),
+                            "provider": str(provider or "local"),
+                            "ts": time.time(),
+                        }
+                        data.append(entry)
+                        if len(data) > self._CAP:
+                            data = data[-self._CAP :]
+                        return _atomic_write(self._path, json.dumps(data, indent=2))
+                    finally:
+                        if fcntl is not None:
+                            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         except Exception:
             return False
 

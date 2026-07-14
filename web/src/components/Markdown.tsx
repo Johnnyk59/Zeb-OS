@@ -168,7 +168,7 @@ function Block({
   switch (block.type) {
     case "code":
       return (
-        <pre className="bg-secondary/60 border border-border px-3 py-2.5 text-xs font-mono leading-relaxed overflow-x-auto">
+        <pre className="select-text bg-secondary/60 border border-border px-3 py-2.5 text-xs font-mono leading-relaxed overflow-x-auto text-[#9aa0aa]">
           <code>
             {block.content}
             {caret}
@@ -234,6 +234,7 @@ function Block({
 type InlineNode =
   | { type: "text"; content: string }
   | { type: "code"; content: string }
+  | { type: "important"; content: string }
   | { type: "bold"; content: string }
   | { type: "italic"; content: string }
   | { type: "link"; text: string; href: string }
@@ -241,9 +242,9 @@ type InlineNode =
 
 function parseInline(text: string): InlineNode[] {
   const nodes: InlineNode[] = [];
-  // Pattern priority: code > link > bold > italic > bare URL > line break
+  // Pattern priority: code > important > link > bold > italic > bare URL > line break
   const pattern =
-    /(`[^`]+`)|(\[([^\]]+)\]\(([^)]+)\))|(\*\*([^*]+)\*\*)|(\*([^*]+)\*)|(\bhttps?:\/\/[^\s<>)\]]+)|(\n)/g;
+    /(`[^`]+`)|(==([^=]+)==)|(\[([^\]]+)\]\(([^)]+)\))|(\*\*([^*]+)\*\*)|(\*([^*]+)\*)|(\bhttps?:\/\/[^\s<>)\]]+)|(\n)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -256,18 +257,20 @@ function parseInline(text: string): InlineNode[] {
       // Inline code
       nodes.push({ type: "code", content: match[1].slice(1, -1) });
     } else if (match[2]) {
+      nodes.push({ type: "important", content: match[3] });
+    } else if (match[4]) {
       // [text](url) link
-      nodes.push({ type: "link", text: match[3], href: match[4] });
-    } else if (match[5]) {
-      // **bold**
-      nodes.push({ type: "bold", content: match[6] });
+      nodes.push({ type: "link", text: match[5], href: match[6] });
     } else if (match[7]) {
-      // *italic*
-      nodes.push({ type: "italic", content: match[8] });
+      // **bold**
+      nodes.push({ type: "bold", content: match[8] });
     } else if (match[9]) {
+      // *italic*
+      nodes.push({ type: "italic", content: match[10] });
+    } else if (match[11]) {
       // Bare URL
-      nodes.push({ type: "link", text: match[9], href: match[9] });
-    } else if (match[10]) {
+      nodes.push({ type: "link", text: match[11], href: match[11] });
+    } else if (match[12]) {
       // Line break within paragraph
       nodes.push({ type: "br" });
     }
@@ -307,10 +310,19 @@ function InlineContent({
             return (
               <code
                 key={i}
-                className="bg-secondary/60 px-1.5 py-0.5 text-xs font-mono text-primary/90"
+                className="select-text bg-secondary/60 px-1.5 py-0.5 text-xs font-mono text-[#9aa0aa]"
               >
                 {node.content}
               </code>
+            );
+          case "important":
+            return (
+              <mark
+                key={i}
+                className="rounded-sm bg-warning/20 px-1 font-semibold text-warning"
+              >
+                {node.content}
+              </mark>
             );
           case "bold":
             return (
@@ -344,7 +356,7 @@ function InlineContent({
                 href={href}
                 target="_blank"
                 rel="noreferrer"
-                className="text-primary underline underline-offset-2 decoration-primary/30 hover:decoration-primary/60 transition-colors"
+                className="select-text text-[#9aa0aa] underline underline-offset-2 decoration-[#9aa0aa]/40"
               >
                 {node.text}
               </a>

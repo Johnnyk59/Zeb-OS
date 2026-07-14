@@ -24,5 +24,13 @@ Design principles (shared by every module here):
 """
 
 from zeb_autonomy.base import Bot, BotContext, BotResult
+from zeb_autonomy.agent_builder import AgentSpec, build_agent, spec_from_template
 
-__all__ = ["Bot", "BotContext", "BotResult"]
+__all__ = [
+    "AgentSpec",
+    "Bot",
+    "BotContext",
+    "BotResult",
+    "build_agent",
+    "spec_from_template",
+]

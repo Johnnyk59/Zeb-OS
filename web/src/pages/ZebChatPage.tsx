@@ -28,6 +28,7 @@ import {
   Volume2,
   VolumeX,
   Wrench,
+  X,
 } from "lucide-react";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
@@ -38,7 +39,7 @@ import { GatewayClient } from "@/lib/gatewayClient";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
 import { api } from "@/lib/api";
-import type { ModelOptionsResponse } from "@/lib/api";
+import type { AgentRecord, ModelOptionsResponse } from "@/lib/api";
 
 interface ToolChip {
   id: string;
@@ -48,11 +49,12 @@ interface ToolChip {
 
 interface ChatMessage {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "shared";
   content: string;
   streaming?: boolean;
   tools?: ToolChip[];
   error?: boolean;
+  provider?: string;
 }
 
 let _mid = 0;
@@ -64,6 +66,48 @@ export default function ZebChatPage({
 }: {
   isActive?: boolean;
   sidebarCollapsed?: boolean;
+}) {
+  const [dual, setDual] = useState(false);
+
+  const openDual = useCallback(() => setDual(true), []);
+  const closeDual = useCallback(() => setDual(false), []);
+
+  return (
+    <div className={cn("flex min-h-0 min-w-0 flex-1", dual ? "flex-row" : "flex-col")}>
+      <div className={cn("flex min-h-0 min-w-0", dual ? "w-1/2 border-r border-current/10" : "flex-1")}>
+        <ChatPane
+          isActive={isActive}
+          sidebarCollapsed={sidebarCollapsed}
+          showBrain={!dual}
+          onNewChat={!dual ? openDual : undefined}
+        />
+      </div>
+      {dual ? (
+        <div className="flex min-h-0 min-w-0 w-1/2">
+          <ChatPane
+            isActive={isActive}
+            sidebarCollapsed={false}
+            showBrain={false}
+            onClose={closeDual}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChatPane({
+  isActive = true,
+  sidebarCollapsed = false,
+  showBrain = true,
+  onNewChat,
+  onClose,
+}: {
+  isActive?: boolean;
+  sidebarCollapsed?: boolean;
+  showBrain?: boolean;
+  onNewChat?: () => void;
+  onClose?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -77,12 +121,44 @@ export default function ZebChatPage({
   const [modelOpts, setModelOpts] = useState<ModelOptionsResponse | null>(null);
   const [switching, setSwitching] = useState(false);
   const [nonce, setNonce] = useState(0);
+  const [agents, setAgents] = useState<AgentRecord[]>([]);
+  const [activeAgent, setActiveAgent] = useState<string | null>(null);
 
   const gwRef = useRef<GatewayClient | null>(null);
   const sessionIdRef = useRef<string>("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const { profile: scopedProfile } = useProfileScope();
+
+  useEffect(() => {
+    let alive = true;
+    const poll = () => {
+      if (document.hidden) return;
+      api
+        .getAgents()
+        .then((result) => {
+          if (alive) setAgents(result.agents ?? []);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  const resizeInput = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, Math.floor(window.innerHeight * 0.4))}px`;
+  }, []);
+
+  useEffect(() => {
+    resizeInput();
+  }, [input, resizeInput]);
 
   // Background brain activity (autonomy / self-evolution / self-review),
   // polled from the server. The live chat turn overrides it below.
@@ -134,7 +210,7 @@ export default function ZebChatPage({
         : bgStatus === "processing"
           ? 0.32
           : 0.06;
-  const split = sidebarCollapsed;
+  const split = sidebarCollapsed && showBrain;
 
   // Model label for the top bar (best-effort).
   useEffect(() => {
@@ -318,6 +394,31 @@ export default function ZebChatPage({
               { id: nextId(), role: "assistant", content: msg, error: true },
             ]);
           }),
+          gw.on<{
+            role?: string;
+            content?: string;
+            provider?: string;
+            source_session_id?: string;
+          }>("shared.context", (ev) => {
+            const payload = ev.payload;
+            const content = payload?.content;
+            const provider = payload?.provider;
+            if (
+              typeof content !== "string" ||
+              payload?.source_session_id === sessionIdRef.current
+            ) {
+              return;
+            }
+            setMessages((msgs) => [
+              ...msgs,
+              {
+                id: nextId(),
+                role: "shared",
+                content,
+                provider,
+              },
+            ]);
+          }),
           gw.onState((s) => {
             if (cancelled) return;
             if (s === "closed" || s === "error") setConn(s);
@@ -404,7 +505,13 @@ export default function ZebChatPage({
     setThinking(false);
   }, []);
 
-  const newChat = useCallback(() => setNonce((n) => n + 1), []);
+  const newChat = useCallback(() => {
+    if (onNewChat) {
+      onNewChat();
+      return;
+    }
+    setNonce((n) => n + 1);
+  }, [onNewChat]);
 
   const statusDot = useMemo(() => {
     const color =
@@ -431,31 +538,36 @@ export default function ZebChatPage({
     );
   }, [conn, busy, thinking]);
 
+  const selectedAgent = activeAgent
+    ? agents.find((agent) => agent.id === activeAgent) ?? null
+    : null;
+
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* Brain overlay — pointer-transparent; chat flows beneath it.
-          Corner badge when the sidebar is visible, right half in split. */}
-      <div
-        aria-hidden
-        className={cn(
-          "pointer-events-none absolute right-0 top-0 z-10",
-          "transition-[width,height] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)]",
-          split ? "h-full w-1/2" : "h-[46%] w-[38%] min-w-72",
-        )}
-        style={{
-          WebkitMaskImage:
-            "radial-gradient(ellipse 70% 70% at center, black 52%, transparent 82%)",
-          maskImage:
-            "radial-gradient(ellipse 70% 70% at center, black 52%, transparent 82%)",
-        }}
-      >
-        <BrainCanvas energy={energy} className="h-full w-full" />
-      </div>
+      {/* Brain overlay — removed entirely while two independent chats are open. */}
+      {showBrain ? (
+        <div
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute right-0 top-0 z-10",
+            "transition-[width,height] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)]",
+            split ? "h-full w-1/2" : "h-[46%] w-[38%] min-w-72",
+          )}
+          style={{
+            WebkitMaskImage:
+              "radial-gradient(ellipse 70% 70% at center, black 52%, transparent 82%)",
+            maskImage:
+              "radial-gradient(ellipse 70% 70% at center, black 52%, transparent 82%)",
+          }}
+        >
+          <BrainCanvas energy={energy} className="h-full w-full" />
+        </div>
+      ) : null}
 
       {/* Brain status pill — real-time label of what Zeb is doing, floating
           over the brain. Chat-turn state (Thinking/Processing) overrides the
           background mind (Learning/Idle). */}
-      <div
+      {showBrain ? <div
         aria-live="polite"
         className={cn(
           "pointer-events-none absolute z-30 flex items-center gap-2 rounded-full",
@@ -475,7 +587,7 @@ export default function ZebChatPage({
           )}
         />
         {brainStatus.label}
-      </div>
+      </div> : null}
 
       {/* Top bar — full width, floats above the brain */}
       <header className="relative z-20 flex h-12 shrink-0 items-center justify-between gap-3 border-b border-current/10 bg-background-base/75 px-4 backdrop-blur-sm">
@@ -484,6 +596,26 @@ export default function ZebChatPage({
             Chat
           </span>
           {statusDot}
+          <nav className="hidden min-w-0 items-center gap-1.5 lg:flex" aria-label="Agent dashboards">
+            {agents
+              .filter((agent) => ["quant", "jewelry", "socials"].includes(agent.id))
+              .map((agent) => (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => setActiveAgent((current) => (current === agent.id ? null : agent.id))}
+                  className={cn(
+                    "rounded-[var(--radius)] border px-2 py-1 font-mono text-[0.62rem] uppercase tracking-[0.08em] transition-colors",
+                    activeAgent === agent.id
+                      ? "border-[#40e8dc]/60 bg-[#40e8dc]/10 text-[#40e8dc]"
+                      : "border-current/10 text-text-tertiary hover:border-current/25 hover:text-midground",
+                  )}
+                  title={`${agent.label}: ${agent.status}`}
+                >
+                  {agent.label}
+                </button>
+              ))}
+          </nav>
         </div>
         <div className="flex items-center gap-2">
           {/* In-chat model switcher — local model + every connected provider,
@@ -533,6 +665,17 @@ export default function ZebChatPage({
           >
             New chat
           </Button>
+          {onClose ? (
+            <Button
+              ghost
+              size="icon"
+              onClick={onClose}
+              aria-label="Close second chat"
+              title="Close second chat"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          ) : null}
         </div>
       </header>
 
@@ -548,6 +691,39 @@ export default function ZebChatPage({
             split ? "w-1/2 max-w-[50%] pr-6" : "max-w-3xl",
           )}
         >
+          {selectedAgent ? (
+            <div className="flex min-h-[28rem] w-full flex-col gap-3 rounded-[var(--radius)] border border-current/10 bg-midground/[0.03] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-sans text-sm uppercase tracking-[0.12em] text-midground">
+                    {selectedAgent.label}
+                  </div>
+                  <div className="mt-1 font-mono text-[0.65rem] uppercase tracking-[0.1em] text-text-tertiary">
+                    {selectedAgent.status}
+                  </div>
+                </div>
+                <Button ghost size="sm" onClick={() => setActiveAgent(null)}>
+                  Back to chat
+                </Button>
+              </div>
+              {agentDashboardUrl(selectedAgent.dashboard_url) ? (
+                <iframe
+                  title={`${selectedAgent.label} dashboard`}
+                  src={agentDashboardUrl(selectedAgent.dashboard_url)}
+                  className="min-h-[24rem] w-full flex-1 rounded-[var(--radius)] border border-current/10 bg-background-base"
+                />
+              ) : (
+                <div className="flex min-h-[24rem] flex-1 flex-col items-center justify-center gap-2 text-center text-text-tertiary">
+                  <span className="text-sm text-text-secondary">Dashboard not built yet</span>
+                  <span className="max-w-md text-xs leading-relaxed">
+                    Zeb can use the built-in agent builder, create this agent's dashboard on the VPS,
+                    and register its URL here without a redeploy.
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
           {banner ? (
             <div className="w-full rounded-[var(--radius)] border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {banner}
@@ -573,6 +749,8 @@ export default function ZebChatPage({
                 "max-w-full rounded-[var(--radius)] px-4 py-2.5",
                 m.role === "user"
                   ? "border border-midground/20 bg-midground/10"
+                  : m.role === "shared"
+                    ? "border border-[#a884ff]/25 bg-[#a884ff]/[0.06]"
                   : m.error
                     ? "border border-destructive/40 bg-destructive/10"
                     : "border border-current/10 bg-midground/[0.04]",
@@ -601,6 +779,13 @@ export default function ZebChatPage({
                 <div className="whitespace-pre-wrap text-sm text-midground">
                   {m.content}
                 </div>
+              ) : m.role === "shared" ? (
+                <div>
+                  <div className="mb-1 font-mono text-[0.6rem] uppercase tracking-[0.12em] text-[#a884ff]">
+                    Shared context{m.provider ? ` · ${m.provider}` : ""}
+                  </div>
+                  <Markdown content={m.content} />
+                </div>
               ) : (
                 <Markdown content={m.content} streaming={m.streaming} />
               )}
@@ -613,6 +798,8 @@ export default function ZebChatPage({
               <Spinner /> {thinking ? "Thinking…" : "Zeb is on it…"}
             </div>
           ) : null}
+            </>
+          )}
         </div>
       </div>
 
@@ -641,7 +828,7 @@ export default function ZebChatPage({
             }
             disabled={conn !== "open"}
             className={cn(
-              "max-h-40 min-h-[2.5rem] flex-1 resize-none rounded-[var(--radius)]",
+              "max-h-[40vh] min-h-[2.5rem] flex-1 resize-none overflow-y-auto rounded-[var(--radius)]",
               "border border-current/15 bg-midground/[0.04] px-3.5 py-2.5",
               "font-sans text-sm text-midground placeholder:text-text-tertiary",
               "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground/50",
@@ -715,4 +902,15 @@ export default function ZebChatPage({
       </footer>
     </div>
   );
+}
+
+function agentDashboardUrl(raw: string): string {
+  const value = String(raw || "").trim();
+  if (value.startsWith("/")) return value;
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
 }
