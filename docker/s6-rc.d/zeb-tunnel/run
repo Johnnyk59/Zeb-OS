@@ -1,12 +1,15 @@
 #!/command/with-contenv sh
 # shellcheck shell=sh
-# Cloudflare quick tunnel for the dashboard.
+# Cloudflare tunnel for the dashboard.
 #
-# Exposes the local dashboard on a public https://<random>.trycloudflare.com
-# URL that works from ANY device with no firewall rules, port-forwarding, or
-# Cloudflare account. This is the zero-config "give me a link that works"
-# path — the raw host:port bind often isn't reachable (NAT / firewall / the
-# host IP changed), so the tunnel is the reliable way in.
+# Two modes:
+#   - Named tunnel (ZEB_TUNNEL_TOKEN set): a permanent Cloudflare Tunnel
+#     bound to your own domain(s). Public-hostname -> local-service routing
+#     lives in the Cloudflare dashboard (Zero Trust > Networks > Tunnels),
+#     not in this container, so the URL is stable across rebuilds/restarts.
+#   - Quick tunnel (no token): falls back to a free, random
+#     https://<random>.trycloudflare.com URL that works from ANY device
+#     with no Cloudflare account. The URL changes every restart.
 #
 # Enabled automatically whenever the dashboard is enabled. Set ZEB_TUNNEL=0
 # to disable and rely on the direct host:port bind instead.
@@ -68,6 +71,65 @@ print_link_box() {
     echo ""
 }
 
+# Multi-hostname variant for named tunnels, which can front more than one
+# custom domain from a single cloudflared process.
+print_link_box_multi() {
+    echo ""
+    echo ""
+    printf '+%s+\n' "$rule"
+    line ""
+    line "    ****  YOUR DASHBOARD LINK(S)  ****"
+    line ""
+    line "    ------------------------------------------------------------"
+    line ""
+    for _u in "$@"; do
+        line "      $_u"
+    done
+    line ""
+    line "    ------------------------------------------------------------"
+    line ""
+    line "      USERNAME:   $user"
+    line "      PASSWORD:   $pw"
+    line ""
+    line "    (link may take ~10 seconds to become reachable)"
+    line ""
+    printf '+%s+\n' "$rule"
+    echo ""
+    echo ""
+}
+
+# ---------- named tunnel (permanent, your own domain) ----------
+# ZEB_TUNNEL_TOKEN comes from `cloudflared tunnel token <name>` on any
+# machine authenticated to your Cloudflare account. It's a self-contained
+# credential — no credentials.json file needs to be mounted into the
+# container. Which hostnames route to this tunnel is configured once in
+# the Cloudflare dashboard (Zero Trust > Networks > Tunnels > Public
+# Hostnames), so it survives container rebuilds untouched.
+if [ -n "${ZEB_TUNNEL_TOKEN:-}" ]; then
+    echo "[tunnel] starting named Cloudflare tunnel -> ${target}"
+
+    if [ -n "${ZEB_TUNNEL_HOSTNAMES:-}" ]; then
+        urls=""
+        old_ifs="$IFS"
+        IFS=','
+        for h in $ZEB_TUNNEL_HOSTNAMES; do
+            h_trimmed=$(printf '%s' "$h" | sed 's/^ *//;s/ *$//')
+            [ -n "$h_trimmed" ] || continue
+            urls="${urls}https://${h_trimmed}
+"
+        done
+        IFS="$old_ifs"
+        if [ -n "$urls" ]; then
+            printf '%s' "$urls" > /opt/data/DASHBOARD_URL.txt 2>/dev/null || true
+            # shellcheck disable=SC2046,SC2086
+            print_link_box_multi $(printf '%s' "$urls")
+        fi
+    fi
+
+    exec cloudflared tunnel --no-autoupdate run --token "$ZEB_TUNNEL_TOKEN"
+fi
+
+# ---------- quick tunnel (fallback, random URL) ----------
 echo "[tunnel] starting Cloudflare quick tunnel -> ${target}"
 
 # Clean up cloudflared (and this process group) on stop so a service
