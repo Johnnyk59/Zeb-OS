@@ -601,3 +601,46 @@ def test_onboard_provider_saves_key_and_connects(client, tmp_path, monkeypatch):
 def test_onboard_provider_requires_key(client):
     assert client.get("/api/providers").status_code == 401
     assert client.post("/api/onboard/provider").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Agents registry (top-bar buttons + self-registered dashboards)
+# ---------------------------------------------------------------------------
+def test_agents_seed_and_register(client):
+    # Auth required.
+    assert client.get("/api/agents").status_code == 401
+
+    # Seeds the three default agents, none wired yet.
+    res = client.get("/api/agents", headers=AUTH)
+    assert res.status_code == 200
+    agents = {a["id"]: a for a in res.json()["agents"]}
+    assert set(["quant", "jewelry", "socials"]).issubset(agents)
+    assert agents["quant"]["dashboard_url"] == ""
+
+    # Zeb registers a dashboard for quant at runtime.
+    res = client.post(
+        "/api/agents/quant",
+        headers=AUTH,
+        json={"dashboard_url": "http://localhost:9200/quant", "status": "ready"},
+    )
+    assert res.status_code == 200 and res.json()["ok"] is True
+
+    agents = {a["id"]: a for a in client.get("/api/agents", headers=AUTH).json()["agents"]}
+    assert agents["quant"]["dashboard_url"] == "http://localhost:9200/quant"
+    assert agents["quant"]["status"] == "ready"
+
+
+# ---------------------------------------------------------------------------
+# Shared cross-provider context
+# ---------------------------------------------------------------------------
+def test_shared_context_roundtrip(client):
+    assert client.get("/api/context").status_code == 401
+
+    from zeb_chat.stores import SharedContextStore
+
+    SharedContextStore().append("user", "hello from one session", provider="anthropic")
+    res = client.get("/api/context", headers=AUTH)
+    assert res.status_code == 200
+    ctx = res.json()["context"]
+    assert ctx and ctx[-1]["content"] == "hello from one session"
+    assert ctx[-1]["provider"] == "anthropic"

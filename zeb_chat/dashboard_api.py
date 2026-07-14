@@ -127,6 +127,56 @@ def delete_session(sid: str, request: Request):
 
 
 # --------------------------------------------------------------------------
+# Shared cross-provider context (one unified memory across all sessions)
+# --------------------------------------------------------------------------
+@router.get("/api/context")
+def shared_context(request: Request):
+    require_key(request)
+    try:
+        from zeb_chat.stores import SharedContextStore
+
+        limit = 50
+        try:
+            limit = int(request.query_params.get("limit", "50"))
+        except Exception:
+            pass
+        return {"context": SharedContextStore().recent(limit)}
+    except Exception as exc:  # pragma: no cover - fail-open
+        return {"context": [], "error": str(exc)}
+
+
+# --------------------------------------------------------------------------
+# Agents (top-bar buttons + self-registered dashboards)
+# --------------------------------------------------------------------------
+@router.get("/api/agents")
+def list_agents(request: Request):
+    require_key(request)
+    try:
+        from zeb_chat.stores import AgentStore
+
+        return {"agents": AgentStore().list()}
+    except Exception as exc:  # pragma: no cover - fail-open
+        return {"agents": [], "error": str(exc)}
+
+
+@router.post("/api/agents/{aid}")
+async def register_agent(aid: str, request: Request):
+    """Zeb registers/updates an agent's dashboard URL + status at runtime.
+
+    Body: {"dashboard_url": "...", "status": "...", "label": "..."} — this is
+    how Zeb wires a dashboard it built to a top-bar button without a redeploy.
+    """
+    require_key(request)
+    try:
+        from zeb_chat.stores import AgentStore
+
+        body = await _json_body(request)
+        return {"ok": True, "agent": AgentStore().register(aid, body)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# --------------------------------------------------------------------------
 # Files (full workspace access)
 # --------------------------------------------------------------------------
 def _default_files_root() -> str:

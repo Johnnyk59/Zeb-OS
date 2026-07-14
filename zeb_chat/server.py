@@ -433,6 +433,18 @@ def create_app() -> FastAPI:
         finally:
             if _activity is not None:
                 _activity.end()
+
+        # Feed the one shared cross-provider context log so every session and
+        # provider can read back what any of them just said (fail-open).
+        try:
+            from zeb_chat.stores import SharedContextStore
+
+            _shared = SharedContextStore()
+            _sid = body.get("session") if isinstance(body.get("session"), str) else None
+            _shared.append("user", message, _sid, provider or "local")
+            _shared.append("assistant", reply, _sid, provider or "local")
+        except Exception:
+            pass
         return {"reply": reply}
 
     return app

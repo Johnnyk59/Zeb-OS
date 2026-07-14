@@ -224,7 +224,7 @@
   .composer{padding:14px 26px 18px;border-top:1px solid var(--line)}
   .composer-inner{max-width:920px;margin:0 auto;display:flex;gap:10px;align-items:flex-end}
   #chatInput{flex:1;resize:none;background:var(--g1);border:1px solid var(--line);color:var(--txt);
-    border-radius:12px;padding:13px 15px;font-size:14px;max-height:160px;min-height:48px;outline:none;
+    border-radius:12px;padding:13px 15px;font-size:14px;max-height:220px;min-height:48px;outline:none;
     transition:border .15s,box-shadow .15s;line-height:1.45}
   #chatInput:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,224,208,.13)}
   #sendBtn{height:48px;padding:0 20px;border-radius:12px}
@@ -328,6 +328,55 @@
     background:#050506;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:10px}
   .sub-card .sub-hint code{color:var(--cyan)}
   .sub-card .sub-row{display:flex;gap:8px;align-items:center}
+
+  /* ===== TOP-BAR AGENT NAV (Quant / Jewelry / Socials) ===== */
+  .agent-nav{display:flex;gap:6px;align-items:center;margin-left:14px}
+  .agent-nav .anav{background:var(--g1);border:1px solid var(--line);color:var(--dim);
+    padding:6px 12px;border-radius:8px;font-size:12px;font-family:var(--mono);letter-spacing:.3px;
+    display:flex;align-items:center;gap:6px;transition:all .14s;white-space:nowrap}
+  .agent-nav .anav:hover{color:var(--txt);border-color:var(--g4)}
+  .agent-nav .anav.active{color:var(--cyan);border-color:var(--cyan);box-shadow:0 0 0 2px rgba(34,224,208,.12)}
+  .agent-nav .anav .adot{width:7px;height:7px;border-radius:50%;background:var(--dim2);flex:none}
+  .agent-nav .anav.live .adot{background:var(--cyan);box-shadow:0 0 6px rgba(34,224,208,.8)}
+  .agent-frame{width:100%;height:100%;border:0;border-radius:12px;background:#050506}
+  .agent-empty{max-width:560px;margin:8vh auto 0;text-align:center;color:var(--dim);line-height:1.7}
+  .agent-empty h3{color:var(--txt);font-size:18px;margin:0 0 8px}
+  .agent-empty .abadge{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:1px;
+    text-transform:uppercase;color:var(--amber);border:1px solid rgba(240,180,60,.35);
+    border-radius:20px;padding:3px 12px;margin-bottom:16px}
+  @media (max-width:1100px){.agent-nav .anav span.alabel{display:none}}
+
+  /* ===== DUAL CHAT (split view on New Chat) ===== */
+  #app.dual #brainWrap{display:none!important}
+  #app.dual #chatPane{right:50%;border-right:1px solid var(--line)}
+  #app.dual #chatPane .chat-scroll.centered{max-width:none}
+  #app.dual #chatPane .composer-inner{max-width:none}
+  #app.dual #chatPane .msg{max-width:82%}
+  #app.dual #chatPane .msg.user{margin-right:2%}
+  #dualCol{position:absolute;top:0;right:0;bottom:0;left:50%;display:none;flex-direction:column;
+    background:radial-gradient(700px 400px at 90% -5%,#111019,#0a0a0b 55%);z-index:20}
+  #app.dual #dualCol{display:flex}
+  #dualCol .chat-top{gap:10px}
+  #dualCol .dc-scroll{flex:1;overflow-y:auto;padding:24px 26px;display:flex;flex-direction:column;gap:14px}
+  #dualCol .dc-scroll .msg{max-width:82%}
+  #dualCol .dc-close{margin-left:auto;background:var(--g1);border:1px solid var(--line);color:var(--dim);
+    width:30px;height:30px;border-radius:8px;font-size:15px}
+  #dualCol .dc-close:hover{color:var(--danger);border-color:var(--danger)}
+  #dualCol .composer{padding:14px 26px 18px;border-top:1px solid var(--line)}
+  #dualCol .composer-inner{display:flex;gap:10px;align-items:flex-end}
+  #dualCol textarea{flex:1;resize:none;background:var(--g1);border:1px solid var(--line);color:var(--txt);
+    border-radius:12px;padding:13px 15px;font-size:14px;max-height:200px;min-height:48px;outline:none;line-height:1.45}
+  #dualCol textarea:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,224,208,.13)}
+
+  /* ===== COPY-PASTE (static grey) + IMPORTANT HIGHLIGHT ===== */
+  .bubble .copytext{font-family:var(--mono);font-size:12.5px;color:#9aa4ad;background:rgba(255,255,255,.03);
+    border:1px solid var(--line);border-radius:6px;padding:1px 6px;user-select:text;cursor:text;
+    -webkit-user-select:text;white-space:pre-wrap;word-break:break-word}
+  .bubble pre.copyblock{font-family:var(--mono);font-size:12.5px;color:#9aa4ad;background:#0a0b0c;
+    border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:8px 0;overflow-x:auto;
+    user-select:text;-webkit-user-select:text;line-height:1.55;white-space:pre}
+  .bubble mark.zeb-important{background:linear-gradient(transparent 55%,rgba(240,180,60,.28) 55%);
+    color:#ffe6a8;font-weight:600;padding:0 2px;border-radius:2px}
 </style>
 
 <!-- AUTH GATE -->
@@ -376,6 +425,7 @@
           </button>
           <div class="recent-pop" id="recentPop" style="display:none"></div>
         </div>
+        <div class="agent-nav" id="agentNav"></div>
         <select class="modelsel" id="modelSel" title="Model for this chat — Local is the default"></select>
         <div class="seg">
           <button id="modeSimple" class="on">Chat</button>
@@ -1295,7 +1345,9 @@ function addMsgNode(role,content,anim){
   const who=role==='user'?'user':'agent';
   const m=el('div','msg '+who);
   m.appendChild(el('div','who',who==='user'?'You':'Zeb'));
-  const bub=el('div','bubble',content);m.appendChild(bub);
+  const bub=el('div','bubble');
+  if(who==='user')bub.textContent=content; else renderRich(bub,content);
+  m.appendChild(bub);
   m.appendChild(el('div','ts',timeNow()));
   sc.appendChild(m);if(anim!==false)scrollBottom();
   return m;
@@ -1307,7 +1359,8 @@ function showTyping(){const sc=$('#chatScroll');typingNode=el('div','msg agent')
 function hideTyping(){if(typingNode){typingNode.remove();typingNode=null;}}
 
 const input=$('#chatInput'), sendBtn=$('#sendBtn');
-input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,160)+'px';});
+function autoGrow(ta,cap){ta.style.height='auto';const h=Math.min(ta.scrollHeight,cap||220);ta.style.height=h+'px';ta.style.overflowY=ta.scrollHeight>(cap||220)?'auto':'hidden';}
+input.addEventListener('input',()=>autoGrow(input,220));
 input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});
 sendBtn.onclick=sendMsg;
 
@@ -1403,6 +1456,10 @@ async function renderRecentPop(){
   const nw=el('button','rp-new');nw.innerHTML='<span style="font-size:15px;line-height:1">&#43;</span><span>Start new chat</span>';
   nw.onclick=async()=>{closeRecent();await newSession();};
   recentPop.appendChild(nw);
+  const split=el('button','rp-new');
+  split.innerHTML='<span style="font-size:14px;line-height:1">&#9707;</span><span>'+(DualChat.isOpen()?'Close second chat':'Open second chat (split view)')+'</span>';
+  split.onclick=()=>{closeRecent();DualChat.toggle();};
+  recentPop.appendChild(split);
   recentPop.appendChild(el('div','rp-label','Recent chats'));
   const holder=el('div');holder.innerHTML='<div class="rp-empty"><span class="spin"></span></div>';recentPop.appendChild(holder);
   try{
@@ -1539,6 +1596,7 @@ function boot(){
   applySidebar();
   Voice.init();
   Brain.init();
+  try{AgentNav.init();}catch(e){}
   restoreChatState();       // return to the same conversation, not a new one
   loadModelSelector();      // populate the chat model dropdown (provider default)
   renderMessages();
@@ -1562,6 +1620,163 @@ async function syncSessionFromServer(){
     }
   }catch(e){/* keep the localStorage copy */}
 }
+
+/* ============ RICH MESSAGE RENDERING ============ */
+/* Zeb's replies may contain three kinds of styled text:
+   - ```fenced``` blocks and `inline code`  -> static GREY monospace, meant to
+     be selected & copied. No click-to-highlight behaviour: it's plain, quiet,
+     copy-friendly text (directive: copy-paste styling).
+   - ==important==  -> a highlighted <mark> Zeb uses to flag text that is
+     critical for the user to read (directive: important-message highlighting).
+   Everything is HTML-escaped first, so model output can never inject markup. */
+function escHtml(s){return String(s==null?'':s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function renderInline(s){
+  // operate on already-escaped text; order matters (code before highlight)
+  s=s.replace(/`([^`\n]+)`/g,(_,c)=>'C'+c+'');
+  s=s.replace(/==([^=\n][^=]*?)==/g,(_,h)=>'H'+h+'');
+  s=s.replace(/C([\s\S]*?)/g,(_,c)=>'<span class="copytext">'+c+'</span>');
+  s=s.replace(/H([\s\S]*?)/g,(_,h)=>'<mark class="zeb-important">'+h+'</mark>');
+  return s;
+}
+function renderRich(bub,content){
+  const raw=String(content==null?'':content);
+  // Split on fenced code blocks ```...``` and render each part.
+  const parts=raw.split(/```/);
+  let html='';
+  for(let i=0;i<parts.length;i++){
+    if(i%2===1){ // inside a fence
+      let body=parts[i].replace(/^[a-zA-Z0-9_+-]*\n/,''); // drop optional lang tag
+      html+='<pre class="copyblock">'+escHtml(body.replace(/\n$/,''))+'</pre>';
+    }else{
+      html+=renderInline(escHtml(parts[i]));
+    }
+  }
+  bub.innerHTML=html;
+}
+
+/* ============ DUAL CHAT (split view) ============ */
+/* A fully independent second conversation living beside the first. It keeps its
+   own history, session id, model selection and in-flight state, so both chats
+   run simultaneously without touching each other. Opening it hides the brain;
+   closing it restores the single-chat + brain layout (directive #4). */
+const DualChat=(function(){
+  let built=false, openState=false, col=null;
+  const st={history:[],session:null,awaiting:false};
+  let sc,ta,send,titleEl,modelSel;
+  function build(){
+    if(built)return; built=true;
+    col=el('div'); col.id='dualCol';
+    col.innerHTML=
+      '<div class="chat-top"><h2 style="font-size:15px">Second Chat</h2>'
+      +'<select class="modelsel" id="dcModel" style="margin-left:12px" title="Model for this chat"></select>'
+      +'<button class="dc-close" id="dcClose" title="Close second chat">&times;</button></div>'
+      +'<div class="dc-scroll" id="dcScroll"></div>'
+      +'<div class="composer"><div class="composer-inner">'
+      +'<textarea id="dcInput" rows="1" placeholder="Message Zeb (second chat)…"></textarea>'
+      +'<button class="btn btn-accent" id="dcSend">Send</button></div></div>';
+    document.querySelector('.main').appendChild(col);
+    sc=col.querySelector('#dcScroll'); ta=col.querySelector('#dcInput');
+    send=col.querySelector('#dcSend'); titleEl=col.querySelector('h2');
+    modelSel=col.querySelector('#dcModel');
+    // clone model options from the primary selector
+    try{modelSel.innerHTML=$('#modelSel').innerHTML;modelSel.value=$('#modelSel').value;}catch(e){}
+    col.querySelector('#dcClose').onclick=close;
+    send.onclick=fire;
+    ta.addEventListener('input',()=>autoGrow(ta,200));
+    ta.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();fire();}});
+    sc.innerHTML='<div class="empty" style="color:var(--dim);text-align:center;margin-top:20vh">Independent second conversation.<br>Runs at the same time as the chat on the left.</div>';
+  }
+  function addNode(role,content){
+    if(sc.querySelector('.empty'))sc.innerHTML='';
+    const who=role==='user'?'user':'agent';
+    const m=el('div','msg '+who);
+    m.appendChild(el('div','who',who==='user'?'You':'Zeb'));
+    const bub=el('div','bubble');
+    if(who==='user')bub.textContent=content; else renderRich(bub,content);
+    m.appendChild(bub); m.appendChild(el('div','ts',timeNow()));
+    sc.appendChild(m); sc.scrollTop=sc.scrollHeight;
+  }
+  async function fire(){
+    const text=ta.value.trim(); if(!text||st.awaiting)return;
+    ta.value='';autoGrow(ta,200);
+    st.history.push({role:'user',content:text});addNode('user',text);
+    st.awaiting=true;send.disabled=true;
+    const tp=el('div','msg agent');tp.innerHTML='<div class="typing"><i></i><i></i><i></i></div>';sc.appendChild(tp);sc.scrollTop=sc.scrollHeight;
+    try{
+      const pm=parseModel(modelSel.value||selectedModel);
+      const payload={message:text,history:st.history.slice(0,-1)};
+      if(pm.provider){payload.provider=pm.provider;if(pm.model)payload.model=pm.model;}
+      const d=await api('/api/chat',{method:'POST',body:JSON.stringify(payload)});
+      const reply=(d&&(d.reply!=null?d.reply:d.content))||'(no reply)';
+      tp.remove();st.history.push({role:'assistant',content:reply});addNode('assistant',reply);
+    }catch(e){tp.remove();addNode('assistant','⚠ '+e.message);}
+    finally{st.awaiting=false;send.disabled=false;ta.focus();}
+  }
+  function open(){build();openState=true;app.classList.add('dual');
+    try{modelSel.innerHTML=$('#modelSel').innerHTML;modelSel.value=$('#modelSel').value;}catch(e){}
+    Brain.relayout&&setTimeout(()=>{try{Brain.relayout();}catch(e){}},50);ta&&ta.focus();}
+  function close(){openState=false;app.classList.remove('dual');
+    setTimeout(()=>{try{Brain.relayout();}catch(e){}},50);}
+  return {open,close,toggle(){openState?close():open();},isOpen:()=>openState};
+})();
+
+/* ============ TOP-BAR AGENT NAV ============ */
+/* Quant Bot / Jewelry Bot / Socials Agent buttons. Each opens a dedicated
+   panel. Zeb builds these agents' real dashboards himself at runtime and
+   registers a URL for each via POST /api/agents/<id> — no redeploy needed.
+   Until an agent registers a dashboard, its panel shows a "not built yet"
+   status. The button turns "live" (cyan dot) once a dashboard is registered. */
+const AgentNav=(function(){
+  const AGENTS=[
+    {id:'quant',   label:'Quant Bot',     ic:'&#9650;'},
+    {id:'jewelry', label:'Jewelry Bot',   ic:'&#9671;'},
+    {id:'socials', label:'Socials Agent', ic:'&#9741;'},
+  ];
+  let registry={}; // id -> {dashboard_url, status, updated}
+  const navEl=()=>document.getElementById('agentNav');
+  function render(){
+    const n=navEl(); if(!n)return; n.innerHTML='';
+    AGENTS.forEach(a=>{
+      const b=el('button','anav');b.dataset.id=a.id;
+      const live=registry[a.id]&&registry[a.id].dashboard_url?' live':'';
+      b.className='anav'+live;
+      b.innerHTML='<span class="adot"></span><span class="ic" style="font-size:11px">'+a.ic+'</span><span class="alabel">'+a.label+'</span>';
+      b.onclick=()=>open(a.id);
+      n.appendChild(b);
+    });
+  }
+  function setActiveBtn(id){document.querySelectorAll('#agentNav .anav').forEach(x=>x.classList.toggle('active',x.dataset.id===id));}
+  function open(id){
+    const a=AGENTS.find(x=>x.id===id)||{label:id};
+    setActiveBtn(id);
+    showData(a.label);
+    const body=$('#dataBody');
+    const reg=registry[id];
+    if(reg&&reg.dashboard_url){
+      body.innerHTML='<iframe class="agent-frame" src="'+escHtml(reg.dashboard_url)+'"></iframe>';
+    }else{
+      body.innerHTML='<div class="agent-empty">'
+        +'<div class="abadge">Awaiting Zeb</div>'
+        +'<h3>'+escHtml(a.label)+' dashboard not built yet</h3>'
+        +'<p>This is a placeholder. Once Zeb is running on the VPS he builds this '
+        +"agent and its dashboard himself, then registers it here (POST /api/agents/"+id+') '
+        +'— it will appear on this button automatically, with no redeploy.</p>'
+        +'<p style="font-family:var(--mono);font-size:11px;color:var(--dim2);margin-top:14px">status: '
+        +escHtml((reg&&reg.status)||'not started')+'</p></div>';
+    }
+  }
+  async function refresh(){
+    try{const d=await api('/api/agents');registry={};(d&&d.agents||[]).forEach(a=>{registry[a.id]=a;});render();}
+    catch(e){/* endpoint optional; buttons still render as placeholders */}
+  }
+  function init(){render();refresh();}
+  // Restore chat view (and clear active agent button) when returning to chat.
+  const _showChat=window.showChat;
+  return {init,refresh,clear(){setActiveBtn(null);}};
+})();
+// Clear the active agent highlight whenever we go back to the chat pane.
+(function(){const _b=$('#backBtn');if(_b){const prev=_b.onclick;_b.onclick=()=>{AgentNav.clear&&AgentNav.clear();if(prev)prev();};}})();
 </script>
 
 <script>
