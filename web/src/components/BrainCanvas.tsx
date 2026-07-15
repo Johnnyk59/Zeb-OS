@@ -11,13 +11,9 @@
  * brain visibly "thinks harder" while the agent is working. The animation
  * pauses when the tab is hidden or the canvas leaves the viewport.
  *
- * Visual language (upgraded pass):
- *   • ~64 neurons on a denser synapse graph — a real, alive-feeling network.
- *   • No flat blue wash — every glow is additive light on transparency, so
- *     the brain reads as luminous energy over the chat, not a colored box.
- *   • Two-layer neuron bloom (wide soft halo + tight bright core) plus a
- *     hot white pinpoint on firing for crisp "spark" lighting.
- *   • Faster rotation, drift and signal travel; smoother energy easing.
+ * Visual language: a still, readable cortex at rest that turns into a layered
+ * signal storm under load. Motion, firing, trails and bloom all scale from the
+ * same energy value so harder tasks visibly demand more of the brain.
  */
 import { useEffect, useRef } from "react";
 
@@ -48,7 +44,7 @@ function rnd(a: number, b: number): number {
 }
 
 export function BrainCanvas({
-  energy = 0.05,
+  energy = 0,
   className,
 }: {
   /** Target activity level 0..1 — eased internally, safe to change often. */
@@ -74,17 +70,15 @@ export function BrainCanvas({
     let tGlobal = 0;
     let last = 0;
     let fireAcc = 0;
-    let cur = 0.05;
+    let cur = 0;
     let raf = 0;
     let running = true;
     let visible = true;
 
     // --- topology -----------------------------------------------------
-    // A dense cortex: ~96 neurons make the brain read as a living network
-    // rather than a lattice, still holding 60fps (per-frame cost is gradients,
-    // capped by the depth sort + signal ceiling). This is a deliberate, large
-    // step up from the original sparse 24-node version.
-    const N = 96;
+    // A dense two-hemisphere cortex. The centre cleft and lobe modulation make
+    // the silhouette read as a brain rather than a generic glowing sphere.
+    const N = 132;
     const nodes: Node[] = [];
     const GA = Math.PI * (3 - Math.sqrt(5));
     for (let i = 0; i < N; i++) {
@@ -94,10 +88,12 @@ export function BrainCanvas({
       let x = Math.cos(th) * r;
       let z = Math.sin(th) * r;
       let yy = y;
-      const k = rnd(0.82, 1.0);
-      x *= 1.18 * k;
-      yy *= 0.86 * k;
-      z *= 0.92 * k;
+      const lobe = 0.92 + 0.08 * Math.cos(yy * Math.PI * 1.6);
+      const k = rnd(0.84, 1.0) * lobe;
+      x *= 1.22 * k;
+      yy *= 0.88 * k;
+      z *= 0.94 * k;
+      x += x >= 0 ? 0.055 : -0.055;
       x += rnd(-0.045, 0.045);
       yy += rnd(-0.045, 0.045);
       z += rnd(-0.045, 0.045);
@@ -112,7 +108,7 @@ export function BrainCanvas({
     // instead of the whole hemisphere.
     for (let i = 0; i < N; i++)
       for (let j = i + 1; j < N; j++) {
-        if (D3(nodes[i], nodes[j]) < 0.44) edges.push([i, j]);
+        if (D3(nodes[i], nodes[j]) < 0.39) edges.push([i, j]);
       }
     // Guarantee no orphan neurons: wire each to its two nearest peers.
     for (let i = 0; i < N; i++) {
@@ -124,7 +120,7 @@ export function BrainCanvas({
       }
     }
     const signals: Signal[] = [];
-    const SIGNAL_CAP = 340;
+    const SIGNAL_CAP = 480;
 
     const emitFrom = (idx: number) => {
       nodes[idx].fire = 1;
@@ -133,7 +129,8 @@ export function BrainCanvas({
         if (e[0] === idx) to = e[1];
         else if (e[1] === idx) to = e[0];
         else continue;
-        if (signals.length < SIGNAL_CAP && Math.random() < 0.6) signals.push({ from: idx, to, t: 0 });
+        if (signals.length < SIGNAL_CAP && Math.random() < 0.64)
+          signals.push({ from: idx, to, t: 0 });
       }
     };
 
@@ -150,42 +147,48 @@ export function BrainCanvas({
     };
 
     const step = (dt: number) => {
-      // Snappy energy easing so thinking bursts feel instant.
-      cur += (energyRef.current - cur) * Math.min(1, dt * 3.2);
-      // Faster spin: idle drifts, working whirls hard.
-      rot += dt * (0.09 + cur * 0.58);
-      tGlobal += dt;
-      for (const n of nodes) {
-        const w = tGlobal * 0.85 + n.drift;
-        // Livelier micro-motion so the whole mesh visibly breathes.
-        n.x = n.bx + Math.sin(w) * 0.042;
-        n.y = n.by + Math.cos(w * 0.9) * 0.042;
-        n.z = n.bz + Math.sin(w * 1.1) * 0.042;
-        n.fire = Math.max(0, n.fire - dt * 1.9);
+      // Wake quickly, settle deliberately. Below the threshold the topology is
+      // truly still: no rotation, drift, spontaneous fire or breathing pulse.
+      const target = Math.max(0, Math.min(1, energyRef.current));
+      cur += (target - cur) * Math.min(1, dt * (target > cur ? 4.8 : 2.4));
+      const motion = cur < 0.018 ? 0 : Math.pow(cur, 1.18);
+      if (target === 0 && motion === 0) {
+        signals.length = 0;
+        fireAcc = 0;
       }
-      // High spontaneous firing rate — the net is always alive, and storms
-      // under load.
-      fireAcc += dt * (1.1 + cur * 11.0);
+      rot += dt * motion * (0.22 + cur * 0.92);
+      tGlobal += dt * motion * (0.55 + cur * 1.25);
+      for (const n of nodes) {
+        const w = tGlobal * 0.9 + n.drift;
+        const amplitude = motion * (0.012 + cur * 0.05);
+        n.x = n.bx + Math.sin(w) * amplitude;
+        n.y = n.by + Math.cos(w * 0.9) * amplitude;
+        n.z = n.bz + Math.sin(w * 1.1) * amplitude;
+        n.fire = Math.max(0, n.fire - dt * (1.25 + cur));
+      }
+      // No idle firing. Easy work creates a measured current; difficult work
+      // produces dense cascades across both hemispheres.
+      fireAcc += dt * Math.pow(cur, 1.45) * 17;
       while (fireAcc >= 1) {
         fireAcc -= 1;
         emitFrom((Math.random() * nodes.length) | 0);
       }
       // Signals travel fast and chain readily → a cascading, electric net.
-      const speed = 0.95 + cur * 3.1;
+      const speed = 0.6 + cur * 4.1;
       for (let i = signals.length - 1; i >= 0; i--) {
         const s = signals[i];
         s.t += dt * speed;
         if (s.t >= 1) {
           nodes[s.to].fire = Math.min(1, nodes[s.to].fire + 0.8);
-          if (Math.random() < 0.34 + cur * 0.45) emitFrom(s.to);
+          if (Math.random() < 0.16 + cur * 0.62) emitFrom(s.to);
           signals.splice(i, 1);
         }
       }
     };
 
-    // Neuron teal + signal violet. No blue core wash — light only.
-    const NC: [number, number, number] = [64, 240, 220];
-    const SC: [number, number, number] = [168, 132, 255];
+    // Teal cortex, warm signal current and white-hot firing points.
+    const NC: [number, number, number] = [76, 239, 217];
+    const SC: [number, number, number] = [255, 184, 92];
 
     const draw = () => {
       // Pull existing pixels toward alpha 0 → comet trails without a
@@ -195,6 +198,19 @@ export function BrainCanvas({
       ctx.fillStyle = `rgba(0,0,0,${0.22 + 0.16 * (1 - cur)})`;
       ctx.fillRect(0, 0, W, H);
       ctx.globalCompositeOperation = "lighter";
+
+      // A soft field appears only while working, giving high effort a sense of
+      // contained power without painting a flat box behind the canvas.
+      if (cur > 0.03) {
+        const field = ctx.createRadialGradient(CX, CY, 0, CX, CY, scale * 1.28);
+        field.addColorStop(0, `rgba(${NC[0]},${NC[1]},${NC[2]},${cur * 0.055})`);
+        field.addColorStop(0.55, `rgba(${SC[0]},${SC[1]},${SC[2]},${cur * 0.018})`);
+        field.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = field;
+        ctx.beginPath();
+        ctx.arc(CX, CY, scale * 1.28, 0, 7);
+        ctx.fill();
+      }
 
       const P = nodes.map((n, i) => {
         const p = project(n) as ReturnType<typeof project> & {
@@ -216,7 +232,7 @@ export function BrainCanvas({
         const b = P[e[1]];
         const dep = (a.depth + b.depth) / 2;
         const heat = Math.max(a.fire, b.fire);
-        const al = (0.05 + cur * 0.2 + heat * 0.28) * (0.42 + 0.58 * ((dep + 1) / 2));
+        const al = (0.035 + cur * 0.24 + heat * 0.3) * (0.42 + 0.58 * ((dep + 1) / 2));
         ctx.strokeStyle = `rgba(${NC[0]},${NC[1]},${NC[2]},${al})`;
         ctx.lineWidth = Math.max(0.4, scale * (0.006 + heat * 0.006) * a.persp);
         ctx.beginPath();
@@ -225,7 +241,7 @@ export function BrainCanvas({
         ctx.stroke();
       }
 
-      // Travelling signals — a soft violet comet with a hot core.
+      // Travelling signals — a warm amber comet with a hot core.
       for (const s of signals) {
         const a = P[s.from];
         const b = P[s.to];
@@ -248,11 +264,11 @@ export function BrainCanvas({
       // Neurons — two-layer bloom (wide halo + tight core) plus a hot white
       // pinpoint while firing, drawn back-to-front for depth.
       for (const p of order) {
-        const pulse = 0.5 + 0.5 * Math.sin(tGlobal * (0.8 + cur * 1.4) + p.seed * 6.28);
+        const pulse = cur * (0.5 + 0.5 * Math.sin(tGlobal * (0.8 + cur * 1.8) + p.seed * 6.28));
         const depthN = (p.depth + 1) / 2;
         const base = scale * (0.008 + 0.013 * depthN) * p.persp;
         const rr = base * (1 + pulse * 0.2 + p.fire * 0.95 + cur * 0.28);
-        const bright = Math.min(1, 0.36 + p.fire * 0.55 + cur * 0.2 + depthN * 0.15);
+        const bright = Math.min(1, 0.22 + p.fire * 0.62 + cur * 0.3 + depthN * 0.13);
 
         // Wide soft halo — a touch larger for a brighter bloom.
         const halo = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, rr * 4.6);

@@ -1742,7 +1742,7 @@ const DualChat=(function(){
 })();
 
 /* ============ TOP-BAR AGENT NAV ============ */
-/* Quant Bot / Jewelry Bot / Socials Agent buttons. Each opens a dedicated
+/* Quant Bot / Socials Agent / Jew buttons. Each opens a dedicated
    panel. Zeb builds these agents' real dashboards himself at runtime and
    registers a URL for each via POST /api/agents/<id> — no redeploy needed.
    Until an agent registers a dashboard, its panel shows a "not built yet"
@@ -1750,8 +1750,8 @@ const DualChat=(function(){
 const AgentNav=(function(){
   const AGENTS=[
     {id:'quant',   label:'Quant Bot',     ic:'&#9650;'},
-    {id:'jewelry', label:'Jewelry Bot',   ic:'&#9671;'},
     {id:'socials', label:'Socials Agent', ic:'&#9741;'},
+    {id:'jewelry', label:'Jew',           ic:'&#9671;'},
   ];
   let registry={}; // id -> {dashboard_url, status, updated}
   const navEl=()=>document.getElementById('agentNav');

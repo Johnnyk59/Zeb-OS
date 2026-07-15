@@ -67,7 +67,7 @@ TEMPLATES = {
         "model": "local",
     },
     "jewelry": {
-        "label": "Jewelry Bot",
+        "label": "Jew",
         "purpose": "Jewelry catalog, pricing and listing management.",
         "suggested_skills": ["image-tag", "price-lookup", "listing-writer"],
         "model": "local",

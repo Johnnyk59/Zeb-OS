@@ -474,7 +474,7 @@ class AgentStore:
     """Registry of Zeb's sub-agents and the dashboards Zeb builds for them.
 
     This is the honest core of the "self-wiring top-bar buttons" feature. The
-    dashboard shows fixed buttons (Quant Bot, Jewelry Bot, Socials Agent). When
+    dashboard shows fixed buttons (Quant Bot, Socials Agent, Jew). When
     Zeb — running on the VPS — builds one of these agents and stands up a
     dashboard for it, Zeb calls ``POST /api/agents/<id>`` with the dashboard URL
     and a status string. The running dashboard polls ``GET /api/agents`` and
@@ -489,8 +489,8 @@ class AgentStore:
     # The three seed agents the top bar ships with. Zeb can register more ids.
     _SEED = {
         "quant": "Quant Bot",
-        "jewelry": "Jewelry Bot",
         "socials": "Socials Agent",
+        "jewelry": "Jew",
     }
 
     def __init__(self, base_dir: Path | None = None) -> None:
