@@ -17,6 +17,7 @@ export type GatewayEventName =
   | 'sudo.request'
   | 'secret.request'
   | 'background.complete'
+  | 'shared.context'
   | 'error'
   | 'skin.changed'
   | (string & {})

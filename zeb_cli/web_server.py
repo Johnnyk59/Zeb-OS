@@ -94,7 +94,7 @@ try:
         WebSocket, WebSocketDisconnect,
     )
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 except ImportError:
@@ -109,7 +109,7 @@ except ImportError:
             WebSocket, WebSocketDisconnect,
         )
         from fastapi.middleware.cors import CORSMiddleware
-        from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+        from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
         from fastapi.staticfiles import StaticFiles
         from pydantic import BaseModel
     except Exception:
@@ -2933,6 +2933,142 @@ async def put_dashboard_self(request: Request):
         return DashboardStateStore().update(body)
 
     return await asyncio.to_thread(_put)
+
+
+# ---------------------------------------------------------------------------
+# Runtime agents and shared perception
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/agents")
+async def get_runtime_agents():
+    """Return seed agents plus any dashboards Zeb registered at runtime."""
+
+    def _get() -> dict[str, Any]:
+        try:
+            from zeb_chat.stores import AgentStore
+
+            return {"agents": AgentStore().list()}
+        except Exception as exc:
+            return {"agents": [], "error": str(exc)}
+
+    return await asyncio.to_thread(_get)
+
+
+@app.post("/api/agents/build")
+async def build_runtime_agent(request: Request):
+    """Use the hardwired agent builder and wire the result to the top bar."""
+    body = await request.json()
+    if not isinstance(body, dict) or not str(body.get("id") or "").strip():
+        raise HTTPException(status_code=400, detail="id is required")
+
+    def _build() -> dict[str, Any]:
+        from zeb_autonomy.agent_builder import build_agent
+
+        agent_id = str(body["id"]).strip()
+        template = str(body.get("template") or "").strip() or None
+        overrides = body.get("overrides") if isinstance(body.get("overrides"), dict) else {}
+        return {"ok": True, "agent": build_agent(agent_id, template, **overrides)}
+
+    return await asyncio.to_thread(_build)
+
+
+@app.post("/api/agents/{agent_id}")
+async def register_runtime_agent(agent_id: str, request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be an object")
+
+    def _register() -> dict[str, Any]:
+        from zeb_chat.stores import AgentStore
+
+        return {"ok": True, "agent": AgentStore().register(agent_id, body)}
+
+    return await asyncio.to_thread(_register)
+
+
+@app.get("/api/context")
+async def get_shared_context(limit: int = 50):
+    def _get() -> dict[str, Any]:
+        try:
+            from zeb_chat.stores import SharedContextStore
+
+            return {"context": SharedContextStore().recent(limit)}
+        except Exception as exc:
+            return {"context": [], "error": str(exc)}
+
+    return await asyncio.to_thread(_get)
+
+
+# ---------------------------------------------------------------------------
+# Instagram perception webhook
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/instagram/webhook")
+async def instagram_webhook_verify(request: Request):
+    from zeb_autonomy.instagram_ingest import verify_webhook_token
+
+    if (
+        request.query_params.get("hub.mode") == "subscribe"
+        and verify_webhook_token(request.query_params.get("hub.verify_token", ""))
+    ):
+        return PlainTextResponse(request.query_params.get("hub.challenge", ""))
+    raise HTTPException(status_code=403, detail="Instagram webhook verification failed")
+
+
+@app.post("/api/instagram/webhook")
+async def instagram_webhook_receive(request: Request):
+    raw = await request.body()
+    from zeb_autonomy.instagram_ingest import ingest_webhook, verify_signature
+
+    if not verify_signature(raw, request.headers.get("x-hub-signature-256")):
+        raise HTTPException(status_code=403, detail="invalid Instagram webhook signature")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="invalid webhook JSON") from exc
+    items = await asyncio.to_thread(ingest_webhook, payload)
+    return {"ok": True, "ingested": len(items)}
+
+
+@app.post("/api/instagram/reply")
+async def instagram_reply(request: Request):
+    """Send a credentials-gated reply to an Instagram messaging recipient."""
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be an object")
+    recipient_id = str(body.get("recipient_id") or "").strip()
+    message = str(body.get("text") or "").strip()
+    if not recipient_id or not message:
+        raise HTTPException(status_code=400, detail="recipient_id and text are required")
+
+    from zeb_autonomy.instagram_ingest import send_reply
+
+    result = await asyncio.to_thread(send_reply, recipient_id, message)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=502,
+            detail=result.get("error", "Instagram reply failed"),
+        )
+    return result
+
+
+@app.get("/api/instagram/status")
+async def instagram_status():
+    from zeb_autonomy.instagram_ingest import status
+
+    return await asyncio.to_thread(status)
+
+
+@app.get("/api/instagram/inbox")
+async def instagram_inbox():
+    def _read() -> dict[str, Any]:
+        from zeb_autonomy.instagram_ingest import _read_inbox
+
+        return {"items": _read_inbox()}
+
+    return await asyncio.to_thread(_read)
 
 
 @app.get("/api/diagnose")

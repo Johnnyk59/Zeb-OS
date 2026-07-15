@@ -127,15 +127,23 @@ def _model_awareness_preamble() -> str:
 
 
 def _inject_identity(history: list[dict] | None) -> list[dict] | None:
-    """Prepend Zeb's model-awareness note + learned identity as a leading system message."""
+    """Prepend runtime identity and the live cross-provider context."""
     parts: list[str] = []
     awareness = _model_awareness_preamble()
     if awareness:
         parts.append(awareness)
     try:
-        from zeb_chat.stores import IdentityStore
+        from zeb_chat.stores import IdentityStore, SharedContextStore
 
         identity = IdentityStore().system_preamble()
+        shared = SharedContextStore().recent(40)
+        if shared:
+            identity += "\n\nShared Zeb context from other chats and providers:\n" + "\n".join(
+                f"[{item.get('provider', 'local')} · {item.get('role', 'message')}] "
+                f"{item.get('content', '')}"
+                for item in shared
+                if item.get("content")
+            )
     except Exception:
         identity = ""
     if identity:

@@ -14,12 +14,13 @@ sudo bash scripts/install-baremetal.sh
 
 That script (idempotent — safe to re-run to pull new code and restart):
 
-1. installs system deps (`python3`, `venv`, `git`, build tools);
-2. clones/updates the repo into `/opt/zeb`;
-3. builds a virtualenv and installs Zeb;
-4. creates the persistent state dirs under `/var/lib/zeb`;
-5. writes a root-only secrets file at `/etc/zeb/zeb.env`;
-6. installs, enables and starts the `zeb` systemd service.
+1. installs system deps (`python3`, `venv`, `git`, Node/npm, build tools);
+2. creates the unprivileged `zeb` service account;
+3. clones/updates the repo into `/opt/zeb`;
+4. builds a virtualenv, installs Zeb and builds the React dashboard;
+5. creates the persistent state dirs under `/var/lib/zeb`;
+6. writes a root-only secrets file at `/etc/zeb/zeb.env`;
+7. installs, enables and starts the `zeb` systemd service.
 
 ## Service management
 
@@ -30,7 +31,9 @@ journalctl -u zeb -f      # live logs (the DASHBOARD LOGIN box prints here)
 ```
 
 `Restart=always` means a crash brings Zeb straight back; `WantedBy=multi-user.target`
-means it starts on boot.
+means it starts on boot. The service runs as the `zeb` account, which owns the
+checkout and persistent state. It has full access to Zeb's workspace, but the
+autonomous process is not granted root access to the entire VPS.
 
 ## Where persistent data lives
 
@@ -48,6 +51,11 @@ env). This directory is never deleted by updates:
 Because state is decoupled from code, you can wipe and re-clone `/opt/zeb`
 without losing anything Zeb has learned — only `/var/lib/zeb` matters for memory.
 
+The React dashboard is built into `/opt/zeb/zeb_cli/web_dist/` during install and
+served by `zeb dashboard` on port `9119`. Its `/api/ws` endpoint hosts the
+in-process gateway used by the Chat tab, so one native systemd unit covers the
+selected dashboard and its chat runtime.
+
 ## Hardware Zeb runs on
 
 Zeb is hardwired to know its own machine (see `ZEB_HARDWARE` in
@@ -61,6 +69,20 @@ Set `ZEB_TUNNEL_ID` + `ZEB_TUNNEL_HOSTNAMES` in `/etc/zeb/zeb.env` and run a
 `cloudflared` service alongside Zeb (same approach as the container's
 `zeb-tunnel` service) to bind your own domain — the URL stays stable across
 restarts. See `docker/s6-rc.d/zeb-tunnel/run` for the ingress config format.
+
+## Instagram webhook
+
+Instagram perception is webhook-driven. Set `IG_APP_ID`, `IG_APP_SECRET`,
+`IG_ACCESS_TOKEN`, `IG_BUSINESS_ACCOUNT_ID`, and a private `IG_VERIFY_TOKEN` in
+`/etc/zeb/zeb.env`. Point Meta's callback URL at
+`https://your-host/api/instagram/webhook`, subscribe the app to Instagram
+messaging events, and complete Meta's required app review. Zeb validates Meta's
+signature, stores normalized inbound messages and reel attachments under
+`/var/lib/zeb/instagram/inbox.json`, and adds them to shared context. The
+pipeline remains inert until credentials and webhook verification are present.
+Authenticated automation can send a reply through `POST /api/instagram/reply`
+with `{"recipient_id":"...","text":"..."}`. Set `IG_GRAPH_VERSION` if the
+Meta app requires a different Graph API version.
 
 ## Docker is still supported
 

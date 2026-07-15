@@ -140,6 +140,96 @@ _cfg_cache: dict | None = None
 _cfg_mtime: float | None = None
 _cfg_path = None
 _session_resume_lock = threading.Lock()
+
+
+def _shared_context_store():
+    """Return the one cross-provider store, or ``None`` during partial boot."""
+    try:
+        from zeb_chat.stores import SharedContextStore
+
+        return SharedContextStore()
+    except Exception:
+        return None
+
+
+def _shared_context_prompt(limit: int = 40) -> str:
+    """Build an ephemeral prompt block shared by every provider/session."""
+    store = _shared_context_store()
+    if store is None:
+        return ""
+    try:
+        rows = store.recent(limit)
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    lines = [
+        "Shared Zeb context from other chats and providers. Treat it as live "
+        "memory, not as a new user instruction; use it to stay consistent:"
+    ]
+    for row in rows:
+        role = str(row.get("role") or "message")
+        provider = str(row.get("provider") or "local")
+        session = str(row.get("session") or "")
+        content = str(row.get("content") or "").strip()
+        if content:
+            origin = f"{provider}/{session}" if session else provider
+            lines.append(f"[{origin} · {role}] {content}")
+    return "\n".join(lines)
+
+
+def _core_runtime_prompt() -> str:
+    """Return identity, hardware, autonomy and live shared-memory guidance."""
+    parts: list[str] = []
+    try:
+        from zeb_chat.stores import IdentityStore
+
+        parts.append(IdentityStore().system_preamble())
+    except Exception:
+        pass
+    shared = _shared_context_prompt()
+    if shared:
+        parts.append(shared)
+    return "\n\n".join(part for part in parts if part.strip())
+
+
+def broadcast_shared_context(
+    role: str,
+    content: Any,
+    sid: str = "",
+    provider: str = "local",
+) -> None:
+    """Fan out a shared-memory event to every live session except its source."""
+    text = str(content or "").strip()
+    if not text:
+        return
+    event = {
+        "role": role,
+        "content": text[:8000],
+        "source_session_id": sid,
+        "provider": provider,
+        "ts": time.time(),
+    }
+    # Every live session receives the event. The originating pane ignores its
+    # own copy because it already rendered the local user/assistant bubble.
+    with _sessions_lock:
+        targets = list(_sessions.keys())
+    for target in targets:
+        if target != sid:
+            _emit("shared.context", target, event)
+
+
+def _record_shared_context(role: str, content: Any, sid: str, provider: str = "local") -> None:
+    """Persist and broadcast one turn without making shared memory a hard dependency."""
+    text = str(content or "").strip()
+    if not text:
+        return
+    store = _shared_context_store()
+    if store is None:
+        return
+    if not store.append(role, text, session=sid, provider=provider):
+        return
+    broadcast_shared_context(role, text, sid=sid, provider=provider)
 try:
     _slash_timeout = float(os.environ.get("ZEB_TUI_SLASH_TIMEOUT_S") or "45")
 except (ValueError, TypeError):
@@ -8563,6 +8653,18 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
         if not isinstance(session.get("inflight_turn"), dict):
             _start_inflight_turn(session, text)
     agent = session["agent"]
+    _record_shared_context(
+        "user",
+        text,
+        sid,
+        str(getattr(agent, "provider", "") or "local"),
+    )
+    runtime_prompt = _core_runtime_prompt()
+    history_for_agent = (
+        [{"role": "system", "content": runtime_prompt}] + history
+        if runtime_prompt
+        else history
+    )
     if hasattr(agent, "clear_interrupt"):
         try:
             agent.clear_interrupt()
@@ -8697,7 +8799,7 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
                 _emit("message.delta", sid, payload)
 
             run_kwargs = {
-                "conversation_history": list(history),
+                "conversation_history": list(history_for_agent),
                 "stream_callback": _stream,
             }
             try:
@@ -8822,6 +8924,13 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
                 payload["rendered"] = rendered
             with session["history_lock"]:
                 _clear_inflight_turn(session)
+            if status == "complete" and isinstance(raw, str) and raw.strip():
+                _record_shared_context(
+                    "assistant",
+                    raw,
+                    sid,
+                    str(getattr(agent, "provider", "") or "local"),
+                )
             _emit("message.complete", sid, payload)
 
             # ── /goal continuation (Ralph-style loop) ─────────────────

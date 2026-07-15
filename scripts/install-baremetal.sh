@@ -16,11 +16,13 @@ ZEB_HOME="${ZEB_HOME:-/var/lib/zeb}"
 ZEB_ENV_FILE="${ZEB_ENV_FILE:-/etc/zeb/zeb.env}"
 REPO_URL="${REPO_URL:-https://github.com/Johnnyk59/Zeb-OS.git}"
 BRANCH="${BRANCH:-main}"
+ZEB_USER="${ZEB_USER:-zeb}"
 
 echo "==> Zeb bare-metal install"
 echo "    code:  $ZEB_CODE_DIR"
 echo "    state: $ZEB_HOME  (persistent)"
 echo "    env:   $ZEB_ENV_FILE"
+echo "    user:  $ZEB_USER"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "!! Please run as root (sudo)." >&2
@@ -29,7 +31,13 @@ fi
 
 # 1. System deps -----------------------------------------------------------
 apt-get update -y
-apt-get install -y python3 python3-venv python3-pip git curl build-essential
+apt-get install -y python3 python3-venv python3-pip git curl build-essential nodejs npm
+
+# Keep the autonomous service out of root while giving it ownership of its
+# checkout and persistent state. It can modify Zeb, but not the whole OS.
+if ! id -u "$ZEB_USER" >/dev/null 2>&1; then
+  useradd --system --home-dir "$ZEB_HOME" --create-home --shell /usr/sbin/nologin "$ZEB_USER"
+fi
 
 # 2. Code ------------------------------------------------------------------
 if [ -d "$ZEB_CODE_DIR/.git" ]; then
@@ -52,6 +60,13 @@ fi
 "$ZEB_CODE_DIR/.venv/bin/pip" install -e "$ZEB_CODE_DIR" \
   || "$ZEB_CODE_DIR/.venv/bin/pip" install fastapi "uvicorn[standard]" huggingface_hub
 
+# Build the selected React dashboard once. The systemd service uses
+# --skip-build so a restart never mutates the checkout or needs npm access.
+if [ -f "$ZEB_CODE_DIR/package-lock.json" ]; then
+  npm --prefix "$ZEB_CODE_DIR" install --workspace web --ignore-scripts
+  npm --prefix "$ZEB_CODE_DIR" run build --workspace web
+fi
+
 # 4. Persistent state dirs -------------------------------------------------
 mkdir -p "$ZEB_HOME/chat" "$ZEB_HOME/agents" "$ZEB_HOME/skills" "$ZEB_HOME/instagram"
 mkdir -p "$(dirname "$ZEB_ENV_FILE")"
@@ -70,10 +85,15 @@ if [ ! -f "$ZEB_ENV_FILE" ]; then
 # IG_APP_SECRET=
 # IG_ACCESS_TOKEN=
 # IG_BUSINESS_ACCOUNT_ID=
+# IG_VERIFY_TOKEN=use-a-long-random-string
+# IG_GRAPH_VERSION=v20.0
 EOF
   chmod 600 "$ZEB_ENV_FILE"
   echo "==> Wrote template $ZEB_ENV_FILE (chmod 600) — edit it to add keys."
 fi
+
+chown -R "$ZEB_USER:$ZEB_USER" "$ZEB_CODE_DIR" "$ZEB_HOME"
+chmod 700 "$ZEB_HOME"
 
 # 5. systemd unit ----------------------------------------------------------
 install -m 644 "$ZEB_CODE_DIR/packaging/systemd/zeb.service" /etc/systemd/system/zeb.service
@@ -81,6 +101,8 @@ install -m 644 "$ZEB_CODE_DIR/packaging/systemd/zeb.service" /etc/systemd/system
 sed -i "s#WorkingDirectory=/opt/zeb#WorkingDirectory=$ZEB_CODE_DIR#" /etc/systemd/system/zeb.service
 sed -i "s#ZEB_HOME=/var/lib/zeb#ZEB_HOME=$ZEB_HOME#" /etc/systemd/system/zeb.service
 sed -i "s#ExecStart=/opt/zeb/.venv/bin/python#ExecStart=$ZEB_CODE_DIR/.venv/bin/python#" /etc/systemd/system/zeb.service
+sed -i "s#^User=zeb#User=$ZEB_USER#" /etc/systemd/system/zeb.service
+sed -i "s#^Group=zeb#Group=$ZEB_USER#" /etc/systemd/system/zeb.service
 
 systemctl daemon-reload
 systemctl enable zeb.service
