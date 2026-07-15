@@ -14,9 +14,9 @@
  * Sidebar visible → brain floats in the top-right corner.
  * Sidebar hidden  → 50/50 split: chat left half, brain right half.
  *
- * The brain's energy tracks agent activity: idle 0.05, waiting/streaming
- * ~0.75, thinking bursts ~0.95 — the same "thinks harder while working"
- * behaviour as the local backbone it visualizes.
+ * The brain's energy tracks agent activity and prompt complexity: it rests
+ * motionless at idle, wakes for work, and becomes a full signal storm for
+ * difficult tasks.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -59,6 +59,34 @@ interface ChatMessage {
 
 let _mid = 0;
 const nextId = () => `m${++_mid}`;
+
+const AGENT_SLOTS = [
+  { id: "quant", label: "Quant Bot" },
+  { id: "socials", label: "Socials Agent" },
+  { id: "jewelry", label: "Jew" },
+] as const;
+
+function estimateTaskIntensity(text: string): number {
+  const normalized = text.toLowerCase();
+  const complexitySignals = [
+    "analyze",
+    "build",
+    "compare",
+    "debug",
+    "design",
+    "investigate",
+    "plan",
+    "research",
+    "review",
+    "strategy",
+  ].filter((term) => normalized.includes(term)).length;
+  const lengthWeight = Math.min(0.34, text.length / 900);
+  const structureWeight = Math.min(
+    0.18,
+    ((text.match(/[\n,:;?]/g) ?? []).length / 18) * 0.18,
+  );
+  return Math.min(1, 0.38 + lengthWeight + structureWeight + complexitySignals * 0.07);
+}
 
 export default function ZebChatPage({
   isActive = true,
@@ -123,6 +151,7 @@ function ChatPane({
   const [nonce, setNonce] = useState(0);
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
+  const [taskIntensity, setTaskIntensity] = useState(0.55);
 
   const gwRef = useRef<GatewayClient | null>(null);
   const sessionIdRef = useRef<string>("");
@@ -200,16 +229,17 @@ function ChatPane({
     return { label: "Idle", dot: "bg-success/70", text: "text-text-secondary" };
   }, [conn, thinking, busy, bgStatus]);
 
-  // Brain energy: thinking beats streaming beats background-learning beats idle.
+  // Brain energy: prompt complexity controls how hard work looks. Idle is a
+  // true zero so the cortex settles completely instead of constantly spinning.
   const energy = thinking
-    ? 0.98
+    ? Math.min(1, 0.78 + taskIntensity * 0.22)
     : busy
-      ? 0.78
+      ? 0.42 + taskIntensity * 0.38
       : bgStatus === "learning"
-        ? 0.5
+        ? 0.46
         : bgStatus === "processing"
-          ? 0.32
-          : 0.06;
+          ? 0.34
+          : 0;
   const split = sidebarCollapsed && showBrain;
 
   // Model label for the top bar (best-effort).
@@ -462,6 +492,7 @@ function ChatPane({
       const gw = gwRef.current;
       if (!text || !gw || conn !== "open" || !sessionIdRef.current) return;
       setInput("");
+      setTaskIntensity(estimateTaskIntensity(text));
       setBusy(true);
       setMessages((msgs) => [
         ...msgs,
@@ -538,12 +569,22 @@ function ChatPane({
     );
   }, [conn, busy, thinking]);
 
+  const agentSlots: AgentRecord[] = AGENT_SLOTS.map((slot) => {
+    const record = agents.find((agent) => agent.id === slot.id);
+    return {
+      id: slot.id,
+      label: slot.label,
+      dashboard_url: record?.dashboard_url ?? "",
+      status: record?.status ?? "awaiting Zeb",
+      updated_at: record?.updated_at,
+    };
+  });
   const selectedAgent = activeAgent
-    ? agents.find((agent) => agent.id === activeAgent) ?? null
+    ? agentSlots.find((agent) => agent.id === activeAgent) ?? null
     : null;
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className="zeb-chat-pane relative flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Brain overlay — removed entirely while two independent chats are open. */}
       {showBrain ? (
         <div
@@ -551,7 +592,7 @@ function ChatPane({
           className={cn(
             "pointer-events-none absolute right-0 top-0 z-10",
             "transition-[width,height] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)]",
-            split ? "h-full w-1/2" : "h-[46%] w-[38%] min-w-72",
+            split ? "h-full w-1/2" : "h-[54%] w-[43%] min-w-80",
           )}
           style={{
             WebkitMaskImage:
@@ -590,31 +631,38 @@ function ChatPane({
       </div> : null}
 
       {/* Top bar — full width, floats above the brain */}
-      <header className="relative z-20 flex h-12 shrink-0 items-center justify-between gap-3 border-b border-current/10 bg-background-base/75 px-4 backdrop-blur-sm">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="font-sans text-display text-sm uppercase tracking-[0.14em] text-midground">
-            Chat
-          </span>
+      <header className="zeb-chat-header relative z-20 flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-current/10 px-3 sm:px-5">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           {statusDot}
-          <nav className="hidden min-w-0 items-center gap-1.5 lg:flex" aria-label="Agent dashboards">
-            {agents
-              .filter((agent) => ["quant", "jewelry", "socials"].includes(agent.id))
-              .map((agent) => (
+          <nav className="scrollbar-none flex min-w-0 flex-1 items-center gap-2 overflow-x-auto" aria-label="Agent dashboards">
+            {agentSlots.map((agent) => {
+              const connected = Boolean(agentDashboardUrl(agent.dashboard_url));
+              return (
                 <button
                   key={agent.id}
                   type="button"
                   onClick={() => setActiveAgent((current) => (current === agent.id ? null : agent.id))}
                   className={cn(
-                    "rounded-[var(--radius)] border px-2 py-1 font-mono text-[0.62rem] uppercase tracking-[0.08em] transition-colors",
+                    "zeb-agent-tab group relative flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-1.5",
+                    "font-mono text-[0.66rem] font-bold uppercase tracking-[0.11em] transition-all duration-300",
                     activeAgent === agent.id
-                      ? "border-[#40e8dc]/60 bg-[#40e8dc]/10 text-[#40e8dc]"
-                      : "border-current/10 text-text-tertiary hover:border-current/25 hover:text-midground",
+                      ? "is-active border-[#58f4df]/65 bg-[#58f4df]/12 text-[#8ffff0]"
+                      : "border-current/10 text-text-secondary hover:border-[#58f4df]/35 hover:text-midground",
                   )}
                   title={`${agent.label}: ${agent.status}`}
                 >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full transition-all duration-300",
+                      connected
+                        ? "bg-[#58f4df] shadow-[0_0_10px_rgba(88,244,223,.9)]"
+                        : "bg-current opacity-35 group-hover:opacity-70",
+                    )}
+                  />
                   {agent.label}
                 </button>
-              ))}
+              );
+            })}
           </nav>
         </div>
         <div className="flex items-center gap-2">
@@ -692,7 +740,7 @@ function ChatPane({
           )}
         >
           {selectedAgent ? (
-            <div className="flex min-h-[28rem] w-full flex-col gap-3 rounded-[var(--radius)] border border-current/10 bg-midground/[0.03] p-4">
+            <div className="zeb-agent-stage flex min-h-[28rem] w-full flex-col gap-3 rounded-[var(--radius)] border border-current/10 bg-midground/[0.03] p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="font-sans text-sm uppercase tracking-[0.12em] text-midground">
@@ -746,7 +794,7 @@ function ChatPane({
             <div
               key={m.id}
               className={cn(
-                "max-w-full rounded-[var(--radius)] px-4 py-2.5",
+                "zeb-message max-w-full rounded-[var(--radius)] px-4 py-3",
                 m.role === "user"
                   ? "border border-midground/20 bg-midground/10"
                   : m.role === "shared"
@@ -804,7 +852,7 @@ function ChatPane({
       </div>
 
       {/* Composer — full width, floats above the brain */}
-      <footer className="relative z-20 shrink-0 border-t border-current/10 bg-background-base/75 px-4 py-3 backdrop-blur-sm sm:px-6">
+      <footer className="zeb-composer relative z-20 shrink-0 border-t border-current/10 px-4 py-3 sm:px-6">
         <form
           className="flex items-end gap-2"
           onSubmit={(e) => {
@@ -828,8 +876,8 @@ function ChatPane({
             }
             disabled={conn !== "open"}
             className={cn(
-              "max-h-[40vh] min-h-[2.5rem] flex-1 resize-none overflow-y-auto rounded-[var(--radius)]",
-              "border border-current/15 bg-midground/[0.04] px-3.5 py-2.5",
+              "max-h-[40vh] min-h-[2.75rem] flex-1 resize-none overflow-y-auto rounded-xl",
+              "border border-current/15 bg-black/20 px-4 py-3 shadow-inner",
               "font-sans text-sm text-midground placeholder:text-text-tertiary",
               "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground/50",
               "disabled:cursor-not-allowed disabled:opacity-60",

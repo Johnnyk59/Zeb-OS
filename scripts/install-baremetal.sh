@@ -94,7 +94,7 @@ if [ ! -f "$ZEB_ENV_FILE" ]; then
 # --- Cloudflare named tunnel (permanent domain) ---
 # ZEB_TUNNEL_TOKEN=
 # ZEB_TUNNEL_ID=
-# ZEB_TUNNEL_HOSTNAMES=zeb.autos
+ZEB_TUNNEL_HOSTNAMES=smartestmotherfuckerever.zeb.autos
 # --- Instagram (Meta Business app; pipeline stays inert until all set) ---
 # IG_APP_ID=
 # IG_APP_SECRET=

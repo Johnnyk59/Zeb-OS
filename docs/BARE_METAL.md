@@ -74,6 +74,11 @@ for your domain pointing to `http://localhost:9119`. The installer runs
 the journal, and restarts the tunnel automatically. If no token is set, it
 falls back to a temporary `trycloudflare.com` URL.
 
+Johnny's default bare-metal hostname is
+`smartestmotherfuckerever.zeb.autos`. The fresh-install env template sets that
+hostname automatically; Cloudflare still needs a matching Published
+Application route targeting `http://localhost:9119`.
+
 ## Instagram webhook
 
 Instagram perception is webhook-driven. Set `IG_APP_ID`, `IG_APP_SECRET`,
