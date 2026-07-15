@@ -1,0 +1,21 @@
+[Unit]
+Description=Zeb public Cloudflare Tunnel
+After=network-online.target zeb.service
+Wants=network-online.target
+Requires=zeb.service
+
+[Service]
+Type=simple
+User=zeb
+Group=zeb
+EnvironmentFile=/etc/zeb/zeb.env
+Environment=ZEB_ENV_FILE=/etc/zeb/zeb.env
+ExecStart=/usr/local/libexec/zeb-tunnel
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
