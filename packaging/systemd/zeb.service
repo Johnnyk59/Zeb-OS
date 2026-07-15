@@ -19,8 +19,10 @@ Environment=ZEB_HOME=/var/lib/zeb
 Environment=ZEB_DASHBOARD=1
 Environment=ZEB_DASHBOARD_HOST=0.0.0.0
 Environment=ZEB_DASHBOARD_PORT=9119
+Environment=ZEB_ENV_FILE=/etc/zeb/zeb.env
 # Load any secrets (API keys, IG_* creds, tunnel ids) from a root-only file.
 EnvironmentFile=-/etc/zeb/zeb.env
+ExecStartPre=/usr/local/libexec/zeb-login-box
 # Serve the selected React dashboard and its in-process /api/ws gateway.
 ExecStart=/opt/zeb/.venv/bin/python -m zeb_cli.main dashboard --host 0.0.0.0 --port 9119 --no-open --skip-build
 # Auto-restart forever so Zeb comes back on crash and on boot.

@@ -16,11 +16,12 @@ That script (idempotent — safe to re-run to pull new code and restart):
 
 1. installs system deps (`python3`, `venv`, `git`, Node/npm, build tools);
 2. creates the unprivileged `zeb` service account;
-3. clones/updates the repo into `/opt/zeb`;
-4. builds a virtualenv, installs Zeb and builds the React dashboard;
-5. creates the persistent state dirs under `/var/lib/zeb`;
-6. writes a root-only secrets file at `/etc/zeb/zeb.env`;
-7. installs, enables and starts the `zeb` systemd service.
+3. installs `cloudflared` for the public dashboard tunnel;
+4. clones/updates the repo into `/opt/zeb`;
+5. builds a virtualenv, installs Zeb and builds the React dashboard;
+6. creates the persistent state dirs under `/var/lib/zeb`;
+7. writes a root-only secrets file at `/etc/zeb/zeb.env`;
+8. installs, enables and starts the dashboard and tunnel services.
 
 ## Service management
 
@@ -28,6 +29,7 @@ That script (idempotent — safe to re-run to pull new code and restart):
 systemctl status zeb      # is it running?
 systemctl restart zeb     # restart
 journalctl -u zeb -f      # live logs (the DASHBOARD LOGIN box prints here)
+journalctl -u zeb-tunnel -f # public link and tunnel logs
 ```
 
 `Restart=always` means a crash brings Zeb straight back; `WantedBy=multi-user.target`
@@ -65,10 +67,12 @@ connected cloud providers.
 
 ## Permanent public URL (Cloudflare named tunnel)
 
-Set `ZEB_TUNNEL_ID` + `ZEB_TUNNEL_HOSTNAMES` in `/etc/zeb/zeb.env` and run a
-`cloudflared` service alongside Zeb (same approach as the container's
-`zeb-tunnel` service) to bind your own domain — the URL stays stable across
-restarts. See `docker/s6-rc.d/zeb-tunnel/run` for the ingress config format.
+Set `ZEB_TUNNEL_TOKEN` and `ZEB_TUNNEL_HOSTNAMES` in `/etc/zeb/zeb.env`.
+Create a Cloudflare Tunnel, copy its token, and configure a Public Hostname
+for your domain pointing to `http://localhost:9119`. The installer runs
+`cloudflared` as `zeb-tunnel.service`, prints the public URL and credentials in
+the journal, and restarts the tunnel automatically. If no token is set, it
+falls back to a temporary `trycloudflare.com` URL.
 
 ## Instagram webhook
 

@@ -31,7 +31,21 @@ fi
 
 # 1. System deps -----------------------------------------------------------
 apt-get update -y
-apt-get install -y python3 python3-venv python3-pip git curl build-essential nodejs npm
+apt-get install -y python3 python3-venv python3-pip git curl build-essential nodejs npm openssl
+
+# cloudflared is not included in the default Ubuntu repositories on every
+# supported VPS image. Install the official package when it is absent.
+if ! command -v cloudflared >/dev/null 2>&1; then
+  arch="$(dpkg --print-architecture)"
+  case "$arch" in
+    amd64) cloudflared_deb="cloudflared-linux-amd64.deb" ;;
+    arm64) cloudflared_deb="cloudflared-linux-arm64.deb" ;;
+    *) echo "Unsupported CPU architecture for cloudflared: $arch" >&2; exit 1 ;;
+  esac
+  curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/$cloudflared_deb" -o /tmp/cloudflared.deb
+  dpkg -i /tmp/cloudflared.deb
+  rm -f /tmp/cloudflared.deb
+fi
 
 # Keep the autonomous service out of root while giving it ownership of its
 # checkout and persistent state. It can modify Zeb, but not the whole OS.
@@ -78,6 +92,7 @@ if [ ! -f "$ZEB_ENV_FILE" ]; then
 # ZEB_DASHBOARD_BASIC_AUTH_USERNAME=admin
 # ZEB_DASHBOARD_BASIC_AUTH_PASSWORD=
 # --- Cloudflare named tunnel (permanent domain) ---
+# ZEB_TUNNEL_TOKEN=
 # ZEB_TUNNEL_ID=
 # ZEB_TUNNEL_HOSTNAMES=zeb.autos
 # --- Instagram (Meta Business app; pipeline stays inert until all set) ---
@@ -92,21 +107,55 @@ EOF
   echo "==> Wrote template $ZEB_ENV_FILE (chmod 600) — edit it to add keys."
 fi
 
+# Generate credentials once when the operator has not supplied them. They are
+# persisted in the root-only env file and printed on every service start.
+umask 077
+set_env_default() {
+  key="$1"
+  value="$2"
+  if grep -q "^${key}=" "$ZEB_ENV_FILE"; then
+    current="$(sed -n "s/^${key}=//p" "$ZEB_ENV_FILE" | head -n1)"
+    if [ -z "$current" ]; then
+      sed -i "s#^${key}=.*#${key}=${value}#" "$ZEB_ENV_FILE"
+    fi
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$ZEB_ENV_FILE"
+  fi
+}
+set_env_default ZEB_DASHBOARD_BASIC_AUTH_USERNAME admin
+set_env_default ZEB_DASHBOARD_BASIC_AUTH_PASSWORD "$(openssl rand -hex 12)"
+set_env_default ZEB_DASHBOARD_BASIC_AUTH_SECRET "$(openssl rand -hex 32)"
+
 chown -R "$ZEB_USER:$ZEB_USER" "$ZEB_CODE_DIR" "$ZEB_HOME"
 chmod 700 "$ZEB_HOME"
 
 # 5. systemd unit ----------------------------------------------------------
 install -m 644 "$ZEB_CODE_DIR/packaging/systemd/zeb.service" /etc/systemd/system/zeb.service
+install -m 644 "$ZEB_CODE_DIR/packaging/systemd/zeb-tunnel.service" /etc/systemd/system/zeb-tunnel.service
+install -m 755 "$ZEB_CODE_DIR/scripts/baremetal-login-box.sh" /usr/local/libexec/zeb-login-box
+install -m 755 "$ZEB_CODE_DIR/scripts/baremetal-tunnel.sh" /usr/local/libexec/zeb-tunnel
 # Point the unit at the chosen paths.
 sed -i "s#WorkingDirectory=/opt/zeb#WorkingDirectory=$ZEB_CODE_DIR#" /etc/systemd/system/zeb.service
 sed -i "s#ZEB_HOME=/var/lib/zeb#ZEB_HOME=$ZEB_HOME#" /etc/systemd/system/zeb.service
 sed -i "s#ExecStart=/opt/zeb/.venv/bin/python#ExecStart=$ZEB_CODE_DIR/.venv/bin/python#" /etc/systemd/system/zeb.service
 sed -i "s#^User=zeb#User=$ZEB_USER#" /etc/systemd/system/zeb.service
 sed -i "s#^Group=zeb#Group=$ZEB_USER#" /etc/systemd/system/zeb.service
+sed -i "s#^EnvironmentFile=-\?/etc/zeb/zeb.env#EnvironmentFile=$ZEB_ENV_FILE#" /etc/systemd/system/zeb.service
+sed -i "s#^EnvironmentFile=/etc/zeb/zeb.env#EnvironmentFile=$ZEB_ENV_FILE#" /etc/systemd/system/zeb-tunnel.service
+sed -i "s#^Environment=ZEB_ENV_FILE=/etc/zeb/zeb.env#Environment=ZEB_ENV_FILE=$ZEB_ENV_FILE#" /etc/systemd/system/zeb.service
+sed -i "s#^Environment=ZEB_ENV_FILE=/etc/zeb/zeb.env#Environment=ZEB_ENV_FILE=$ZEB_ENV_FILE#" /etc/systemd/system/zeb-tunnel.service
+sed -i "s#^User=zeb#User=$ZEB_USER#" /etc/systemd/system/zeb-tunnel.service
+sed -i "s#^Group=zeb#Group=$ZEB_USER#" /etc/systemd/system/zeb-tunnel.service
 
 systemctl daemon-reload
 systemctl enable zeb.service
+systemctl enable zeb-tunnel.service
 systemctl restart zeb.service
+systemctl restart zeb-tunnel.service
+
+echo ""
+echo "==> Dashboard credentials and link: journalctl -u zeb -n 80 --no-pager"
+echo "==> Public tunnel logs and link: journalctl -u zeb-tunnel -n 120 --no-pager"
 
 echo ""
 echo "==> Zeb is installed as a systemd service (auto-start on boot, auto-restart on crash)."
