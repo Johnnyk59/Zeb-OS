@@ -101,6 +101,12 @@ def test_should_require_auth_truth_table(host, allow_public, expected):
     assert should_require_auth(host, allow_public) is expected
 
 
+def test_force_auth_engages_gate_on_loopback():
+    from zeb_cli.web_server import should_require_auth
+
+    assert should_require_auth("127.0.0.1", force_auth=True) is True
+
+
 # ---------------------------------------------------------------------------
 # start_server stashes auth_required on app.state (Task 0.3)
 # ---------------------------------------------------------------------------

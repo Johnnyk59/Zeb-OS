@@ -452,7 +452,11 @@ _LOOPBACK_HOST_VALUES: frozenset = frozenset({
 })
 
 
-def should_require_auth(host: str, allow_public: bool = False) -> bool:
+def should_require_auth(
+    host: str,
+    allow_public: bool = False,
+    force_auth: bool = False,
+) -> bool:
     """Return True iff the dashboard auth gate must be active.
 
     Truth table:
@@ -471,7 +475,7 @@ def should_require_auth(host: str, allow_public: bool = False) -> bool:
     MCP-persistence campaign, where ``--insecure --host 0.0.0.0`` left the
     config/MCP/agent surface open to internet scanners.
     """
-    return host not in _LOOPBACK_HOST_VALUES
+    return force_auth or host not in _LOOPBACK_HOST_VALUES
 
 
 def _is_accepted_host(host_header: str, bound_host: str) -> bool:
@@ -512,7 +516,20 @@ def _is_accepted_host(host_header: str, bound_host: str) -> bool:
     # Loopback bind: accept the loopback names
     bound_lc = bound_host.lower()
     if bound_lc in _LOOPBACK_HOST_VALUES:
-        return host_only in _LOOPBACK_HOST_VALUES
+        if host_only in _LOOPBACK_HOST_VALUES:
+            return True
+        # A forced-auth loopback origin is the safe Cloudflare Tunnel shape:
+        # the socket is private, but the browser correctly sends the public
+        # hostname in Host and Origin. Accept only operator-declared names.
+        public_hostnames = getattr(app.state, "public_hostnames", frozenset())
+        if (
+            bool(getattr(app.state, "auth_required", False))
+            and host_only in public_hostnames
+        ):
+            return True
+        return bool(getattr(app.state, "allow_trycloudflare", False)) and bool(
+            re.fullmatch(r"[a-z0-9-]+\.trycloudflare\.com", host_only)
+        )
 
     # Explicit non-loopback bind: require exact host match
     return host_only == bound_lc
@@ -665,6 +682,44 @@ async def _token_auth_seam(request: Request, call_next):
     """
     from zeb_cli.dashboard_auth.token_auth import token_auth_middleware
     return await token_auth_middleware(request, call_next)
+
+
+@app.middleware("http")
+async def _dashboard_security_headers(request: Request, call_next):
+    """Apply browser hardening to SPA, login, API, and error responses."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), geolocation=(), payment=(), usb=()",
+    )
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "; ".join(
+            (
+                "default-src 'self'",
+                "base-uri 'self'",
+                "object-src 'none'",
+                "frame-ancestors 'none'",
+                "form-action 'self'",
+                "script-src 'self' 'unsafe-inline'",
+                "style-src 'self' 'unsafe-inline'",
+                "img-src 'self' data: blob: https:",
+                "font-src 'self' data: https:",
+                "connect-src 'self' ws: wss:",
+                "frame-src 'self' https:",
+            )
+        ),
+    )
+    if request.url.scheme == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -16094,7 +16149,18 @@ def start_server(
     # injection / WS-auth paths can branch on it consistently.  Phase 3.5
     # uses this to decide whether to refuse the bind, log the gate-on
     # banner, and enable uvicorn proxy_headers.
-    app.state.auth_required = should_require_auth(host)
+    force_auth = os.environ.get("ZEB_DASHBOARD_FORCE_AUTH", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    app.state.auth_required = should_require_auth(host, force_auth=force_auth)
+    app.state.public_hostnames = frozenset(
+        hostname.strip().lower().rstrip(".")
+        for hostname in os.environ.get("ZEB_TUNNEL_HOSTNAMES", "").split(",")
+        if hostname.strip()
+    )
+    app.state.allow_trycloudflare = force_auth and not bool(
+        os.environ.get("ZEB_TUNNEL_TOKEN", "").strip()
+    )
 
     # ``--insecure`` no longer disables the auth gate (June 2026 hardening:
     # the zeb-0day MCP-persistence campaign abused unauthenticated public
@@ -16202,6 +16268,7 @@ def start_server(
     # ping at 20/20 to detect it promptly and stay under the tunnel's idle
     # window.
     _is_loopback = host in ("127.0.0.1", "localhost", "::1")
+    _local_only = _is_loopback and not app.state.auth_required
     config = uvicorn.Config(
         app, host=host, port=port, log_level="warning",
         # proxy_headers defaults to False so _ws_client_is_allowed sees
@@ -16212,12 +16279,13 @@ def start_server(
         # decide cookie Secure flags, so we flip proxy_headers on for that
         # mode.
         proxy_headers=bool(app.state.auth_required),
+        forwarded_allow_ips="127.0.0.1,::1",
         # Half-open detection for public binds only (see above). Loopback
         # disables the protocol ping (None) so an event-loop stall can never
         # trigger a false disconnect; a genuinely dead local client is still
         # reaped via the WebSocketDisconnect → disconnect/reap path.
-        ws_ping_interval=None if _is_loopback else 20.0,
-        ws_ping_timeout=None if _is_loopback else 20.0,
+        ws_ping_interval=None if _local_only else 20.0,
+        ws_ping_timeout=None if _local_only else 20.0,
     )
     server = uvicorn.Server(config)
 

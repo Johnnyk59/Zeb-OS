@@ -83,6 +83,25 @@ class TestHostHeaderValidator:
         assert _is_accepted_host("LOCALHOST", "127.0.0.1")
         assert _is_accepted_host("LocalHost:9119", "127.0.0.1")
 
+    def test_forced_auth_loopback_accepts_only_declared_tunnel_hostname(self):
+        from zeb_cli.web_server import _is_accepted_host, app
+
+        previous_auth = getattr(app.state, "auth_required", None)
+        previous_names = getattr(app.state, "public_hostnames", None)
+        app.state.auth_required = True
+        app.state.public_hostnames = frozenset({"smartestmotherfuckerever.zeb.autos"})
+        try:
+            assert _is_accepted_host(
+                "smartestmotherfuckerever.zeb.autos", "127.0.0.1"
+            )
+            assert not _is_accepted_host("evil.example", "127.0.0.1")
+        finally:
+            app.state.auth_required = previous_auth
+            if previous_names is None:
+                del app.state.public_hostnames
+            else:
+                app.state.public_hostnames = previous_names
+
 
 class TestHostHeaderMiddleware:
     """End-to-end test via the FastAPI app — verify the middleware

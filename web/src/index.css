@@ -43,22 +43,19 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Zeb Agent — Nous DS with the LENS_0 (Zeb teal) palette applied
-   statically as the default dashboard theme. */
+/* Zeb Agent — a graphite command surface with restrained mineral accents. */
 /* ------------------------------------------------------------------ */
 
 :root {
-  /* LENS_0 — from design-language/src/ui/components/overlays/index.tsx.
-     These are the defaults for the `default` (Zeb Teal) dashboard theme;
-     ThemeProvider rewrites them as inline styles when a user switches themes. */
+  /* Neutral defaults keep every surface inside a black/charcoal hierarchy. */
   --foreground: color-mix(in srgb, #ffffff 0%, transparent);
   --foreground-base: #ffffff;
   --foreground-alpha: 0;
-  --midground: color-mix(in srgb, #ffe6cb 100%, transparent);
-  --midground-base: #ffe6cb;
+  --midground: color-mix(in srgb, #f2efe9 100%, transparent);
+  --midground-base: #f2efe9;
   --midground-alpha: 1;
-  --background: color-mix(in srgb, #041c1c 100%, transparent);
-  --background-base: #041c1c;
+  --background: color-mix(in srgb, #0a0b0e 100%, transparent);
+  --background-base: #0a0b0e;
   --background-alpha: 1;
 
   /* Typography tokens — the bundled Nous faces give Zeb a distinct voice
@@ -76,14 +73,8 @@
   --theme-spacing-mul: 1;
   --theme-density: comfortable;
 
-  /* Data-series accents — consumed by Analytics + Models pages for the
-     input-vs-output token visualisations (chart bars, table values,
-     legend swatches). Defaults are tuned for the Zeb-teal LENS_0
-     look: cream input + emerald-400 output read as warm/cool against
-     the dark canvas. Themes override via ThemeProvider, which emits
-     these as `--series-input-token` / `--series-output-token`. */
-  --series-input-token: #ffe6cb;
-  --series-output-token: #34d399;
+  --series-input-token: #ded9d0;
+  --series-output-token: #969da8;
 }
 
 /* Theme tokens cascade into the document root so every descendant inherits
@@ -104,7 +95,7 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: #031516;
+  background: #07080a;
 }
 
 code, kbd, pre, samp, .font-mono, .font-mono-ui {
@@ -136,9 +127,9 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   position: relative;
   isolation: isolate;
   background:
-    radial-gradient(circle at 82% 12%, rgba(64, 232, 220, 0.1), transparent 34%),
-    radial-gradient(circle at 14% 88%, rgba(255, 184, 92, 0.055), transparent 30%),
-    linear-gradient(145deg, #03191a 0%, #041c1c 48%, #021112 100%);
+    radial-gradient(circle at 82% 12%, rgba(190, 196, 207, 0.07), transparent 34%),
+    radial-gradient(circle at 8% 88%, rgba(124, 63, 199, 0.035), transparent 28%),
+    linear-gradient(145deg, #07080a 0%, #0b0d11 48%, #050608 100%);
 }
 
 .zeb-app-shell::before {
@@ -147,36 +138,36 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   z-index: -1;
   inset: 0;
   pointer-events: none;
-  opacity: 0.22;
+  opacity: 0.28;
   background-image:
-    linear-gradient(rgba(143, 255, 240, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(143, 255, 240, 0.035) 1px, transparent 1px);
+    linear-gradient(rgba(228, 231, 236, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(228, 231, 236, 0.024) 1px, transparent 1px);
   background-size: 4rem 4rem;
   mask-image: linear-gradient(to bottom, black, transparent 76%);
 }
 
 .zeb-sidebar {
   background:
-    linear-gradient(180deg, rgba(8, 39, 39, 0.96), rgba(2, 20, 21, 0.98)),
+    linear-gradient(180deg, rgba(17, 19, 24, 0.97), rgba(8, 9, 12, 0.99)),
     var(--background-base);
-  border-right: 1px solid rgba(143, 255, 240, 0.1);
-  box-shadow: 1rem 0 4rem rgba(0, 0, 0, 0.22);
-  backdrop-filter: blur(24px) saturate(1.15);
+  border-right: 1px solid rgba(235, 238, 243, 0.09);
+  box-shadow: 1rem 0 4rem rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(24px) saturate(0.8);
 }
 
 .zeb-page-header,
 .zeb-chat-header,
 .zeb-composer {
-  background: linear-gradient(90deg, rgba(5, 29, 30, 0.9), rgba(3, 22, 23, 0.72));
-  border-color: rgba(143, 255, 240, 0.1);
-  backdrop-filter: blur(22px) saturate(1.25);
+  background: linear-gradient(90deg, rgba(14, 16, 20, 0.94), rgba(8, 9, 12, 0.84));
+  border-color: rgba(235, 238, 243, 0.09);
+  backdrop-filter: blur(22px) saturate(0.86);
 }
 
 .zeb-chat-pane {
   isolation: isolate;
   background:
-    radial-gradient(circle at 76% 28%, rgba(62, 220, 207, 0.055), transparent 38%),
-    linear-gradient(180deg, rgba(4, 28, 28, 0.18), rgba(1, 14, 15, 0.42));
+    radial-gradient(circle at 76% 28%, rgba(188, 194, 204, 0.045), transparent 38%),
+    linear-gradient(180deg, rgba(18, 20, 25, 0.2), rgba(5, 6, 8, 0.5));
 }
 
 .zeb-chat-pane::before {
@@ -205,21 +196,21 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 
 .zeb-agent-tab:hover {
   transform: translateY(-1px);
-  background: rgba(88, 244, 223, 0.065);
+  background: rgba(232, 235, 240, 0.07);
   box-shadow: 0 0.55rem 1.5rem rgba(0, 0, 0, 0.18);
 }
 
 .zeb-agent-tab.is-active {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 0 1.8rem rgba(88, 244, 223, 0.12);
+    0 0 1.8rem rgba(218, 222, 229, 0.09);
 }
 
 .zeb-agent-stage {
   background:
-    radial-gradient(circle at 100% 0, rgba(88, 244, 223, 0.08), transparent 32%),
-    rgba(255, 230, 203, 0.025);
-  border-color: rgba(143, 255, 240, 0.16);
+    radial-gradient(circle at 100% 0, rgba(214, 218, 225, 0.065), transparent 32%),
+    rgba(242, 239, 233, 0.025);
+  border-color: rgba(235, 238, 243, 0.13);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.035),
     0 1.5rem 4rem rgba(0, 0, 0, 0.2);
@@ -242,12 +233,150 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 }
 
 .zeb-composer textarea:focus {
-  border-color: rgba(88, 244, 223, 0.42);
-  background: rgba(1, 13, 14, 0.72);
+  border-color: rgba(223, 227, 234, 0.38);
+  background: rgba(6, 7, 9, 0.82);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.025),
-    0 0 0 3px rgba(88, 244, 223, 0.055),
+    0 0 0 3px rgba(223, 227, 234, 0.045),
     0 1.2rem 3rem rgba(0, 0, 0, 0.2);
+}
+
+/* Zeb's ambient sidebar apartment. The illustration is a three-by-two sprite
+   sheet; the viewport moves the sheet instead of loading a new image per act. */
+.zeb-roommate {
+  position: relative;
+  display: flex;
+  height: 100%;
+  min-height: 9rem;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid rgba(235, 238, 243, 0.07);
+  background:
+    radial-gradient(circle at 50% 76%, rgba(126, 70, 184, 0.11), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.012), rgba(0, 0, 0, 0.08));
+}
+
+.zeb-roommate::before {
+  content: '';
+  position: absolute;
+  inset: auto 9% 8% 9%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(238, 240, 244, 0.13), transparent);
+  box-shadow: 0 0.8rem 1.6rem rgba(0, 0, 0, 0.7);
+}
+
+.zeb-roommate__meta {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.55rem 0.8rem 0;
+  color: rgba(229, 232, 237, 0.38);
+  font-family: var(--theme-font-mono);
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.zeb-roommate__activity {
+  max-width: 7.5rem;
+  overflow: hidden;
+  color: rgba(240, 237, 232, 0.58);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zeb-roommate__stage {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  transform-origin: 50% 88%;
+  transition: transform 1.25s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 700ms ease;
+  animation: zeb-roommate-breathe 5.8s ease-in-out infinite;
+}
+
+.zeb-roommate__stage.is-seated {
+  animation-duration: 7.4s;
+}
+
+.zeb-roommate__stage.is-looking {
+  animation: none;
+  transform: translateX(1.5%) rotate(0.45deg);
+}
+
+.zeb-roommate__stage.is-shifting {
+  animation: none;
+  transform: translateY(1.5%) rotate(-0.4deg) scale(0.992);
+}
+
+.zeb-roommate__stage.is-offscreen {
+  animation: none;
+  opacity: 0;
+  transform: translateX(-118%) rotate(-4deg);
+}
+
+.zeb-roommate__sprite-window {
+  position: absolute;
+  inset: -3% -6% -5%;
+  overflow: hidden;
+}
+
+.zeb-roommate__sheet {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 300%;
+  max-width: none;
+  height: 200%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 0.8rem 0.75rem rgba(0, 0, 0, 0.5));
+}
+
+.zeb-roommate__eyelids {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  height: 8%;
+  justify-content: space-between;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scaleY(0.12);
+  transform-origin: center;
+}
+
+.zeb-roommate__eyelids i {
+  display: block;
+  width: 47%;
+  height: 100%;
+  border-bottom: 2px solid rgba(13, 8, 17, 0.92);
+  border-radius: 45% 45% 52% 52%;
+  background: #7c3fc7;
+}
+
+.zeb-roommate__eyelids.is-blinking {
+  opacity: 1;
+  animation: zeb-roommate-blink 190ms ease-in-out both;
+}
+
+@keyframes zeb-roommate-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-0.8%) scale(1.004); }
+}
+
+@keyframes zeb-roommate-blink {
+  0%, 100% { opacity: 0; transform: translate(-50%, -50%) scaleY(0.1); }
+  28%, 72% { opacity: 1; transform: translate(-50%, -50%) scaleY(1); }
+}
+
+@media (min-width: 1024px) {
+  .zeb-roommate {
+    min-height: 12.5rem;
+  }
 }
 
 @keyframes zeb-message-arrive {
@@ -275,7 +404,9 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 
 @media (prefers-reduced-motion: reduce) {
   .zeb-message,
-  .zeb-agent-tab {
+  .zeb-agent-tab,
+  .zeb-roommate__stage,
+  .zeb-roommate__eyelids {
     animation: none;
     transition-duration: 0.01ms;
   }

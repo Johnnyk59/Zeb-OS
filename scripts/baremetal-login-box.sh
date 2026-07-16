@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Print the public dashboard URL and credentials in the systemd journal.
+# Print the public dashboard URL without leaking credentials to the journal.
 set -euo pipefail
 
 env_file="${ZEB_ENV_FILE:-/etc/zeb/zeb.env}"
@@ -12,7 +12,6 @@ fi
 
 port="${ZEB_DASHBOARD_PORT:-9119}"
 user="${ZEB_DASHBOARD_BASIC_AUTH_USERNAME:-admin}"
-pw="${ZEB_DASHBOARD_BASIC_AUTH_PASSWORD:-see /etc/zeb/zeb.env}"
 hostnames="${ZEB_TUNNEL_HOSTNAMES:-public link pending}"
 
 rule="======================================================================"
@@ -29,10 +28,11 @@ while IFS= read -r host; do
 done < <(printf '%s' "$hostnames" | tr ',' '\n' | sed 's/^ *//;s/ *$//')
 printf '| %-68s |\n' ''
 printf '| %-68s |\n' "  USERNAME: ${user}"
-printf '| %-68s |\n' "  PASSWORD: ${pw}"
+printf '| %-68s |\n' '  PASSWORD: stored in the root-only credential file'
 printf '| %-68s |\n' ''
 printf '| %-68s |\n' "  Local fallback: http://127.0.0.1:${port}"
 printf '| %-68s |\n' '  Public hostname must be configured in Cloudflare for the tunnel.'
+printf '| %-68s |\n' '  Root can read: /root/ZEB_DASHBOARD_LOGIN.txt'
 printf '| %-68s |\n' '--------------------------------------------------------------------'
 printf '| %-68s |\n' ''
 printf '+%s+\n\n' "$rule"

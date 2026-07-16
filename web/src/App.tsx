@@ -64,6 +64,7 @@ import { ProfileProvider } from "@/contexts/ProfileProvider";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { ProfileSwitcher } from "@/components/ProfileSwitcher";
 import { ProfileScopeBanner } from "@/components/ProfileScopeBanner";
+import { ZebRoommate } from "@/components/ZebRoommate";
 import ConfigPage from "@/pages/ConfigPage";
 import DiagnosePage from "@/pages/DiagnosePage";
 import DocsPage from "@/pages/DocsPage";
@@ -656,7 +657,7 @@ export default function App() {
             <ProfileSwitcher collapsed={isDesktopCollapsed} />
 
             <nav
-              className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden border-t border-current/10 py-2"
+              className="max-h-[52dvh] min-h-0 w-full shrink-0 overflow-y-auto overflow-x-hidden border-t border-current/10 py-2"
               aria-label={t.app.navigation}
             >
               <ul className="flex flex-col">
@@ -716,6 +717,15 @@ export default function App() {
                 </div>
               )}
             </nav>
+
+            <div
+              className={cn(
+                "min-h-36 flex-1 overflow-hidden lg:min-h-[12.5rem]",
+                isDesktopCollapsed && "lg:hidden",
+              )}
+            >
+              <ZebRoommate />
+            </div>
 
             {/* Clean sidebar — only functional navigation remains. The admin
                 actions panel (restart/update), sign-out, theme toggle (Zeb is

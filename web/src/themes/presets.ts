@@ -39,8 +39,8 @@ const DEFAULT_LAYOUT: ThemeLayout = {
 // ---------------------------------------------------------------------------
 
 /**
- * Zeb Dark — the canonical ZebOS look. Near-black canvas, cool porcelain
- * text, a faint teal glow, Inter for UI text and JetBrains Mono for code.
+ * Zeb Graphite — the canonical ZebOS look. Near-black canvas, cool porcelain
+ * text, a restrained mineral glow, bundled display type and JetBrains Mono.
  * Deliberately restrained: contrast comes from typography and spacing, not
  * from saturated color.
  */
@@ -49,26 +49,25 @@ export const defaultTheme: DashboardTheme = {
   label: "Zeb Dark",
   description: "ZebOS signature — near-black, minimal, precise",
   palette: {
-    background: { hex: "#08090b", alpha: 1 },
-    midground: { hex: "#e2e8ed", alpha: 1 },
+    background: { hex: "#090a0d", alpha: 1 },
+    midground: { hex: "#edeae4", alpha: 1 },
     foreground: { hex: "#ffffff", alpha: 0 },
-    warmGlow: "rgba(94, 234, 212, 0.10)",
+    warmGlow: "rgba(194, 199, 207, 0.10)",
     noiseOpacity: 0.3,
   },
   typography: {
     ...DEFAULT_TYPOGRAPHY,
-    fontSans: `"Inter", ${SYSTEM_SANS}`,
+    fontSans: `"Collapse", ${SYSTEM_SANS}`,
+    fontDisplay: `"Rules Expanded", "Collapse", ${SYSTEM_SANS}`,
     fontMono: `"JetBrains Mono", ${SYSTEM_MONO}`,
-    fontUrl:
-      "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap",
-    letterSpacing: "-0.008em",
+    letterSpacing: "0.008em",
   },
   layout: {
     ...DEFAULT_LAYOUT,
     radius: "0.625rem",
   },
   colorOverrides: {
-    success: "#34d399",
+    success: "#b9bec7",
     warning: "#fbbf24",
     destructive: "#f87171",
   },
@@ -76,21 +75,17 @@ export const defaultTheme: DashboardTheme = {
   terminalForeground: "#dbe2e8",
 };
 
-/** The previous default — kept for anyone who prefers the teal look. */
+/** Legacy key retained so persisted installs migrate to graphite, not teal. */
 export const zebTealTheme: DashboardTheme = {
   name: "zeb-teal",
-  label: "Zeb Teal",
-  description: "Classic dark teal — the original Zeb look",
-  palette: {
-    background: { hex: "#041c1c", alpha: 1 },
-    midground: { hex: "#ffe6cb", alpha: 1 },
-    foreground: { hex: "#ffffff", alpha: 0 },
-    warmGlow: "rgba(255, 189, 56, 0.35)",
-    noiseOpacity: 1,
-  },
-  typography: DEFAULT_TYPOGRAPHY,
-  layout: DEFAULT_LAYOUT,
-  terminalBackground: "#000000",
+  label: "Graphite Classic",
+  description: "Legacy selection upgraded to the Zeb graphite system",
+  palette: defaultTheme.palette,
+  typography: defaultTheme.typography,
+  layout: defaultTheme.layout,
+  colorOverrides: defaultTheme.colorOverrides,
+  terminalBackground: defaultTheme.terminalBackground,
+  terminalForeground: defaultTheme.terminalForeground,
 };
 
 export const midnightTheme: DashboardTheme = {

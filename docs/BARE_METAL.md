@@ -14,22 +14,30 @@ sudo bash scripts/install-baremetal.sh
 
 That script (idempotent — safe to re-run to pull new code and restart):
 
-1. installs system deps (`python3`, `venv`, `git`, Node/npm, build tools);
+1. installs system deps (`python3`, `venv`, `git`, Node 22/npm, build tools);
 2. creates the unprivileged `zeb` service account;
 3. installs `cloudflared` for the public dashboard tunnel;
 4. clones/updates the repo into `/opt/zeb`;
 5. builds a virtualenv, installs Zeb and builds the React dashboard;
 6. creates the persistent state dirs under `/var/lib/zeb`;
-7. writes a root-only secrets file at `/etc/zeb/zeb.env`;
+7. writes a service-readable secrets file at `/etc/zeb/zeb.env` with a scrypt
+   password hash, never the plaintext dashboard password;
 8. installs, enables and starts the dashboard and tunnel services.
+
+On the first install, the generated login is shown once in the terminal and
+written to `/root/ZEB_DASHBOARD_LOGIN.txt` with mode `0600`. Store it in a
+password manager, then delete that recovery file. Service logs show the URL and
+username but deliberately never print the password.
 
 ## Service management
 
 ```
 systemctl status zeb      # is it running?
 systemctl restart zeb     # restart
-journalctl -u zeb -f      # live logs (the DASHBOARD LOGIN box prints here)
+journalctl -u zeb -f      # live application logs (never includes password)
 journalctl -u zeb-tunnel -f # public link and tunnel logs
+sudo cat /root/ZEB_DASHBOARD_LOGIN.txt # first-install credential recovery
+sudo zeb-change-password               # rotate password + revoke all sessions
 ```
 
 `Restart=always` means a crash brings Zeb straight back; `WantedBy=multi-user.target`
@@ -48,13 +56,16 @@ env). This directory is never deleted by updates:
 | `/var/lib/zeb/agents/<id>/` | agent manifests + skills + dashboards Zeb builds (see `zeb_autonomy/agent_builder.py`) |
 | `/var/lib/zeb/skills/` | Zeb's skills |
 | `/var/lib/zeb/instagram/` | Instagram inbox (once a Meta app is connected) |
-| `/etc/zeb/zeb.env` | secrets: API keys, tunnel id/hostnames, `IG_*` credentials (chmod 600) |
+| `/etc/zeb/zeb.env` | secrets: API keys, tunnel token/hostnames, password hash, `IG_*` credentials (root:zeb, chmod 640) |
+| `/root/ZEB_DASHBOARD_LOGIN.txt` | first-install plaintext login recovery (root-only, chmod 600; delete after saving) |
 
 Because state is decoupled from code, you can wipe and re-clone `/opt/zeb`
 without losing anything Zeb has learned — only `/var/lib/zeb` matters for memory.
 
 The React dashboard is built into `/opt/zeb/zeb_cli/web_dist/` during install and
-served by `zeb dashboard` on port `9119`. Its `/api/ws` endpoint hosts the
+served by `zeb dashboard` on loopback port `9119`. `ZEB_DASHBOARD_FORCE_AUTH=1`
+keeps the complete login/session gate active even though Cloudflare reaches the
+private loopback origin. Its `/api/ws` endpoint hosts the
 in-process gateway used by the Chat tab, so one native systemd unit covers the
 selected dashboard and its chat runtime.
 
@@ -70,14 +81,20 @@ connected cloud providers.
 Set `ZEB_TUNNEL_TOKEN` and `ZEB_TUNNEL_HOSTNAMES` in `/etc/zeb/zeb.env`.
 Create a Cloudflare Tunnel, copy its token, and configure a Public Hostname
 for your domain pointing to `http://localhost:9119`. The installer runs
-`cloudflared` as `zeb-tunnel.service`, prints the public URL and credentials in
-the journal, and restarts the tunnel automatically. If no token is set, it
+`cloudflared` as `zeb-tunnel.service`, prints the public URL (but no password)
+in the journal, and restarts the tunnel automatically. If no token is set, it
 falls back to a temporary `trycloudflare.com` URL.
 
 Johnny's default bare-metal hostname is
 `smartestmotherfuckerever.zeb.autos`. The fresh-install env template sets that
 hostname automatically; Cloudflare still needs a matching Published
 Application route targeting `http://localhost:9119`.
+
+Do not open TCP `9119` in the VPS firewall. Zeb binds only to `127.0.0.1`,
+accepts the exact declared tunnel hostname (or Cloudflare's generated hostname
+while temporary-tunnel fallback is active), rate-limits login attempts, stores
+only a memory-hard scrypt password hash, and uses HttpOnly/Secure session
+cookies plus single-use WebSocket tickets behind HTTPS.
 
 ## Instagram webhook
 
