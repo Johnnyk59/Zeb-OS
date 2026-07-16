@@ -186,9 +186,9 @@ export function BrainCanvas({
       }
     };
 
-    // Teal cortex, warm signal current and white-hot firing points.
-    const NC: [number, number, number] = [76, 239, 217];
-    const SC: [number, number, number] = [255, 184, 92];
+    // Graphite-silver cortex, warm signal current and white-hot firing points.
+    const NC: [number, number, number] = [177, 184, 195];
+    const SC: [number, number, number] = [218, 177, 119];
 
     const draw = () => {
       // Pull existing pixels toward alpha 0 → comet trails without a

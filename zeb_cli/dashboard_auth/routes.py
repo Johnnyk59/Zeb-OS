@@ -23,7 +23,7 @@ from typing import Any, Deque, Dict, Tuple
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from zeb_cli.dashboard_auth import (
     get_provider,
@@ -106,9 +106,8 @@ def _redirect_uri(request: Request) -> str:
 
 
 def _client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    # Uvicorn rewrites request.client only for explicitly trusted loopback
+    # proxies. Reading X-Forwarded-For here again would trust attacker input.
     return request.client.host if request.client else ""
 
 
@@ -418,9 +417,11 @@ def _validate_post_login_target(raw: str) -> str:
 # this is defence-in-depth on top of the provider's own constant-time
 # verify, not the only line of defence.
 
-_PW_RATE_MAX_ATTEMPTS = 10
-_PW_RATE_WINDOW_SEC = 60.0
+_PW_RATE_MAX_ATTEMPTS = 5
+_PW_RATE_GLOBAL_MAX_ATTEMPTS = 60
+_PW_RATE_WINDOW_SEC = 300.0
 _pw_attempts: Dict[str, Deque[float]] = defaultdict(deque)
+_pw_attempts_global: Deque[float] = deque()
 _pw_attempts_lock = threading.Lock()
 
 
@@ -437,12 +438,25 @@ def _password_rate_limited(ip: str) -> bool:
     cutoff = now - _PW_RATE_WINDOW_SEC
     key = ip or "_unknown_"
     with _pw_attempts_lock:
+        if len(_pw_attempts) > 2048:
+            stale_keys = [
+                bucket_key
+                for bucket_key, timestamps in _pw_attempts.items()
+                if not timestamps or timestamps[-1] < cutoff
+            ]
+            for bucket_key in stale_keys:
+                _pw_attempts.pop(bucket_key, None)
+        while _pw_attempts_global and _pw_attempts_global[0] < cutoff:
+            _pw_attempts_global.popleft()
+        if len(_pw_attempts_global) >= _PW_RATE_GLOBAL_MAX_ATTEMPTS:
+            return True
         bucket = _pw_attempts[key]
         while bucket and bucket[0] < cutoff:
             bucket.popleft()
         if len(bucket) >= _PW_RATE_MAX_ATTEMPTS:
             return True
         bucket.append(now)
+        _pw_attempts_global.append(now)
         return False
 
 
@@ -450,13 +464,14 @@ def _reset_password_rate_limit() -> None:
     """Test-only: clear all rate-limit buckets."""
     with _pw_attempts_lock:
         _pw_attempts.clear()
+        _pw_attempts_global.clear()
 
 
 class _PasswordLoginBody(BaseModel):
-    provider: str
-    username: str
-    password: str
-    next: str = ""
+    provider: str = Field(min_length=1, max_length=64)
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=256)
+    next: str = Field(default="", max_length=2048)
 
 
 @router.post("/auth/password-login", name="auth_password_login")
@@ -487,6 +502,7 @@ async def auth_password_login(request: Request, body: _PasswordLoginBody):
         raise HTTPException(
             status_code=429,
             detail="Too many login attempts. Try again shortly.",
+            headers={"Retry-After": str(int(_PW_RATE_WINDOW_SEC))},
         )
 
     p = get_provider(body.provider)

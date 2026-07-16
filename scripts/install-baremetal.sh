@@ -14,6 +14,7 @@ set -euo pipefail
 ZEB_CODE_DIR="${ZEB_CODE_DIR:-/opt/zeb}"
 ZEB_HOME="${ZEB_HOME:-/var/lib/zeb}"
 ZEB_ENV_FILE="${ZEB_ENV_FILE:-/etc/zeb/zeb.env}"
+ZEB_CREDENTIAL_FILE="${ZEB_CREDENTIAL_FILE:-/root/ZEB_DASHBOARD_LOGIN.txt}"
 REPO_URL="${REPO_URL:-https://github.com/Johnnyk59/Zeb-OS.git}"
 BRANCH="${BRANCH:-main}"
 ZEB_USER="${ZEB_USER:-zeb}"
@@ -31,7 +32,20 @@ fi
 
 # 1. System deps -----------------------------------------------------------
 apt-get update -y
-apt-get install -y python3 python3-venv python3-pip git curl build-essential nodejs npm openssl
+apt-get install -y python3 python3-venv python3-pip git curl ca-certificates build-essential openssl
+
+# The dashboard toolchain requires Node 22+. Ubuntu 24.04 ships Node 18, so
+# install NodeSource's current 22.x package only when the host needs it.
+node_major=""
+if command -v node >/dev/null 2>&1; then
+  node_major="$(node --version | sed -n 's/^v\([0-9][0-9]*\).*/\1/p')"
+fi
+if [[ -z "$node_major" || "$node_major" -lt 22 ]]; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource-setup.sh
+  bash /tmp/nodesource-setup.sh
+  rm -f /tmp/nodesource-setup.sh
+  apt-get install -y nodejs
+fi
 
 # cloudflared is not included in the default Ubuntu repositories on every
 # supported VPS image. Install the official package when it is absent.
@@ -86,7 +100,7 @@ mkdir -p "$ZEB_HOME/chat" "$ZEB_HOME/agents" "$ZEB_HOME/skills" "$ZEB_HOME/insta
 mkdir -p "$(dirname "$ZEB_ENV_FILE")"
 if [ ! -f "$ZEB_ENV_FILE" ]; then
   cat > "$ZEB_ENV_FILE" <<'EOF'
-# Zeb secrets & config (root-only). Uncomment/fill as needed.
+# Zeb secrets & config (root-owned, readable by the zeb service). Uncomment/fill as needed.
 # ANTHROPIC_API_KEY=
 # OPENAI_API_KEY=
 # ZEB_DASHBOARD_BASIC_AUTH_USERNAME=admin
@@ -104,11 +118,12 @@ ZEB_TUNNEL_HOSTNAMES=smartestmotherfuckerever.zeb.autos
 # IG_GRAPH_VERSION=v20.0
 EOF
   chmod 600 "$ZEB_ENV_FILE"
-  echo "==> Wrote template $ZEB_ENV_FILE (chmod 600) — edit it to add keys."
+  echo "==> Wrote template $ZEB_ENV_FILE — edit it to add keys."
 fi
 
-# Generate credentials once when the operator has not supplied them. They are
-# persisted in the root-only env file and printed on every service start.
+# Generate credentials once when the operator has not supplied them. Only the
+# scrypt hash enters the service environment; plaintext is written once to a
+# root-only recovery file and shown only in this interactive installer output.
 umask 077
 set_env_default() {
   key="$1"
@@ -122,18 +137,64 @@ set_env_default() {
     printf '%s=%s\n' "$key" "$value" >> "$ZEB_ENV_FILE"
   fi
 }
+set_env_value() {
+  key="$1"
+  value="$2"
+  if grep -q "^${key}=" "$ZEB_ENV_FILE"; then
+    sed -i "s#^${key}=.*#${key}=${value}#" "$ZEB_ENV_FILE"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$ZEB_ENV_FILE"
+  fi
+}
 set_env_default ZEB_DASHBOARD_BASIC_AUTH_USERNAME admin
-set_env_default ZEB_DASHBOARD_BASIC_AUTH_PASSWORD "$(openssl rand -hex 12)"
 set_env_default ZEB_DASHBOARD_BASIC_AUTH_SECRET "$(openssl rand -hex 32)"
+
+dashboard_user="$(sed -n 's/^ZEB_DASHBOARD_BASIC_AUTH_USERNAME=//p' "$ZEB_ENV_FILE" | head -n1)"
+dashboard_hostnames="$(sed -n 's/^ZEB_TUNNEL_HOSTNAMES=//p' "$ZEB_ENV_FILE" | head -n1)"
+dashboard_hostname="${dashboard_hostnames%%,*}"
+dashboard_hostname="${dashboard_hostname:-smartestmotherfuckerever.zeb.autos}"
+password_hash="$(sed -n 's/^ZEB_DASHBOARD_BASIC_AUTH_PASSWORD_HASH=//p' "$ZEB_ENV_FILE" | head -n1)"
+initial_password="$(sed -n 's/^ZEB_DASHBOARD_BASIC_AUTH_PASSWORD=//p' "$ZEB_ENV_FILE" | head -n1)"
+if [[ -n "$initial_password" || -z "$password_hash" ]]; then
+  initial_password="${initial_password:-$(openssl rand -base64 24 | tr -d '\n')}"
+  password_hash="$(
+    printf '%s' "$initial_password" |
+      "$ZEB_CODE_DIR/.venv/bin/python" -c \
+        'import sys; sys.path.insert(0, sys.argv[1]); from plugins.dashboard_auth.basic import hash_password; print(hash_password(sys.stdin.read()))' \
+        "$ZEB_CODE_DIR"
+  )"
+  set_env_value ZEB_DASHBOARD_BASIC_AUTH_PASSWORD_HASH "$password_hash"
+fi
+
+# Never leave a plaintext password in the service-readable environment.
+sed -i '/^ZEB_DASHBOARD_BASIC_AUTH_PASSWORD=/d' "$ZEB_ENV_FILE"
+if [[ -n "$initial_password" ]]; then
+  cat > "$ZEB_CREDENTIAL_FILE" <<EOF
+Zeb dashboard login
+URL: https://${dashboard_hostname}
+Username: ${dashboard_user:-admin}
+Password: ${initial_password}
+
+This file is readable only by root. Delete it after storing the password in
+your password manager. Zeb stores only a scrypt hash in its service config.
+EOF
+  chown root:root "$ZEB_CREDENTIAL_FILE"
+  chmod 600 "$ZEB_CREDENTIAL_FILE"
+fi
+
+chown root:"$ZEB_USER" "$ZEB_ENV_FILE"
+chmod 640 "$ZEB_ENV_FILE"
 
 chown -R "$ZEB_USER:$ZEB_USER" "$ZEB_CODE_DIR" "$ZEB_HOME"
 chmod 700 "$ZEB_HOME"
 
 # 5. systemd unit ----------------------------------------------------------
+mkdir -p /usr/local/libexec
 install -m 644 "$ZEB_CODE_DIR/packaging/systemd/zeb.service" /etc/systemd/system/zeb.service
 install -m 644 "$ZEB_CODE_DIR/packaging/systemd/zeb-tunnel.service" /etc/systemd/system/zeb-tunnel.service
 install -m 755 "$ZEB_CODE_DIR/scripts/baremetal-login-box.sh" /usr/local/libexec/zeb-login-box
 install -m 755 "$ZEB_CODE_DIR/scripts/baremetal-tunnel.sh" /usr/local/libexec/zeb-tunnel
+install -m 750 "$ZEB_CODE_DIR/scripts/change-dashboard-password.sh" /usr/local/sbin/zeb-change-password
 # Point the unit at the chosen paths.
 sed -i "s#WorkingDirectory=/opt/zeb#WorkingDirectory=$ZEB_CODE_DIR#" /etc/systemd/system/zeb.service
 sed -i "s#ZEB_HOME=/var/lib/zeb#ZEB_HOME=$ZEB_HOME#" /etc/systemd/system/zeb.service
@@ -154,11 +215,24 @@ systemctl restart zeb.service
 systemctl restart zeb-tunnel.service
 
 echo ""
-echo "==> Dashboard credentials and link: journalctl -u zeb -n 80 --no-pager"
+if [[ -n "$initial_password" ]]; then
+  rule="======================================================================"
+  printf '\n+%s+\n' "$rule"
+  printf '| %-68s |\n' 'ZEB DASHBOARD - PRIVATE LOGIN'
+  printf '| %-68s |\n' ''
+  printf '| %-68s |\n' "  URL: https://${dashboard_hostname}"
+  printf '| %-68s |\n' "  USERNAME: ${dashboard_user:-admin}"
+  printf '| %-68s |\n' "  PASSWORD: ${initial_password}"
+  printf '| %-68s |\n' ''
+  printf '| %-68s |\n' "  Root-only copy: $ZEB_CREDENTIAL_FILE"
+  printf '+%s+\n\n' "$rule"
+else
+  echo "==> Existing password hash preserved. Root credential file: $ZEB_CREDENTIAL_FILE"
+fi
 echo "==> Public tunnel logs and link: journalctl -u zeb-tunnel -n 120 --no-pager"
 
 echo ""
 echo "==> Zeb is installed as a systemd service (auto-start on boot, auto-restart on crash)."
 echo "    Status:  systemctl status zeb"
-echo "    Logs:    journalctl -u zeb -f    (look for the DASHBOARD LOGIN box)"
+echo "    Logs:    journalctl -u zeb -f"
 echo "    State:   $ZEB_HOME  (persists across restarts & updates)"

@@ -54,7 +54,7 @@ function generateChannelId(scope?: string): string {
   )}`;
 }
 
-// Colors for the terminal body.  Matches the dashboard's dark teal canvas
+// Colors for the terminal body. Matches the dashboard's graphite canvas
 // with cream foreground — we intentionally don't pick monokai or a loud
 // theme, because the TUI's skin engine already paints the content; the
 // terminal chrome just needs to sit quietly inside the dashboard.

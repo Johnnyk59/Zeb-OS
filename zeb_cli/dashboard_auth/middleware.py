@@ -77,9 +77,8 @@ def _path_is_public(path: str) -> bool:
 
 
 def _client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    # Uvicorn has already accepted proxy headers only from loopback. Trusting
+    # X-Forwarded-For a second time would let callers choose their audit IP.
     return request.client.host if request.client else ""
 
 
@@ -460,4 +459,3 @@ def _attempt_refresh(request: Request, *, refresh_token):
         if new_session is not None:
             return new_session, provider.name
     return None
-

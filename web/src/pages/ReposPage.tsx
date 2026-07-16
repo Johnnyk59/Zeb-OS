@@ -193,7 +193,7 @@ export default function ReposPage() {
               <Badge className="bg-midground/10 text-text-secondary">
                 {totals.total} tracked
               </Badge>
-              <Badge className="bg-[#40e8dc]/15 text-[#40e8dc]">
+              <Badge className="bg-white/10 text-[#d7dae0]">
                 {totals.extracted} extracted
               </Badge>
               <Badge className="bg-success/15 text-success">
@@ -260,7 +260,7 @@ export default function ReposPage() {
                         <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
                       </a>
                       {r.extracted ? (
-                        <Badge className="bg-[#40e8dc]/15 text-[#40e8dc]">
+                        <Badge className="bg-white/10 text-[#d7dae0]">
                           <Boxes className="mr-1 h-3 w-3" /> extracted
                         </Badge>
                       ) : null}

@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   CircleStop,
+  ExternalLink,
   Mic,
   Plus,
   Send,
@@ -107,6 +108,7 @@ export default function ZebChatPage({
           isActive={isActive}
           sidebarCollapsed={sidebarCollapsed}
           showBrain={!dual}
+          showAgentNav={!dual}
           onNewChat={!dual ? openDual : undefined}
         />
       </div>
@@ -116,6 +118,7 @@ export default function ZebChatPage({
             isActive={isActive}
             sidebarCollapsed={false}
             showBrain={false}
+            showAgentNav={false}
             onClose={closeDual}
           />
         </div>
@@ -128,12 +131,14 @@ function ChatPane({
   isActive = true,
   sidebarCollapsed = false,
   showBrain = true,
+  showAgentNav = true,
   onNewChat,
   onClose,
 }: {
   isActive?: boolean;
   sidebarCollapsed?: boolean;
   showBrain?: boolean;
+  showAgentNav?: boolean;
   onNewChat?: () => void;
   onClose?: () => void;
 }) {
@@ -150,7 +155,6 @@ function ChatPane({
   const [switching, setSwitching] = useState(false);
   const [nonce, setNonce] = useState(0);
   const [agents, setAgents] = useState<AgentRecord[]>([]);
-  const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [taskIntensity, setTaskIntensity] = useState(0.55);
 
   const gwRef = useRef<GatewayClient | null>(null);
@@ -221,12 +225,12 @@ function ChatPane({
     if (thinking)
       return { label: "Thinking", dot: "bg-warning", text: "text-warning" };
     if (busy)
-      return { label: "Processing", dot: "bg-[#40e8dc]", text: "text-[#40e8dc]" };
+      return { label: "Processing", dot: "bg-[#c8ccd3]", text: "text-[#c8ccd3]" };
     if (bgStatus === "learning")
-      return { label: "Learning", dot: "bg-[#a884ff]", text: "text-[#a884ff]" };
+      return { label: "Learning", dot: "bg-[#d3ad78]", text: "text-[#d3ad78]" };
     if (bgStatus === "processing" || bgStatus === "thinking")
-      return { label: "Processing", dot: "bg-[#40e8dc]", text: "text-[#40e8dc]" };
-    return { label: "Idle", dot: "bg-success/70", text: "text-text-secondary" };
+      return { label: "Processing", dot: "bg-[#c8ccd3]", text: "text-[#c8ccd3]" };
+    return { label: "Idle", dot: "bg-white/35", text: "text-text-secondary" };
   }, [conn, thinking, busy, bgStatus]);
 
   // Brain energy: prompt complexity controls how hard work looks. Idle is a
@@ -547,7 +551,7 @@ function ChatPane({
   const statusDot = useMemo(() => {
     const color =
       conn === "open"
-        ? "bg-success"
+        ? "bg-[#c8ccd3]"
         : conn === "connecting"
           ? "bg-warning"
           : "bg-destructive";
@@ -579,9 +583,14 @@ function ChatPane({
       updated_at: record?.updated_at,
     };
   });
-  const selectedAgent = activeAgent
-    ? agentSlots.find((agent) => agent.id === activeAgent) ?? null
-    : null;
+  const openAgentDashboard = useCallback((agent: AgentRecord) => {
+    const target = agentDashboardUrl(agent.dashboard_url);
+    if (!target) {
+      setBanner(`${agent.label} is waiting for Zeb to register its dashboard URL.`);
+      return;
+    }
+    window.open(target, "_blank", "noopener,noreferrer");
+  }, []);
 
   return (
     <div className="zeb-chat-pane relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -634,36 +643,37 @@ function ChatPane({
       <header className="zeb-chat-header relative z-20 flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-current/10 px-3 sm:px-5">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {statusDot}
-          <nav className="scrollbar-none flex min-w-0 flex-1 items-center gap-2 overflow-x-auto" aria-label="Agent dashboards">
+          {showAgentNav ? <nav className="scrollbar-none flex min-w-0 flex-1 items-center gap-2 overflow-x-auto" aria-label="Agent dashboards">
             {agentSlots.map((agent) => {
               const connected = Boolean(agentDashboardUrl(agent.dashboard_url));
               return (
                 <button
                   key={agent.id}
                   type="button"
-                  onClick={() => setActiveAgent((current) => (current === agent.id ? null : agent.id))}
+                  onClick={() => openAgentDashboard(agent)}
                   className={cn(
                     "zeb-agent-tab group relative flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-1.5",
                     "font-mono text-[0.66rem] font-bold uppercase tracking-[0.11em] transition-all duration-300",
-                    activeAgent === agent.id
-                      ? "is-active border-[#58f4df]/65 bg-[#58f4df]/12 text-[#8ffff0]"
-                      : "border-current/10 text-text-secondary hover:border-[#58f4df]/35 hover:text-midground",
+                    connected
+                      ? "border-white/15 text-[#e8e8e8] hover:border-white/35 hover:text-white"
+                      : "border-white/8 text-text-tertiary hover:border-white/20 hover:text-text-secondary",
                   )}
-                  title={`${agent.label}: ${agent.status}`}
+                  title={connected ? `Open ${agent.label} in a new tab` : `${agent.label}: ${agent.status}`}
                 >
                   <span
                     className={cn(
                       "h-1.5 w-1.5 rounded-full transition-all duration-300",
                       connected
-                        ? "bg-[#58f4df] shadow-[0_0_10px_rgba(88,244,223,.9)]"
+                        ? "bg-[#d7dae0] shadow-[0_0_10px_rgba(215,218,224,.55)]"
                         : "bg-current opacity-35 group-hover:opacity-70",
                     )}
                   />
                   {agent.label}
+                  {connected ? <ExternalLink className="h-2.5 w-2.5 opacity-55" /> : null}
                 </button>
               );
             })}
-          </nav>
+          </nav> : null}
         </div>
         <div className="flex items-center gap-2">
           {/* In-chat model switcher — local model + every connected provider,
@@ -739,39 +749,6 @@ function ChatPane({
             split ? "w-1/2 max-w-[50%] pr-6" : "max-w-3xl",
           )}
         >
-          {selectedAgent ? (
-            <div className="zeb-agent-stage flex min-h-[28rem] w-full flex-col gap-3 rounded-[var(--radius)] border border-current/10 bg-midground/[0.03] p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-sans text-sm uppercase tracking-[0.12em] text-midground">
-                    {selectedAgent.label}
-                  </div>
-                  <div className="mt-1 font-mono text-[0.65rem] uppercase tracking-[0.1em] text-text-tertiary">
-                    {selectedAgent.status}
-                  </div>
-                </div>
-                <Button ghost size="sm" onClick={() => setActiveAgent(null)}>
-                  Back to chat
-                </Button>
-              </div>
-              {agentDashboardUrl(selectedAgent.dashboard_url) ? (
-                <iframe
-                  title={`${selectedAgent.label} dashboard`}
-                  src={agentDashboardUrl(selectedAgent.dashboard_url)}
-                  className="min-h-[24rem] w-full flex-1 rounded-[var(--radius)] border border-current/10 bg-background-base"
-                />
-              ) : (
-                <div className="flex min-h-[24rem] flex-1 flex-col items-center justify-center gap-2 text-center text-text-tertiary">
-                  <span className="text-sm text-text-secondary">Dashboard not built yet</span>
-                  <span className="max-w-md text-xs leading-relaxed">
-                    Zeb can use the built-in agent builder, create this agent's dashboard on the VPS,
-                    and register its URL here without a redeploy.
-                  </span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <>
           {banner ? (
             <div className="w-full rounded-[var(--radius)] border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {banner}
@@ -846,8 +823,6 @@ function ChatPane({
               <Spinner /> {thinking ? "Thinking…" : "Zeb is on it…"}
             </div>
           ) : null}
-            </>
-          )}
         </div>
       </div>
 
@@ -896,7 +871,7 @@ function ChatPane({
                 aria-label={voice.voiceMode ? "Mute Zeb's voice" : "Let Zeb speak"}
                 title={voice.voiceMode ? "Voice replies on" : "Voice replies off"}
                 className={
-                  voice.voiceMode ? "text-[#40e8dc]" : "text-text-tertiary"
+                  voice.voiceMode ? "text-[#d1d4da]" : "text-text-tertiary"
                 }
               >
                 {voice.voiceMode ? (
@@ -957,7 +932,9 @@ function agentDashboardUrl(raw: string): string {
   if (value.startsWith("/")) return value;
   try {
     const url = new URL(value, window.location.origin);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+    if (url.protocol === "https:") return url.href;
+    const localDevelopment = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+    return url.protocol === "http:" && localDevelopment ? url.href : "";
   } catch {
     return "";
   }

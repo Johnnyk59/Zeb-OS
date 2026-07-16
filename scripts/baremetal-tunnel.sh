@@ -16,7 +16,6 @@ rule="======================================================================"
 print_box() {
   local url="$1"
   local user="${ZEB_DASHBOARD_BASIC_AUTH_USERNAME:-admin}"
-  local pw="${ZEB_DASHBOARD_BASIC_AUTH_PASSWORD:-see /etc/zeb/zeb.env}"
   printf '\n\n+%s+\n' "$rule"
   printf '| %-68s |\n' ''
   printf '| %-68s |\n' 'ZEBOS DASHBOARD - PUBLIC LINK'
@@ -25,7 +24,7 @@ print_box() {
   printf '| %-68s |\n' "  $url"
   printf '| %-68s |\n' ''
   printf '| %-68s |\n' "  USERNAME: ${user}"
-  printf '| %-68s |\n' "  PASSWORD: ${pw}"
+  printf '| %-68s |\n' '  PASSWORD: stored in the root-only credential file'
   printf '| %-68s |\n' ''
   printf '| %-68s |\n' '  The link may take a few seconds to become reachable.'
   printf '+%s+\n\n' "$rule"
