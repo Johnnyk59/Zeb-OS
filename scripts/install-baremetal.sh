@@ -32,7 +32,7 @@ fi
 
 # 1. System deps -----------------------------------------------------------
 apt-get update -y
-apt-get install -y python3 python3-venv python3-pip git curl ca-certificates build-essential openssl
+apt-get install -y python3 python3-venv python3-pip git curl ca-certificates build-essential openssl poppler-utils
 
 # The dashboard toolchain requires Node 22+. Ubuntu 24.04 ships Node 18, so
 # install NodeSource's current 22.x package only when the host needs it.
@@ -125,36 +125,84 @@ fi
 # scrypt hash enters the service environment; plaintext is written once to a
 # root-only recovery file and shown only in this interactive installer output.
 umask 077
-set_env_default() {
-  key="$1"
-  value="$2"
-  if grep -q "^${key}=" "$ZEB_ENV_FILE"; then
-    current="$(sed -n "s/^${key}=//p" "$ZEB_ENV_FILE" | head -n1)"
-    if [ -z "$current" ]; then
-      sed -i "s#^${key}=.*#${key}=${value}#" "$ZEB_ENV_FILE"
+# BEGIN bare-metal env helpers
+shell_quote_env_value() {
+  local value="$1"
+  local escaped
+
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+    echo "Environment values must not contain newlines." >&2
+    return 1
+  fi
+
+  escaped="$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
+  printf "'%s'" "$escaped"
+}
+
+read_env_value() {
+  local key="$1"
+  local line
+  local value
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == "$key="* ]] || continue
+    value="${line#*=}"
+    if [[ ${#value} -ge 2 && "$value" == \'*\' ]]; then
+      value="${value:1:${#value}-2}"
+      value="$(printf '%s' "$value" | sed "s/'\\\\''/'/g")"
     fi
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$ZEB_ENV_FILE"
-  fi
+    printf '%s' "$value"
+    return 0
+  done < "$ZEB_ENV_FILE"
 }
+
 set_env_value() {
-  key="$1"
-  value="$2"
-  if grep -q "^${key}=" "$ZEB_ENV_FILE"; then
-    sed -i "s#^${key}=.*#${key}=${value}#" "$ZEB_ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$ZEB_ENV_FILE"
+  local key="$1"
+  local value="$2"
+  local encoded
+  local found=0
+  local line
+  local tmp
+
+  encoded="$(shell_quote_env_value "$value")"
+  tmp="$(mktemp "${ZEB_ENV_FILE}.tmp.XXXXXX")"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$key="* ]]; then
+      if [[ "$found" -eq 0 ]]; then
+        printf '%s=%s\n' "$key" "$encoded" >> "$tmp"
+        found=1
+      fi
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$ZEB_ENV_FILE"
+  if [[ "$found" -eq 0 ]]; then
+    printf '%s=%s\n' "$key" "$encoded" >> "$tmp"
+  fi
+  mv -f "$tmp" "$ZEB_ENV_FILE"
+}
+
+set_env_default() {
+  local key="$1"
+  local value="$2"
+  local current
+
+  current="$(read_env_value "$key")"
+  if [[ -z "$current" ]]; then
+    set_env_value "$key" "$value"
   fi
 }
+# END bare-metal env helpers
+
 set_env_default ZEB_DASHBOARD_BASIC_AUTH_USERNAME admin
 set_env_default ZEB_DASHBOARD_BASIC_AUTH_SECRET "$(openssl rand -hex 32)"
 
-dashboard_user="$(sed -n 's/^ZEB_DASHBOARD_BASIC_AUTH_USERNAME=//p' "$ZEB_ENV_FILE" | head -n1)"
-dashboard_hostnames="$(sed -n 's/^ZEB_TUNNEL_HOSTNAMES=//p' "$ZEB_ENV_FILE" | head -n1)"
+dashboard_user="$(read_env_value ZEB_DASHBOARD_BASIC_AUTH_USERNAME)"
+dashboard_hostnames="$(read_env_value ZEB_TUNNEL_HOSTNAMES)"
 dashboard_hostname="${dashboard_hostnames%%,*}"
 dashboard_hostname="${dashboard_hostname:-smartestmotherfuckerever.zeb.autos}"
-password_hash="$(sed -n 's/^ZEB_DASHBOARD_BASIC_AUTH_PASSWORD_HASH=//p' "$ZEB_ENV_FILE" | head -n1)"
-initial_password="$(sed -n 's/^ZEB_DASHBOARD_BASIC_AUTH_PASSWORD=//p' "$ZEB_ENV_FILE" | head -n1)"
+password_hash="$(read_env_value ZEB_DASHBOARD_BASIC_AUTH_PASSWORD_HASH)"
+initial_password="$(read_env_value ZEB_DASHBOARD_BASIC_AUTH_PASSWORD)"
 if [[ -n "$initial_password" || -z "$password_hash" ]]; then
   initial_password="${initial_password:-$(openssl rand -base64 24 | tr -d '\n')}"
   password_hash="$(
@@ -163,8 +211,10 @@ if [[ -n "$initial_password" || -z "$password_hash" ]]; then
         'import sys; sys.path.insert(0, sys.argv[1]); from plugins.dashboard_auth.basic import hash_password; print(hash_password(sys.stdin.read()))' \
         "$ZEB_CODE_DIR"
   )"
-  set_env_value ZEB_DASHBOARD_BASIC_AUTH_PASSWORD_HASH "$password_hash"
 fi
+# Normalize an existing raw scrypt$... assignment on every rerun. Quoting keeps
+# dollar signs literal when helper services source the env under `set -u`.
+set_env_value ZEB_DASHBOARD_BASIC_AUTH_PASSWORD_HASH "$password_hash"
 
 # Never leave a plaintext password in the service-readable environment.
 sed -i '/^ZEB_DASHBOARD_BASIC_AUTH_PASSWORD=/d' "$ZEB_ENV_FILE"

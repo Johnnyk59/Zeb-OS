@@ -39,15 +39,46 @@ password_hash="$(
 )"
 session_secret="$(openssl rand -hex 32)"
 
+# BEGIN bare-metal env helpers
+shell_quote_env_value() {
+  local value="$1"
+  local escaped
+
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+    echo "Environment values must not contain newlines." >&2
+    return 1
+  fi
+
+  escaped="$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
+  printf "'%s'" "$escaped"
+}
+
 set_env_value() {
   local key="$1"
   local value="$2"
-  if grep -q "^${key}=" "$ZEB_ENV_FILE"; then
-    sed -i "s#^${key}=.*#${key}=${value}#" "$ZEB_ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$ZEB_ENV_FILE"
+  local encoded
+  local found=0
+  local line
+  local tmp
+
+  encoded="$(shell_quote_env_value "$value")"
+  tmp="$(mktemp "${ZEB_ENV_FILE}.tmp.XXXXXX")"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$key="* ]]; then
+      if [[ "$found" -eq 0 ]]; then
+        printf '%s=%s\n' "$key" "$encoded" >> "$tmp"
+        found=1
+      fi
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$ZEB_ENV_FILE"
+  if [[ "$found" -eq 0 ]]; then
+    printf '%s=%s\n' "$key" "$encoded" >> "$tmp"
   fi
+  mv -f "$tmp" "$ZEB_ENV_FILE"
 }
+# END bare-metal env helpers
 
 umask 077
 set_env_value ZEB_DASHBOARD_BASIC_AUTH_PASSWORD_HASH "$password_hash"

@@ -13,22 +13,31 @@ export function Markdown({
   content,
   highlightTerms,
   streaming,
+  size = "default",
 }: {
   content: string;
   highlightTerms?: string[];
   streaming?: boolean;
+  size?: "default" | "chat";
 }) {
   const blocks = useMemo(() => parseBlocks(content), [content]);
   const caret = streaming ? <StreamingCaret /> : null;
 
   return (
-    <div className="text-sm text-foreground leading-relaxed space-y-2">
+    <div
+      className={
+        size === "chat"
+          ? "space-y-3 text-[1.0625rem] leading-7 text-foreground"
+          : "space-y-2 text-sm leading-relaxed text-foreground"
+      }
+    >
       {blocks.map((block, i) => (
         <Block
           key={i}
           block={block}
           highlightTerms={highlightTerms}
           caret={caret && i === blocks.length - 1 ? caret : null}
+          chatSize={size === "chat"}
         />
       ))}
       {blocks.length === 0 && caret}
@@ -160,15 +169,17 @@ function Block({
   block,
   highlightTerms,
   caret,
+  chatSize = false,
 }: {
   block: BlockNode;
   highlightTerms?: string[];
   caret?: ReactNode;
+  chatSize?: boolean;
 }) {
   switch (block.type) {
     case "code":
       return (
-        <pre className="select-text bg-secondary/60 border border-border px-3 py-2.5 text-xs font-mono leading-relaxed overflow-x-auto text-[#9aa0aa]">
+        <pre className={`select-text bg-secondary/60 border border-border px-3 py-2.5 font-mono leading-relaxed overflow-x-auto text-[#9aa0aa] ${chatSize ? "text-sm" : "text-xs"}`}>
           <code>
             {block.content}
             {caret}
@@ -179,10 +190,10 @@ function Block({
     case "heading": {
       const Tag = `h${Math.min(block.level, 4)}` as "h1" | "h2" | "h3" | "h4";
       const sizes: Record<string, string> = {
-        h1: "text-base font-bold",
-        h2: "text-sm font-bold",
-        h3: "text-sm font-semibold",
-        h4: "text-sm font-medium",
+        h1: chatSize ? "text-xl font-bold" : "text-base font-bold",
+        h2: chatSize ? "text-lg font-bold" : "text-sm font-bold",
+        h3: chatSize ? "text-base font-semibold" : "text-sm font-semibold",
+        h4: chatSize ? "text-base font-medium" : "text-sm font-medium",
       };
       return (
         <Tag className={sizes[Tag]}>
@@ -205,7 +216,7 @@ function Block({
       const last = block.items.length - 1;
       return (
         <Tag
-          className={`space-y-0.5 ${block.ordered ? "list-decimal" : "list-disc"} pl-5 text-sm`}
+          className={`space-y-0.5 ${block.ordered ? "list-decimal" : "list-disc"} pl-5 ${chatSize ? "text-[1.0625rem]" : "text-sm"}`}
         >
           {block.items.map((item, i) => (
             <li key={i}>

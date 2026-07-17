@@ -978,6 +978,20 @@ DEFAULT_CONFIG = {
         # Self-review engine — keeps the 6h/12h/24h "what did I accomplish"
         # reviews current so the dashboard buttons always show fresh summaries.
         "self_review": {"enabled": True, "interval_hours": 2},
+        # Gwen's private background brain. The scheduler checks every five
+        # minutes; durable due times in autonomy/gwen/brain.db run local
+        # reflection every 30 minutes and a configured/auto mentor every hour.
+        "gwen": {
+            "enabled": True,
+            "scheduler_interval_minutes": 5,
+            "reflection_interval_minutes": 30,
+            "mentor_interval_minutes": 60,
+            "claim_lease_seconds": 120,
+            "context_char_limit": 12000,
+            "recent_message_limit": 24,
+            "summary_char_limit": 4000,
+            "reflection_max_tokens": 700,
+        },
         # Nightly file organizer (feature 9). target="" = disabled (safe default;
         # reorganizing an unspecified tree is never done automatically).
         # dry_run defaults True: even with a target set, the bot only PLANS

@@ -16,6 +16,9 @@
  * same energy value so harder tasks visibly demand more of the brain.
  */
 import { useEffect, useRef } from "react";
+import { getBrainMotionProfile } from "@/lib/brain-activity";
+
+type RGB = readonly [number, number, number];
 
 interface Node {
   bx: number;
@@ -27,6 +30,7 @@ interface Node {
   seed: number;
   drift: number;
   fire: number;
+  palette: number;
 }
 
 interface Signal {
@@ -35,12 +39,50 @@ interface Signal {
   t: number;
 }
 
+interface Edge {
+  from: number;
+  to: number;
+  color: RGB;
+}
+
 const TILT = 0.34;
 const CT = Math.cos(TILT);
 const ST = Math.sin(TILT);
 
 function rnd(a: number, b: number): number {
   return a + Math.random() * (b - a);
+}
+
+function mixColor(a: RGB, b: RGB): RGB {
+  return [
+    Math.round((a[0] + b[0]) / 2),
+    Math.round((a[1] + b[1]) / 2),
+    Math.round((a[2] + b[2]) / 2),
+  ];
+}
+
+function createGlowSprite(color: RGB, whiteCore = false): HTMLCanvasElement {
+  const sprite = document.createElement("canvas");
+  const size = 96;
+  sprite.width = size;
+  sprite.height = size;
+  const spriteContext = sprite.getContext("2d");
+  if (!spriteContext) return sprite;
+
+  const center = size / 2;
+  const gradient = spriteContext.createRadialGradient(center, center, 0, center, center, center);
+  if (whiteCore) {
+    gradient.addColorStop(0, "rgba(255,255,255,1)");
+    gradient.addColorStop(0.12, `rgba(${color[0]},${color[1]},${color[2]},0.98)`);
+  } else {
+    gradient.addColorStop(0, `rgba(${color[0]},${color[1]},${color[2]},1)`);
+  }
+  gradient.addColorStop(0.38, `rgba(${color[0]},${color[1]},${color[2]},0.42)`);
+  gradient.addColorStop(0.72, `rgba(${color[0]},${color[1]},${color[2]},0.1)`);
+  gradient.addColorStop(1, `rgba(${color[0]},${color[1]},${color[2]},0)`);
+  spriteContext.fillStyle = gradient;
+  spriteContext.fillRect(0, 0, size, size);
+  return sprite;
 }
 
 export function BrainCanvas({
@@ -53,7 +95,10 @@ export function BrainCanvas({
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const energyRef = useRef(energy);
-  energyRef.current = energy;
+
+  useEffect(() => {
+    energyRef.current = energy;
+  }, [energy]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -74,6 +119,29 @@ export function BrainCanvas({
     let raf = 0;
     let running = true;
     let visible = true;
+    const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let reducedMotion = reducedMotionQuery.matches;
+
+    const palette: readonly RGB[] = [
+      [45, 230, 255], // cyan
+      [65, 126, 255], // electric blue
+      [157, 102, 255], // violet
+      [255, 103, 132], // coral
+    ];
+    const nodeSprites = palette.map((color) => createGlowSprite(color));
+    const signalSprite = createGlowSprite(palette[3], true);
+    const fieldSprites = [createGlowSprite(palette[0]), createGlowSprite(palette[2])];
+    const drawSprite = (
+      sprite: HTMLCanvasElement,
+      x: number,
+      y: number,
+      radius: number,
+      alpha: number,
+    ) => {
+      if (alpha <= 0 || radius <= 0) return;
+      ctx.globalAlpha = Math.min(1, alpha);
+      ctx.drawImage(sprite, x - radius, y - radius, radius * 2, radius * 2);
+    };
 
     // --- topology -----------------------------------------------------
     // A dense two-hemisphere cortex. The centre cleft and lobe modulation make
@@ -97,18 +165,32 @@ export function BrainCanvas({
       x += rnd(-0.045, 0.045);
       yy += rnd(-0.045, 0.045);
       z += rnd(-0.045, 0.045);
-      nodes.push({ bx: x, by: yy, bz: z, x, y: yy, z, seed: Math.random(), drift: rnd(0, 6.28), fire: 0 });
+      const seed = Math.random();
+      const paletteIndex =
+        seed < 0.075 ? 3 : x < 0 ? (z > 0 ? 0 : 1) : z > 0 ? 2 : 1;
+      nodes.push({
+        bx: x,
+        by: yy,
+        bz: z,
+        x,
+        y: yy,
+        z,
+        seed,
+        drift: rnd(0, 6.28),
+        fire: 0,
+        palette: paletteIndex,
+      });
     }
-    const edges: Array<[number, number]> = [];
+    const edgePairs: Array<[number, number]> = [];
     const has = (i: number, j: number) =>
-      edges.some((e) => (e[0] === i && e[1] === j) || (e[0] === j && e[1] === i));
+      edgePairs.some((e) => (e[0] === i && e[1] === j) || (e[0] === j && e[1] === i));
     const D3 = (a: Node, b: Node) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
     // Tighter threshold than before because neurons sit closer together at
     // this density — this keeps each neuron wired to a handful of neighbours
     // instead of the whole hemisphere.
     for (let i = 0; i < N; i++)
       for (let j = i + 1; j < N; j++) {
-        if (D3(nodes[i], nodes[j]) < 0.39) edges.push([i, j]);
+        if (D3(nodes[i], nodes[j]) < 0.39) edgePairs.push([i, j]);
       }
     // Guarantee no orphan neurons: wire each to its two nearest peers.
     for (let i = 0; i < N; i++) {
@@ -116,20 +198,25 @@ export function BrainCanvas({
         .map((n, j) => ({ j, d: j === i ? 9 : D3(nodes[i], n) }))
         .sort((a, b) => a.d - b.d);
       for (const { j } of dist.slice(0, 2)) {
-        if (!has(i, j)) edges.push([Math.min(i, j), Math.max(i, j)]);
+        if (!has(i, j)) edgePairs.push([Math.min(i, j), Math.max(i, j)]);
       }
     }
+    const edges: Edge[] = edgePairs.map(([from, to]) => ({
+      from,
+      to,
+      color: mixColor(palette[nodes[from].palette], palette[nodes[to].palette]),
+    }));
     const signals: Signal[] = [];
     const SIGNAL_CAP = 480;
 
-    const emitFrom = (idx: number) => {
+    const emitFrom = (idx: number, fanoutChance: number) => {
       nodes[idx].fire = 1;
       for (const e of edges) {
         let to = -1;
-        if (e[0] === idx) to = e[1];
-        else if (e[1] === idx) to = e[0];
+        if (e.from === idx) to = e.to;
+        else if (e.to === idx) to = e.from;
         else continue;
-        if (signals.length < SIGNAL_CAP && Math.random() < 0.64)
+        if (signals.length < SIGNAL_CAP && Math.random() < fanoutChance)
           signals.push({ from: idx, to, t: 0 });
       }
     };
@@ -147,69 +234,68 @@ export function BrainCanvas({
     };
 
     const step = (dt: number) => {
-      // Wake quickly, settle deliberately. Below the threshold the topology is
-      // truly still: no rotation, drift, spontaneous fire or breathing pulse.
       const target = Math.max(0, Math.min(1, energyRef.current));
       cur += (target - cur) * Math.min(1, dt * (target > cur ? 4.8 : 2.4));
-      const motion = cur < 0.018 ? 0 : Math.pow(cur, 1.18);
-      if (target === 0 && motion === 0) {
+      const profile = getBrainMotionProfile(cur);
+
+      if (reducedMotion) {
         signals.length = 0;
         fireAcc = 0;
+        for (const n of nodes) {
+          n.x = n.bx;
+          n.y = n.by;
+          n.z = n.bz;
+          n.fire = 0;
+        }
+        return;
       }
-      rot += dt * motion * (0.22 + cur * 0.92);
-      tGlobal += dt * motion * (0.55 + cur * 1.25);
+
+      rot += dt * profile.rotationSpeed;
+      tGlobal += dt * profile.driftSpeed;
       for (const n of nodes) {
-        const w = tGlobal * 0.9 + n.drift;
-        const amplitude = motion * (0.012 + cur * 0.05);
-        n.x = n.bx + Math.sin(w) * amplitude;
-        n.y = n.by + Math.cos(w * 0.9) * amplitude;
-        n.z = n.bz + Math.sin(w * 1.1) * amplitude;
-        n.fire = Math.max(0, n.fire - dt * (1.25 + cur));
+        const w = tGlobal + n.drift;
+        n.x = n.bx + Math.sin(w) * profile.driftAmplitude;
+        n.y = n.by + Math.cos(w * 0.9) * profile.driftAmplitude;
+        n.z = n.bz + Math.sin(w * 1.1) * profile.driftAmplitude;
+        n.fire = Math.max(0, n.fire - dt * profile.fireDecay);
       }
-      // No idle firing. Easy work creates a measured current; difficult work
-      // produces dense cascades across both hemispheres.
-      fireAcc += dt * Math.pow(cur, 1.45) * 17;
+
+      fireAcc += dt * profile.firingRate;
       while (fireAcc >= 1) {
         fireAcc -= 1;
-        emitFrom((Math.random() * nodes.length) | 0);
+        emitFrom((Math.random() * nodes.length) | 0, profile.fanoutChance);
       }
-      // Signals travel fast and chain readily → a cascading, electric net.
-      const speed = 0.6 + cur * 4.1;
+
       for (let i = signals.length - 1; i >= 0; i--) {
         const s = signals[i];
-        s.t += dt * speed;
+        s.t += dt * profile.signalSpeed;
         if (s.t >= 1) {
           nodes[s.to].fire = Math.min(1, nodes[s.to].fire + 0.8);
-          if (Math.random() < 0.16 + cur * 0.62) emitFrom(s.to);
+          if (Math.random() < profile.cascadeChance) {
+            emitFrom(s.to, profile.fanoutChance);
+          }
           signals.splice(i, 1);
         }
       }
     };
 
-    // Graphite-silver cortex, warm signal current and white-hot firing points.
-    const NC: [number, number, number] = [177, 184, 195];
-    const SC: [number, number, number] = [218, 177, 119];
-
     const draw = () => {
-      // Pull existing pixels toward alpha 0 → comet trails without a
-      // dark box over the content behind the overlay. A gentler fade at
-      // high energy leaves longer, silkier light streaks.
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.fillStyle = `rgba(0,0,0,${0.22 + 0.16 * (1 - cur)})`;
-      ctx.fillRect(0, 0, W, H);
+      if (reducedMotion) {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.clearRect(0, 0, W, H);
+      } else {
+        // Fade old pixels without painting a dark rectangle over the chat.
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.fillStyle = `rgba(0,0,0,${0.22 + 0.16 * (1 - cur)})`;
+        ctx.fillRect(0, 0, W, H);
+      }
       ctx.globalCompositeOperation = "lighter";
 
-      // A soft field appears only while working, giving high effort a sense of
-      // contained power without painting a flat box behind the canvas.
+      // These fields and every neuron/signal bloom reuse mount-time sprites;
+      // the animation loop allocates no CanvasGradient objects.
       if (cur > 0.03) {
-        const field = ctx.createRadialGradient(CX, CY, 0, CX, CY, scale * 1.28);
-        field.addColorStop(0, `rgba(${NC[0]},${NC[1]},${NC[2]},${cur * 0.055})`);
-        field.addColorStop(0.55, `rgba(${SC[0]},${SC[1]},${SC[2]},${cur * 0.018})`);
-        field.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = field;
-        ctx.beginPath();
-        ctx.arc(CX, CY, scale * 1.28, 0, 7);
-        ctx.fill();
+        drawSprite(fieldSprites[0], CX - scale * 0.2, CY, scale * 1.18, cur * 0.075);
+        drawSprite(fieldSprites[1], CX + scale * 0.2, CY, scale * 1.18, cur * 0.065);
       }
 
       const P = nodes.map((n, i) => {
@@ -217,23 +303,26 @@ export function BrainCanvas({
           i: number;
           fire: number;
           seed: number;
+          palette: number;
         };
         p.i = i;
         p.fire = n.fire;
         p.seed = n.seed;
+        p.palette = n.palette;
         return p;
       });
       const order = P.slice().sort((a, b) => a.depth - b.depth);
 
-      // Synapses — brighter and slightly warmer as the net lights up. Front
-      // edges read stronger than the ones curving behind the sphere.
+      ctx.globalAlpha = 1;
       for (const e of edges) {
-        const a = P[e[0]];
-        const b = P[e[1]];
+        const a = P[e.from];
+        const b = P[e.to];
         const dep = (a.depth + b.depth) / 2;
         const heat = Math.max(a.fire, b.fire);
-        const al = (0.035 + cur * 0.24 + heat * 0.3) * (0.42 + 0.58 * ((dep + 1) / 2));
-        ctx.strokeStyle = `rgba(${NC[0]},${NC[1]},${NC[2]},${al})`;
+        const al =
+          (0.045 + cur * 0.29 + heat * 0.32) *
+          (0.42 + 0.58 * ((dep + 1) / 2));
+        ctx.strokeStyle = `rgba(${e.color[0]},${e.color[1]},${e.color[2]},${al})`;
         ctx.lineWidth = Math.max(0.4, scale * (0.006 + heat * 0.006) * a.persp);
         ctx.beginPath();
         ctx.moveTo(a.sx, a.sy);
@@ -241,7 +330,6 @@ export function BrainCanvas({
         ctx.stroke();
       }
 
-      // Travelling signals — a warm amber comet with a hot core.
       for (const s of signals) {
         const a = P[s.from];
         const b = P[s.to];
@@ -250,51 +338,33 @@ export function BrainCanvas({
         const y = a.sy + (b.sy - a.sy) * te;
         const persp = (a.persp + b.persp) / 2;
         const r = (scale * 0.013 + cur * scale * 0.014) * persp;
-        const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3.6);
-        g.addColorStop(0, `rgba(255,255,255,0.9)`);
-        g.addColorStop(0.25, `rgba(${SC[0]},${SC[1]},${SC[2]},0.85)`);
-        g.addColorStop(0.6, `rgba(${SC[0]},${SC[1]},${SC[2]},0.32)`);
-        g.addColorStop(1, `rgba(${SC[0]},${SC[1]},${SC[2]},0)`);
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(x, y, r * 3.6, 0, 7);
-        ctx.fill();
+        drawSprite(signalSprite, x, y, r * 3.8, 0.78 + cur * 0.22);
       }
 
-      // Neurons — two-layer bloom (wide halo + tight core) plus a hot white
-      // pinpoint while firing, drawn back-to-front for depth.
       for (const p of order) {
         const pulse = cur * (0.5 + 0.5 * Math.sin(tGlobal * (0.8 + cur * 1.8) + p.seed * 6.28));
         const depthN = (p.depth + 1) / 2;
         const base = scale * (0.008 + 0.013 * depthN) * p.persp;
-        const rr = base * (1 + pulse * 0.2 + p.fire * 0.95 + cur * 0.28);
-        const bright = Math.min(1, 0.22 + p.fire * 0.62 + cur * 0.3 + depthN * 0.13);
+        const visibleFire = p.fire * (0.35 + cur * 0.65);
+        const rr = base * (1 + pulse * 0.2 + visibleFire * 0.95 + cur * 0.3);
+        const bright = Math.min(
+          1,
+          0.28 + visibleFire * 0.58 + cur * 0.36 + depthN * 0.13,
+        );
+        const sprite = nodeSprites[p.palette];
 
-        // Wide soft halo — a touch larger for a brighter bloom.
-        const halo = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, rr * 4.6);
-        halo.addColorStop(0, `rgba(${NC[0]},${NC[1]},${NC[2]},${bright * 0.5})`);
-        halo.addColorStop(0.5, `rgba(${NC[0]},${NC[1]},${NC[2]},${bright * 0.16})`);
-        halo.addColorStop(1, `rgba(${NC[0]},${NC[1]},${NC[2]},0)`);
-        ctx.fillStyle = halo;
-        ctx.beginPath();
-        ctx.arc(p.sx, p.sy, rr * 4.2, 0, 7);
-        ctx.fill();
+        drawSprite(sprite, p.sx, p.sy, rr * 4.6, bright * (0.42 + cur * 0.12));
+        drawSprite(sprite, p.sx, p.sy, rr * 1.7, bright * 0.9);
 
-        // Tight bright core.
-        const core = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, rr * 1.6);
-        core.addColorStop(0, `rgba(${NC[0]},${NC[1]},${NC[2]},${bright})`);
-        core.addColorStop(1, `rgba(${NC[0]},${NC[1]},${NC[2]},0)`);
-        ctx.fillStyle = core;
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.24 + visibleFire * 0.7 + cur * 0.12)})`;
         ctx.beginPath();
-        ctx.arc(p.sx, p.sy, rr * 1.6, 0, 7);
-        ctx.fill();
-
-        // Hot white spark at the centre — sharpest while firing.
-        ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.35 + p.fire * 0.55)})`;
-        ctx.beginPath();
-        ctx.arc(p.sx, p.sy, Math.max(0.5, rr * (0.4 + p.fire * 0.35)), 0, 7);
+        ctx.arc(p.sx, p.sy, Math.max(0.45, rr * (0.34 + visibleFire * 0.34)), 0, 7);
         ctx.fill();
       }
+
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
     };
 
     const resize = () => {
@@ -318,7 +388,13 @@ export function BrainCanvas({
         raf = requestAnimationFrame(frame);
         return;
       }
-      const dt = Math.min((ts - last) / 1000, 0.05);
+      // A reduced-motion canvas only needs enough frames to ease brightness
+      // when energy changes; rotation, drift and signals remain disabled.
+      if (reducedMotion && ts - last < 100) {
+        raf = requestAnimationFrame(frame);
+        return;
+      }
+      const dt = Math.min((ts - last) / 1000, reducedMotion ? 0.1 : 0.05);
       last = ts;
       step(dt);
       draw();
@@ -332,6 +408,14 @@ export function BrainCanvas({
       visible = entries[0]?.isIntersecting ?? true;
     });
     io.observe(canvas);
+    const onReducedMotionChange = (event: MediaQueryListEvent) => {
+      reducedMotion = event.matches;
+      if (reducedMotion) {
+        signals.length = 0;
+        fireAcc = 0;
+      }
+    };
+    reducedMotionQuery.addEventListener("change", onReducedMotionChange);
 
     raf = requestAnimationFrame((ts) => {
       last = ts;
@@ -343,6 +427,7 @@ export function BrainCanvas({
       cancelAnimationFrame(raf);
       ro.disconnect();
       io.disconnect();
+      reducedMotionQuery.removeEventListener("change", onReducedMotionChange);
     };
   }, []);
 

@@ -5,6 +5,7 @@ import { useI18n } from "@/i18n";
 
 export function SidebarFooter({ status }: SidebarFooterProps) {
   const { t } = useI18n();
+  void status;
 
   return (
     <div
@@ -15,9 +16,9 @@ export function SidebarFooter({ status }: SidebarFooterProps) {
       )}
     >
       <Typography
-        className="font-mono-ui text-xs tabular-nums tracking-[0.08em] text-text-tertiary lowercase"
+        className="font-mono-ui text-xs tabular-nums tracking-[0.08em] text-text-tertiary"
       >
-        {status?.version != null ? `v${status.version}` : "—"}
+        V6.9
       </Typography>
 
       <a
