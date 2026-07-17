@@ -16,15 +16,25 @@ export type RoommateSceneId =
   | "carry-tv"
   | "phone"
   | "snack"
-  | "couch-forward"
+  | "window-vape"
   | "couch-crossed"
-  | "couch-vape"
+  | "groceries"
   | "gaming"
   | "sleep"
   | "laptop"
   | "plant"
   | "music"
-  | "groceries";
+  | "trading"
+  | "ramen"
+  | "meditate"
+  | "maker"
+  | "couch-vape"
+  | "crate-vape"
+  | "phone-vape"
+  | "big-exhale";
+
+type RoommatePose = "standing" | "seated" | "mobile" | "floor";
+type RoommateZone = "free" | "lounge" | "desk" | "mobile" | "floor";
 
 type RoommateMotion =
   | "rest"
@@ -39,23 +49,37 @@ type RoommateMotion =
   | "sleep"
   | "type"
   | "water"
-  | "music";
+  | "music"
+  | "trade"
+  | "noodle"
+  | "meditate"
+  | "maker";
 
 type RoommateEffect =
   | "none"
   | "smoke"
+  | "weights"
   | "tv"
   | "phone"
   | "crumbs"
-  | "weights"
+  | "footsteps"
   | "controller"
   | "dream"
   | "laptop"
   | "water"
   | "music"
-  | "footsteps";
+  | "hologram"
+  | "steam"
+  | "aura"
+  | "maker";
 
-export type RoommateTransition = "crossfade" | "walk" | "sit" | "stand";
+export type RoommateTransition =
+  | "crossfade"
+  | "walk"
+  | "lounge"
+  | "rise"
+  | "desk"
+  | "floor";
 
 type MicroAction =
   | "none"
@@ -65,13 +89,18 @@ type MicroAction =
   | "exhale"
   | "rep"
   | "tap"
+  | "scroll"
   | "bite"
   | "play"
   | "dream"
   | "type"
   | "water"
   | "bop"
-  | "step";
+  | "step"
+  | "focus"
+  | "steam"
+  | "float"
+  | "repair";
 
 interface EyeGeometry {
   x: number;
@@ -87,9 +116,11 @@ export interface RoommateScene {
   sheet: string;
   cell: number;
   label: string;
-  pose: "standing" | "seated" | "mobile";
+  pose: RoommatePose;
+  zone: RoommateZone;
   motion: RoommateMotion;
   effect: RoommateEffect;
+  holdMs: readonly [number, number];
   eyes?: EyeGeometry;
   scale?: number;
   x?: number;
@@ -97,252 +128,395 @@ export interface RoommateScene {
   propLocked?: boolean;
 }
 
-const SHEET_MAIN = "/zeb/zeb-roommate-sprites.png";
-const SHEET_LIFE = "/zeb/zeb-roommate-life-sprites.png";
-const SHEET_HOBBIES = "/zeb/zeb-roommate-hobbies-sprites.png";
+const SHEET_CORE = "/zeb/zeb-roommate-core-sprites-v2.png";
+const SHEET_DAILY = "/zeb/zeb-roommate-daily-sprites-v2.png";
+const SHEET_FLOW = "/zeb/zeb-roommate-flow-sprites-v2.png";
+const SHEET_EXTRA = "/zeb/zeb-roommate-extra-sprites-v2.png";
+const SHEET_SMOKE = "/zeb/zeb-roommate-smoke-sprites-v2.png";
 
-const DEFAULT_EYES: EyeGeometry = { x: 50, y: 25, width: 28, height: 8, gap: 5 };
+const STANDING_EYES: EyeGeometry = { x: 50, y: 22, width: 21.5, height: 7.5, gap: 5.1 };
+const SEATED_EYES: EyeGeometry = { x: 33, y: 24, width: 18.6, height: 7.2, gap: 4.6 };
+const FLOOR_EYES: EyeGeometry = { x: 28, y: 21.5, width: 18.8, height: 7.1, gap: 4.3 };
 
 export const ROOMMATE_SCENES: Record<RoommateSceneId, RoommateScene> = {
   idle: {
     id: "idle",
-    sheet: SHEET_MAIN,
+    sheet: SHEET_CORE,
     cell: 0,
-    label: "chilling",
+    label: "just standing there faded",
     pose: "standing",
+    zone: "free",
     motion: "rest",
     effect: "none",
-    eyes: { ...DEFAULT_EYES, x: 56.3, y: 25.5, width: 21.3 },
-    scale: 0.9,
-    y: 2,
+    holdMs: [34_000, 58_000],
+    eyes: { ...STANDING_EYES, x: 51.8, y: 21.8, width: 21.2 },
+    scale: 1.08,
+    y: 1,
   },
   vape: {
     id: "vape",
-    sheet: SHEET_MAIN,
+    sheet: SHEET_CORE,
     cell: 1,
-    label: "smoke break",
+    label: "taking a smoke break",
     pose: "standing",
+    zone: "free",
     motion: "smoke",
     effect: "smoke",
-    eyes: { ...DEFAULT_EYES, x: 50.1, y: 26.2, width: 21.3 },
-    scale: 0.9,
-    y: 2,
+    holdMs: [32_000, 54_000],
+    eyes: { ...STANDING_EYES, x: 50.4, y: 22.2, width: 21.4 },
+    scale: 1.09,
+    y: 1,
   },
   weights: {
     id: "weights",
-    sheet: SHEET_MAIN,
+    sheet: SHEET_CORE,
     cell: 2,
-    label: "getting a pump",
+    label: "getting a little pump in",
     pose: "standing",
+    zone: "free",
     motion: "lift",
     effect: "weights",
-    eyes: { ...DEFAULT_EYES, x: 43.1, y: 25.7, width: 20.9 },
-    scale: 0.88,
-    y: 2,
+    holdMs: [26_000, 42_000],
+    eyes: { ...STANDING_EYES, x: 50.1, y: 21.5, width: 20.7 },
+    scale: 1.07,
+    y: 1,
   },
   couch: {
     id: "couch",
-    sheet: SHEET_MAIN,
+    sheet: SHEET_CORE,
     cell: 3,
-    label: "posted up",
+    label: "posted up on the couch",
     pose: "seated",
+    zone: "lounge",
     motion: "lounge",
     effect: "none",
-    eyes: { ...DEFAULT_EYES, x: 45.6, y: 26.5, width: 18.2 },
-    scale: 0.79,
-    y: 5,
+    holdMs: [38_000, 64_000],
+    eyes: { ...SEATED_EYES, x: 26.5, y: 24.1, width: 18.1, rotate: 1 },
+    scale: 1.04,
+    y: 3,
     propLocked: true,
   },
   tv: {
     id: "tv",
-    sheet: SHEET_MAIN,
+    sheet: SHEET_CORE,
     cell: 4,
-    label: "watching something",
+    label: "locked into a retro screen",
     pose: "seated",
+    zone: "lounge",
     motion: "watch",
     effect: "tv",
-    eyes: { ...DEFAULT_EYES, x: 39.6, y: 26.1, width: 18.6 },
-    scale: 0.76,
+    holdMs: [36_000, 60_000],
+    eyes: { ...SEATED_EYES, x: 31.8, y: 24.6, width: 18.3, rotate: 1 },
+    scale: 1.02,
     x: -1,
-    y: 5,
+    y: 4,
     propLocked: true,
   },
   "carry-tv": {
     id: "carry-tv",
-    sheet: SHEET_MAIN,
+    sheet: SHEET_CORE,
     cell: 5,
-    label: "moving the TV",
+    label: "moving the whole setup",
     pose: "mobile",
+    zone: "mobile",
     motion: "walk",
     effect: "footsteps",
-    eyes: { ...DEFAULT_EYES, x: 46, y: 20.4, width: 18.6 },
-    scale: 0.84,
-    x: 1,
-    y: 4,
+    holdMs: [20_000, 36_000],
+    eyes: { ...STANDING_EYES, x: 52.2, y: 20.3, width: 18.8 },
+    scale: 1.05,
+    y: 3,
   },
   phone: {
     id: "phone",
-    sheet: SHEET_LIFE,
-    cell: 1,
-    label: "checking the group chat",
+    sheet: SHEET_DAILY,
+    cell: 0,
+    label: "checking his phone",
     pose: "standing",
+    zone: "free",
     motion: "phone",
     effect: "phone",
-    eyes: { ...DEFAULT_EYES, x: 52.3, y: 28.7, width: 25.4 },
-    scale: 0.89,
-    y: 2,
+    holdMs: [26_000, 46_000],
+    eyes: { ...STANDING_EYES, x: 52.6, y: 21.6, width: 21.4 },
+    scale: 1.08,
+    y: 1,
   },
   snack: {
     id: "snack",
-    sheet: SHEET_LIFE,
-    cell: 2,
-    label: "snack run",
+    sheet: SHEET_DAILY,
+    cell: 1,
+    label: "killing a bag of chips",
     pose: "standing",
+    zone: "free",
     motion: "snack",
     effect: "crumbs",
-    eyes: { ...DEFAULT_EYES, x: 49.6, y: 28.9, width: 25.8 },
-    scale: 0.88,
-    y: 2,
+    holdMs: [24_000, 40_000],
+    eyes: { ...STANDING_EYES, x: 50.8, y: 22.1, width: 21.4 },
+    scale: 1.05,
+    y: 1,
   },
-  "couch-forward": {
-    id: "couch-forward",
-    sheet: SHEET_LIFE,
-    cell: 3,
-    label: "locked in",
-    pose: "seated",
-    motion: "lounge",
-    effect: "none",
-    eyes: { ...DEFAULT_EYES, x: 58.7, y: 29.5, width: 24.1 },
-    scale: 0.79,
-    y: 5,
-    propLocked: true,
+  "window-vape": {
+    id: "window-vape",
+    sheet: SHEET_DAILY,
+    cell: 2,
+    label: "leaning back with the vape",
+    pose: "standing",
+    zone: "free",
+    motion: "smoke",
+    effect: "smoke",
+    holdMs: [32_000, 52_000],
+    eyes: { ...STANDING_EYES, x: 51.3, y: 21.5, width: 20.9 },
+    scale: 1.06,
+    y: 1,
   },
   "couch-crossed": {
     id: "couch-crossed",
-    sheet: SHEET_LIFE,
+    sheet: SHEET_DAILY,
     cell: 4,
-    label: "getting comfortable",
+    label: "sitting all comfortable",
     pose: "seated",
+    zone: "lounge",
     motion: "lounge",
     effect: "none",
-    eyes: { ...DEFAULT_EYES, x: 38, y: 25.9, width: 23.3 },
-    scale: 0.79,
+    holdMs: [38_000, 64_000],
+    eyes: { ...SEATED_EYES, x: 34.7, y: 24.2, width: 18.6 },
+    scale: 1.03,
+    y: 4,
+    propLocked: true,
+  },
+  groceries: {
+    id: "groceries",
+    sheet: SHEET_DAILY,
+    cell: 5,
+    label: "back from the store",
+    pose: "mobile",
+    zone: "mobile",
+    motion: "walk",
+    effect: "footsteps",
+    holdMs: [22_000, 38_000],
+    eyes: { ...STANDING_EYES, x: 50.4, y: 20.2, width: 18.9 },
+    scale: 1.03,
+    y: 3,
+  },
+  gaming: {
+    id: "gaming",
+    sheet: SHEET_FLOW,
+    cell: 0,
+    label: "running one more game",
+    pose: "seated",
+    zone: "lounge",
+    motion: "game",
+    effect: "controller",
+    holdMs: [30_000, 50_000],
+    eyes: { ...SEATED_EYES, x: 28.7, y: 21.8, width: 18.5 },
+    scale: 1.04,
+    y: 4,
+    propLocked: true,
+  },
+  sleep: {
+    id: "sleep",
+    sheet: SHEET_FLOW,
+    cell: 1,
+    label: "out cold for a minute",
+    pose: "seated",
+    zone: "lounge",
+    motion: "sleep",
+    effect: "dream",
+    holdMs: [52_000, 90_000],
+    scale: 1.03,
+    y: 4,
+    propLocked: true,
+  },
+  laptop: {
+    id: "laptop",
+    sheet: SHEET_FLOW,
+    cell: 2,
+    label: "building something",
+    pose: "seated",
+    zone: "desk",
+    motion: "type",
+    effect: "laptop",
+    holdMs: [34_000, 62_000],
+    eyes: { ...SEATED_EYES, x: 32.2, y: 22.2, width: 18.2, rotate: -1 },
+    scale: 1.01,
+    y: 4,
+    propLocked: true,
+  },
+  plant: {
+    id: "plant",
+    sheet: SHEET_FLOW,
+    cell: 3,
+    label: "watering the plant",
+    pose: "standing",
+    zone: "free",
+    motion: "water",
+    effect: "water",
+    holdMs: [28_000, 46_000],
+    eyes: { ...STANDING_EYES, x: 28.2, y: 21.8, width: 20.8, rotate: -2 },
+    scale: 1.03,
+    x: -4,
+    y: 2,
+    propLocked: true,
+  },
+  music: {
+    id: "music",
+    sheet: SHEET_FLOW,
+    cell: 4,
+    label: "floating in the music",
+    pose: "standing",
+    zone: "free",
+    motion: "music",
+    effect: "music",
+    holdMs: [30_000, 50_000],
+    eyes: { ...STANDING_EYES, x: 50.1, y: 21.9, width: 21.2 },
+    scale: 1.06,
+    y: 1,
+  },
+  trading: {
+    id: "trading",
+    sheet: SHEET_FLOW,
+    cell: 5,
+    label: "watching the charts",
+    pose: "seated",
+    zone: "desk",
+    motion: "trade",
+    effect: "hologram",
+    holdMs: [34_000, 60_000],
+    eyes: { ...SEATED_EYES, x: 33.1, y: 22.6, width: 18.3 },
+    scale: 1.03,
+    y: 4,
+    propLocked: true,
+  },
+  ramen: {
+    id: "ramen",
+    sheet: SHEET_EXTRA,
+    cell: 0,
+    label: "eating ramen on the floor",
+    pose: "floor",
+    zone: "floor",
+    motion: "noodle",
+    effect: "steam",
+    holdMs: [26_000, 46_000],
+    eyes: { ...FLOOR_EYES, x: 23.2, y: 20.4, width: 19.3 },
+    scale: 0.99,
+    y: 6,
+    propLocked: true,
+  },
+  meditate: {
+    id: "meditate",
+    sheet: SHEET_EXTRA,
+    cell: 3,
+    label: "sitting still for once",
+    pose: "floor",
+    zone: "floor",
+    motion: "meditate",
+    effect: "aura",
+    holdMs: [42_000, 74_000],
+    eyes: { ...FLOOR_EYES, x: 22.4, y: 22.6, width: 18.3 },
+    scale: 0.98,
+    y: 6,
+    propLocked: true,
+  },
+  maker: {
+    id: "maker",
+    sheet: SHEET_EXTRA,
+    cell: 5,
+    label: "messing with a little gadget",
+    pose: "seated",
+    zone: "desk",
+    motion: "maker",
+    effect: "maker",
+    holdMs: [32_000, 56_000],
+    eyes: { ...SEATED_EYES, x: 27.9, y: 21.1, width: 18.2 },
+    scale: 1,
     y: 5,
     propLocked: true,
   },
   "couch-vape": {
     id: "couch-vape",
-    sheet: SHEET_LIFE,
-    cell: 5,
-    label: "smoke break",
+    sheet: SHEET_SMOKE,
+    cell: 0,
+    label: "smoking on the couch",
     pose: "seated",
+    zone: "lounge",
     motion: "smoke",
     effect: "smoke",
-    eyes: { ...DEFAULT_EYES, x: 41.5, y: 25.2, width: 23.7 },
-    scale: 0.77,
-    y: 5,
+    holdMs: [34_000, 56_000],
+    eyes: { ...SEATED_EYES, x: 27.4, y: 23.6, width: 18.2 },
+    scale: 1.03,
+    y: 4,
     propLocked: true,
   },
-  gaming: {
-    id: "gaming",
-    sheet: SHEET_HOBBIES,
-    cell: 0,
-    label: "one more game",
-    pose: "seated",
-    motion: "game",
-    effect: "controller",
-    eyes: { ...DEFAULT_EYES, x: 62.1, y: 32.5, width: 23.5 },
-    scale: 0.8,
-    y: 5,
-    propLocked: true,
-  },
-  sleep: {
-    id: "sleep",
-    sheet: SHEET_HOBBIES,
+  "crate-vape": {
+    id: "crate-vape",
+    sheet: SHEET_SMOKE,
     cell: 1,
-    label: "power nap",
+    label: "smoking on a milk crate",
     pose: "seated",
-    motion: "sleep",
-    effect: "dream",
-    scale: 0.8,
-    y: 5,
+    zone: "lounge",
+    motion: "smoke",
+    effect: "smoke",
+    holdMs: [32_000, 52_000],
+    eyes: { ...SEATED_EYES, x: 49.7, y: 21.8, width: 19.1 },
+    scale: 1.02,
+    y: 4,
     propLocked: true,
   },
-  laptop: {
-    id: "laptop",
-    sheet: SHEET_HOBBIES,
+  "phone-vape": {
+    id: "phone-vape",
+    sheet: SHEET_SMOKE,
     cell: 2,
-    label: "building something",
-    pose: "seated",
-    motion: "type",
-    effect: "laptop",
-    eyes: { ...DEFAULT_EYES, x: 45.4, y: 32.4, width: 23.7, rotate: -2 },
-    scale: 0.77,
-    y: 5,
-    propLocked: true,
-  },
-  plant: {
-    id: "plant",
-    sheet: SHEET_HOBBIES,
-    cell: 3,
-    label: "plant duty",
+    label: "scrolling and smoking",
     pose: "standing",
-    motion: "water",
-    effect: "water",
-    eyes: { ...DEFAULT_EYES, x: 49.3, y: 21.2, width: 22.1, rotate: -1 },
-    scale: 0.82,
-    x: -1,
-    y: 4,
-    propLocked: true,
+    zone: "free",
+    motion: "smoke",
+    effect: "smoke",
+    holdMs: [30_000, 50_000],
+    eyes: { ...STANDING_EYES, x: 50.4, y: 22.1, width: 21.2 },
+    scale: 1.06,
+    y: 1,
   },
-  music: {
-    id: "music",
-    sheet: SHEET_HOBBIES,
+  "big-exhale": {
+    id: "big-exhale",
+    sheet: SHEET_SMOKE,
     cell: 4,
-    label: "in his zone",
-    pose: "standing",
-    motion: "music",
-    effect: "music",
-    scale: 0.88,
-    y: 2,
-  },
-  groceries: {
-    id: "groceries",
-    sheet: SHEET_HOBBIES,
-    cell: 5,
-    label: "back from the store",
-    pose: "mobile",
-    motion: "walk",
-    effect: "footsteps",
-    eyes: { ...DEFAULT_EYES, x: 44.3, y: 19, width: 21.9 },
-    scale: 0.82,
+    label: "blowing a giant cloud",
+    pose: "seated",
+    zone: "lounge",
+    motion: "smoke",
+    effect: "smoke",
+    holdMs: [30_000, 50_000],
+    eyes: { ...SEATED_EYES, x: 33.6, y: 24, width: 18.4 },
+    scale: 1.03,
     y: 4,
+    propLocked: true,
   },
 };
 
-// Five of twenty equal-duration slots are smoking scenes, keeping long-run
-// visible smoking time at one quarter without an obviously repeating pattern.
 export const ROOMMATE_ACTIVITY_CYCLE: RoommateSceneId[] = [
-  "vape",
-  "couch-vape",
-  "vape",
-  "couch-vape",
-  "vape",
   "idle",
+  "vape",
   "weights",
   "couch",
   "tv",
   "carry-tv",
   "phone",
   "snack",
-  "couch-forward",
+  "window-vape",
   "couch-crossed",
+  "groceries",
   "gaming",
   "sleep",
   "laptop",
   "plant",
   "music",
-  "groceries",
+  "trading",
+  "ramen",
+  "meditate",
+  "maker",
+  "couch-vape",
+  "crate-vape",
+  "phone-vape",
+  "big-exhale",
 ];
 
 const MICRO_ACTIONS: Record<RoommateSceneId, readonly MicroAction[]> = {
@@ -350,35 +524,46 @@ const MICRO_ACTIONS: Record<RoommateSceneId, readonly MicroAction[]> = {
   vape: ["draw", "exhale", "settle"],
   weights: ["rep", "rep", "settle"],
   couch: ["settle", "look"],
-  tv: ["look", "settle"],
-  "carry-tv": ["step", "settle"],
-  phone: ["tap", "look", "tap"],
-  snack: ["bite", "settle"],
-  "couch-forward": ["settle", "look"],
+  tv: ["focus", "focus", "settle"],
+  "carry-tv": ["step", "step", "settle"],
+  phone: ["tap", "scroll", "look"],
+  snack: ["bite", "settle", "bite"],
+  "window-vape": ["draw", "exhale", "look"],
   "couch-crossed": ["settle", "look"],
-  "couch-vape": ["draw", "exhale", "settle"],
-  gaming: ["play", "play", "look"],
+  groceries: ["step", "settle"],
+  gaming: ["play", "play", "focus"],
   sleep: ["dream", "dream"],
-  laptop: ["type", "type", "look"],
+  laptop: ["type", "type", "focus"],
   plant: ["water", "look"],
   music: ["bop", "bop", "settle"],
-  groceries: ["step", "settle"],
+  trading: ["type", "focus", "focus"],
+  ramen: ["bite", "steam", "settle"],
+  meditate: ["float", "float", "settle"],
+  maker: ["repair", "repair", "focus"],
+  "couch-vape": ["draw", "exhale", "settle"],
+  "crate-vape": ["draw", "exhale", "look"],
+  "phone-vape": ["tap", "draw", "exhale"],
+  "big-exhale": ["draw", "exhale", "exhale"],
 };
 
 const MICRO_ACTION_DELAYS: Record<RoommateMotion, readonly [number, number]> = {
-  rest: [7_000, 13_000],
-  smoke: [5_000, 10_000],
-  lift: [4_500, 8_500],
-  lounge: [8_000, 15_000],
-  watch: [8_000, 15_000],
-  walk: [5_000, 10_000],
-  phone: [4_500, 9_000],
-  snack: [5_000, 10_000],
-  game: [4_000, 8_000],
-  sleep: [11_000, 18_000],
-  type: [4_500, 9_000],
-  water: [6_000, 11_000],
-  music: [4_000, 8_000],
+  rest: [8_500, 15_000],
+  smoke: [4_800, 8_800],
+  lift: [4_000, 7_200],
+  lounge: [8_500, 16_000],
+  watch: [6_800, 12_500],
+  walk: [4_400, 7_800],
+  phone: [4_000, 7_800],
+  snack: [4_800, 8_400],
+  game: [4_000, 7_200],
+  sleep: [10_500, 16_500],
+  type: [4_200, 7_800],
+  water: [5_400, 9_200],
+  music: [4_500, 8_000],
+  trade: [4_500, 7_600],
+  noodle: [5_500, 9_400],
+  meditate: [6_500, 11_500],
+  maker: [4_600, 8_200],
 };
 
 function shuffledCycle(): RoommateSceneId[] {
@@ -410,8 +595,6 @@ export function selectNextRoommateScene(
     replenished = true;
   }
 
-  // The registry has multiple scenes, so this is only a guard against a bad
-  // injected replenishment source rather than part of the normal schedule.
   const fallback = ROOMMATE_ACTIVITY_CYCLE.find((candidate) => candidate !== current);
   return { sceneId: fallback ?? current, remaining: [] };
 }
@@ -436,9 +619,11 @@ export function roommateTransition(
   from: RoommateScene,
   to: RoommateScene,
 ): RoommateTransition {
-  if (from.pose === "seated" && to.pose !== "seated") return "stand";
-  if (from.pose !== "seated" && to.pose === "seated") return "sit";
   if (from.pose === "mobile" || to.pose === "mobile") return "walk";
+  if (from.pose === "floor" || to.pose === "floor") return "floor";
+  if (from.zone === "desk" || to.zone === "desk") return "desk";
+  if (from.pose === "seated" && to.pose !== "seated") return "rise";
+  if (from.pose !== "seated" && to.pose === "seated") return "lounge";
   return "crossfade";
 }
 
@@ -467,6 +652,10 @@ function eyeVariables(eyes: EyeGeometry): CSSProperties {
     "--eye-gap": `${eyes.gap ?? 5}%`,
     "--eye-rotate": `${eyes.rotate ?? 0}deg`,
   } as CSSProperties;
+}
+
+function sceneDelay(scene: RoommateScene): number {
+  return randomBetween(scene.holdMs[0], scene.holdMs[1]);
 }
 
 function RoommateEffects({
@@ -517,6 +706,8 @@ function RoommateSceneLayer({
       className={classes(
         "zeb-roommate__scene",
         `scene-${scene.id}`,
+        `pose-${scene.pose}`,
+        `zone-${scene.zone}`,
         `motion-${scene.motion}`,
         `is-${role}`,
         role !== "steady" && `transition-${transition}`,
@@ -616,7 +807,7 @@ export function ZebRoommate() {
     if (reducedMotion || previewScene) return;
 
     let cancelled = false;
-    const schedule = (delay = randomBetween(44_000, 78_000)) => {
+    const schedule = (delay = sceneDelay(ROOMMATE_SCENES[sceneRef.current])) => {
       sceneTimerRef.current = window.setTimeout(() => {
         if (cancelled) return;
         if (document.hidden) {
@@ -654,12 +845,12 @@ export function ZebRoommate() {
 
         transitionTimerRef.current = window.setTimeout(() => {
           if (!cancelled) setPreviousSceneId(null);
-        }, 1_850);
-        schedule();
+        }, 1_980);
+        schedule(sceneDelay(ROOMMATE_SCENES[next]));
       }, delay);
     };
 
-    schedule(22_000);
+    schedule(18_000);
     return () => {
       cancelled = true;
       if (sceneTimerRef.current !== null) window.clearTimeout(sceneTimerRef.current);
@@ -676,16 +867,16 @@ export function ZebRoommate() {
     const scheduleBlink = () => {
       timer = window.setTimeout(() => {
         if (!document.hidden && !cancelled) {
-          const doubleBlink = Math.random() < 0.18;
+          const doubleBlink = Math.random() < 0.22;
           setBlinkPattern(doubleBlink ? "double" : "single");
           setBlinking(true);
           blinkEnd = window.setTimeout(
             () => setBlinking(false),
-            doubleBlink ? 520 : 210,
+            doubleBlink ? 540 : 190,
           );
         }
         if (!cancelled) scheduleBlink();
-      }, randomBetween(11_500, 16_500));
+      }, randomBetween(12_500, 18_500));
     };
     scheduleBlink();
     return () => {
@@ -717,7 +908,7 @@ export function ZebRoommate() {
           setMicroAction(nextAction);
           actionEnd = window.setTimeout(
             () => setMicroAction("none"),
-            randomBetween(1_200, 2_600),
+            randomBetween(1_200, 2_700),
           );
         }
         if (!cancelled) scheduleAction();
@@ -759,11 +950,10 @@ export function ZebRoommate() {
           />
         </div>
         <span aria-hidden className="zeb-roommate__floor" />
-      </div>
-
-      <div className="zeb-roommate__meta" aria-live="polite">
-        <span>ZEB / OFF CLOCK</span>
-        <span className="zeb-roommate__activity">{scene.label}</span>
+        <div className="zeb-roommate__meta" aria-live="polite">
+          <span>ZEB / OFF CLOCK</span>
+          <span className="zeb-roommate__activity">{scene.label}</span>
+        </div>
       </div>
     </section>
   );

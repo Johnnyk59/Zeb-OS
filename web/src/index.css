@@ -241,77 +241,80 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
     0 1.2rem 3rem rgba(0, 0, 0, 0.2);
 }
 
-/* Zeb's compact sidebar apartment. Scene wrappers own entry/exit motion;
-   settled sprite composites stay locked to the floor so furniture never drifts. */
+/* Zeb's sidebar roommate should feel embedded into the rail itself, not like a
+   separate card. The stage owns the art, transitions, and ambient overlays. */
 .zeb-roommate {
-  --roommate-floor: rgba(236, 224, 207, 0.15);
+  --roommate-floor: rgba(232, 223, 212, 0.16);
   position: relative;
-  isolation: isolate;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  isolation: isolate;
   background: transparent;
   contain: layout paint;
-}
-
-.zeb-roommate::before,
-.zeb-roommate::after {
-  content: none;
 }
 
 .zeb-roommate__stage {
   position: relative;
   z-index: 1;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   isolation: isolate;
 }
 
-.zeb-roommate__stage::before {
+.zeb-roommate__stage::before,
+.zeb-roommate__stage::after {
   content: '';
   position: absolute;
-  inset: auto 10% 0.38rem;
-  z-index: 0;
-  height: 34%;
+  inset: auto 2% 0;
   pointer-events: none;
-  background: radial-gradient(ellipse at 50% 100%, rgba(124, 63, 199, 0.075), transparent 68%);
+}
+
+.zeb-roommate__stage::before {
+  z-index: 0;
+  height: 58%;
+  background:
+    radial-gradient(ellipse at 50% 100%, rgba(148, 108, 76, 0.12), transparent 58%),
+    radial-gradient(circle at 24% 82%, rgba(95, 115, 148, 0.08), transparent 36%),
+    radial-gradient(circle at 74% 78%, rgba(158, 112, 202, 0.08), transparent 34%);
+  filter: blur(8px);
   transform-origin: 50% 100%;
-  animation: zeb-roommate-room-glow 9s ease-in-out infinite;
+  animation: zeb-roommate-room-glow 12s ease-in-out infinite;
+}
+
+.zeb-roommate__stage::after {
+  z-index: 1;
+  right: 11%;
+  left: 11%;
+  bottom: 1.15rem;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--roommate-floor) 18%, var(--roommate-floor) 82%, transparent);
+  opacity: 0.82;
 }
 
 @keyframes zeb-roommate-room-glow {
-  0%, 100% { opacity: 0.58; transform: scaleX(0.96); }
-  50% { opacity: 1; transform: scaleX(1.03); }
+  0%, 100% { opacity: 0.72; transform: scaleX(0.96) translateY(0); }
+  50% { opacity: 1; transform: scaleX(1.02) translateY(-2px); }
 }
 
 .zeb-roommate__floor {
   position: absolute;
   z-index: 1;
-  right: 9%;
-  bottom: 0.48rem;
-  left: 9%;
-  height: 1px;
+  right: 13%;
+  bottom: 1.1rem;
+  left: 13%;
+  height: 0.62rem;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent, var(--roommate-floor) 22%, var(--roommate-floor) 78%, transparent);
-}
-
-.zeb-roommate__floor::before {
-  content: '';
-  position: absolute;
-  inset: -0.22rem 12% auto;
-  height: 0.48rem;
-  border-radius: 50%;
-  opacity: 0.72;
-  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.72), transparent 70%);
-  filter: blur(2px);
+  opacity: 0.85;
+  background: radial-gradient(ellipse at 50% 45%, rgba(0, 0, 0, 0.82), transparent 68%);
+  filter: blur(4px);
 }
 
 .zeb-roommate__sprite-window {
   position: absolute;
   z-index: 2;
-  inset: 0.12rem 0.2rem 0.34rem;
+  inset: 0 0 0.55rem;
   overflow: hidden;
 }
 
@@ -323,6 +326,7 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   transform: translate3d(0, 0, 0);
   transform-origin: 50% 100%;
   backface-visibility: hidden;
+  filter: blur(0);
 }
 
 .zeb-roommate__scene.is-steady {
@@ -331,12 +335,12 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 
 .zeb-roommate__scene.is-incoming {
   z-index: 3;
-  will-change: opacity, transform;
+  will-change: opacity, transform, filter;
 }
 
 .zeb-roommate__scene.is-outgoing {
   z-index: 1;
-  will-change: opacity, transform;
+  will-change: opacity, transform, filter;
 }
 
 .zeb-roommate__ambient {
@@ -351,41 +355,64 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   .scene-vape,
   .scene-phone,
   .scene-snack,
+  .scene-window-vape,
+  .scene-phone-vape,
   .scene-music
 ).is-steady .zeb-roommate__ambient {
-  animation: zeb-roommate-breathe 7.2s ease-in-out infinite;
+  animation: zeb-roommate-breathe 7.8s ease-in-out infinite;
+}
+
+.zeb-roommate__scene.scene-meditate.is-steady .zeb-roommate__ambient {
+  animation: zeb-roommate-hover 9.6s ease-in-out infinite;
+}
+
+.zeb-roommate__scene.scene-sleep.is-steady .zeb-roommate__ambient {
+  animation: zeb-roommate-sleep-breathe 8.8s ease-in-out infinite;
 }
 
 @keyframes zeb-roommate-breathe {
   0%, 100% { transform: scale3d(1, 1, 1); }
-  44% { transform: scale3d(1.004, 1.006, 1); }
-  62% { transform: scale3d(0.999, 1.002, 1); }
+  42% { transform: scale3d(1.004, 1.006, 1); }
+  64% { transform: scale3d(0.999, 1.002, 1); }
+}
+
+@keyframes zeb-roommate-hover {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  48% { transform: translate3d(0, -4px, 0); }
+}
+
+@keyframes zeb-roommate-sleep-breathe {
+  0%, 100% { transform: scale3d(1, 1, 1); }
+  50% { transform: scale3d(1.006, 0.996, 1); }
 }
 
 .zeb-roommate__pose {
   position: absolute;
   bottom: 0;
   left: 50%;
-  height: min(118%, 13rem);
   width: auto;
+  height: min(146%, 16.9rem);
   aspect-ratio: 1;
   overflow: hidden;
-  transform: translate3d(calc(-50% + var(--pose-x, 0%)), var(--pose-y, 0%), 0)
-    scale(var(--pose-scale, 1));
+  transform: translate3d(calc(-50% + var(--pose-x, 0%)), var(--pose-y, 0%), 0) scale(var(--pose-scale, 1));
   transform-origin: 50% 100%;
   backface-visibility: hidden;
   contain: layout paint;
 }
 
+.zeb-roommate__scene.pose-floor .zeb-roommate__pose {
+  height: min(136%, 15.6rem);
+}
+
 .zeb-roommate__scene.motion-lift .zeb-roommate__pose,
 .zeb-roommate__scene.motion-walk .zeb-roommate__pose {
-  transform-origin: 50% 92%;
+  transform-origin: 50% 91%;
 }
 
 .zeb-roommate__scene.motion-phone .zeb-roommate__pose,
 .zeb-roommate__scene.motion-snack .zeb-roommate__pose,
 .zeb-roommate__scene.motion-music .zeb-roommate__pose {
-  transform-origin: 50% 82%;
+  transform-origin: 50% 81%;
 }
 
 .zeb-roommate__scene.is-prop-locked.is-steady .zeb-roommate__pose {
@@ -405,130 +432,157 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   object-fit: fill;
   pointer-events: none;
   user-select: none;
-  filter: drop-shadow(0 0.55rem 0.48rem rgba(0, 0, 0, 0.52));
+  filter: drop-shadow(0 0.8rem 0.75rem rgba(0, 0, 0, 0.58));
 }
 
-/* Both temporary layers end at the same identity transform, preventing the
-   one-frame snap that otherwise appears when the outgoing layer is removed. */
 .zeb-roommate__scene.is-incoming.transition-crossfade {
-  animation: zeb-roommate-crossfade-in 980ms 90ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: zeb-roommate-crossfade-in 920ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .zeb-roommate__scene.is-outgoing.transition-crossfade {
-  animation: zeb-roommate-crossfade-out 780ms cubic-bezier(0.4, 0, 0.6, 1) both;
+  animation: zeb-roommate-crossfade-out 760ms cubic-bezier(0.4, 0, 0.6, 1) both;
 }
 
 .zeb-roommate__scene.is-incoming.transition-walk {
-  animation: zeb-roommate-walk-in 1.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: zeb-roommate-walk-in 1.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .zeb-roommate__scene.is-outgoing.transition-walk {
-  animation: zeb-roommate-walk-out 1.15s cubic-bezier(0.5, 0, 0.75, 0) both;
+  animation: zeb-roommate-walk-out 1.12s cubic-bezier(0.5, 0, 0.75, 0) both;
 }
 
-.zeb-roommate__scene.is-incoming.transition-sit {
-  animation: zeb-roommate-sit-in 1.18s 110ms cubic-bezier(0.22, 1, 0.36, 1) both;
+.zeb-roommate__scene.is-incoming.transition-lounge {
+  animation: zeb-roommate-lounge-in 1.1s 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.zeb-roommate__scene.is-outgoing.transition-sit {
-  animation: zeb-roommate-sit-out 920ms cubic-bezier(0.4, 0, 0.6, 1) both;
+.zeb-roommate__scene.is-outgoing.transition-lounge {
+  animation: zeb-roommate-lounge-out 860ms cubic-bezier(0.4, 0, 0.6, 1) both;
 }
 
-.zeb-roommate__scene.is-incoming.transition-stand {
-  animation: zeb-roommate-stand-in 1.18s 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
+.zeb-roommate__scene.is-incoming.transition-rise {
+  animation: zeb-roommate-rise-in 1.08s 60ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.zeb-roommate__scene.is-outgoing.transition-stand {
-  animation: zeb-roommate-stand-out 940ms cubic-bezier(0.4, 0, 0.6, 1) both;
+.zeb-roommate__scene.is-outgoing.transition-rise {
+  animation: zeb-roommate-rise-out 880ms cubic-bezier(0.4, 0, 0.6, 1) both;
+}
+
+.zeb-roommate__scene.is-incoming.transition-desk {
+  animation: zeb-roommate-desk-in 1.05s 70ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.zeb-roommate__scene.is-outgoing.transition-desk {
+  animation: zeb-roommate-desk-out 820ms cubic-bezier(0.4, 0, 0.6, 1) both;
+}
+
+.zeb-roommate__scene.is-incoming.transition-floor {
+  animation: zeb-roommate-floor-in 1.14s 70ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.zeb-roommate__scene.is-outgoing.transition-floor {
+  animation: zeb-roommate-floor-out 860ms cubic-bezier(0.4, 0, 0.6, 1) both;
 }
 
 @keyframes zeb-roommate-crossfade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from { opacity: 0; filter: blur(4px); transform: scale(0.988); }
+  to { opacity: 1; filter: blur(0); transform: scale(1); }
 }
 
 @keyframes zeb-roommate-crossfade-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
+  from { opacity: 1; filter: blur(0); transform: scale(1); }
+  to { opacity: 0; filter: blur(5px); transform: scale(1.012); }
 }
 
 @keyframes zeb-roommate-walk-in {
-  0% { opacity: 0; transform: translate3d(82%, 1px, 0) rotate(1.2deg); }
-  14% { opacity: 1; }
-  30% { transform: translate3d(54%, -2px, 0) rotate(-0.45deg); }
-  54% { transform: translate3d(29%, 1px, 0) rotate(0.4deg); }
-  78% { transform: translate3d(9%, -1px, 0) rotate(-0.2deg); }
-  100% { opacity: 1; transform: translate3d(0, 0, 0) rotate(0); }
+  0% { opacity: 0; filter: blur(4px); transform: translate3d(76%, 1px, 0) rotate(1.35deg); }
+  16% { opacity: 1; }
+  34% { transform: translate3d(46%, -2px, 0) rotate(-0.5deg); }
+  60% { transform: translate3d(18%, 1px, 0) rotate(0.34deg); }
+  100% { opacity: 1; filter: blur(0); transform: translate3d(0, 0, 0) rotate(0); }
 }
 
 @keyframes zeb-roommate-walk-out {
-  0% { opacity: 1; transform: translate3d(0, 0, 0) rotate(0); }
-  28% { transform: translate3d(-18%, -2px, 0) rotate(-0.35deg); }
-  58% { opacity: 0.88; transform: translate3d(-47%, 1px, 0) rotate(0.45deg); }
-  100% { opacity: 0; transform: translate3d(-92%, -1px, 0) rotate(-1deg); }
+  0% { opacity: 1; filter: blur(0); transform: translate3d(0, 0, 0) rotate(0); }
+  36% { transform: translate3d(-22%, -2px, 0) rotate(-0.35deg); }
+  100% { opacity: 0; filter: blur(4px); transform: translate3d(-86%, 0, 0) rotate(-1deg); }
 }
 
-@keyframes zeb-roommate-sit-in {
-  0% { opacity: 0; transform: translate3d(0, -5%, 0) scale(0.985); }
-  62% { opacity: 1; transform: translate3d(0, 0.8%, 0) scale(1.003); }
+@keyframes zeb-roommate-lounge-in {
+  0% { opacity: 0; filter: blur(4px); transform: translate3d(0, -4%, 0) scale(0.985); }
+  64% { opacity: 1; filter: blur(0); transform: translate3d(0, 0.5%, 0) scale(1.003); }
   100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 
-@keyframes zeb-roommate-sit-out {
-  0% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-  44% { opacity: 0.62; transform: translate3d(-1%, -1.5%, 0) scale(0.995); }
-  100% { opacity: 0; transform: translate3d(-3%, -6%, 0) scale(0.98); }
+@keyframes zeb-roommate-lounge-out {
+  0% { opacity: 1; filter: blur(0); transform: translate3d(0, 0, 0) scale(1); }
+  100% { opacity: 0; filter: blur(4px); transform: translate3d(-2%, -5%, 0) scale(0.986); }
 }
 
-@keyframes zeb-roommate-stand-in {
-  0% { opacity: 0; transform: translate3d(2%, 6%, 0) scale(0.98); }
-  66% { opacity: 1; transform: translate3d(0, -0.8%, 0) scale(1.003); }
-  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+@keyframes zeb-roommate-rise-in {
+  0% { opacity: 0; filter: blur(4px); transform: translate3d(1%, 6%, 0) scale(0.982); }
+  100% { opacity: 1; filter: blur(0); transform: translate3d(0, 0, 0) scale(1); }
 }
 
-@keyframes zeb-roommate-stand-out {
-  0% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-  48% { opacity: 0.66; transform: translate3d(1%, 1.5%, 0) scale(0.995); }
-  100% { opacity: 0; transform: translate3d(3%, 6%, 0) scale(0.98); }
+@keyframes zeb-roommate-rise-out {
+  0% { opacity: 1; filter: blur(0); transform: translate3d(0, 0, 0) scale(1); }
+  100% { opacity: 0; filter: blur(4px); transform: translate3d(2%, 6%, 0) scale(0.984); }
 }
 
-/* Action motion is opt-in per scene. Prop-locked couch, desk, TV, and plant
-   composites deliberately have no matching selectors. */
-.zeb-roommate__scene.scene-idle.is-steady.action-look .zeb-roommate__pose,
-.zeb-roommate__scene.scene-phone.is-steady.action-look .zeb-roommate__pose {
+@keyframes zeb-roommate-desk-in {
+  0% { opacity: 0; filter: blur(4px); transform: translate3d(0, 3%, 0) scale(0.99); }
+  100% { opacity: 1; filter: blur(0); transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes zeb-roommate-desk-out {
+  0% { opacity: 1; filter: blur(0); transform: translate3d(0, 0, 0) scale(1); }
+  100% { opacity: 0; filter: blur(4px); transform: translate3d(0, -3%, 0) scale(0.992); }
+}
+
+@keyframes zeb-roommate-floor-in {
+  0% { opacity: 0; filter: blur(4px); transform: translate3d(0, 8%, 0) scale(0.978); }
+  100% { opacity: 1; filter: blur(0); transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes zeb-roommate-floor-out {
+  0% { opacity: 1; filter: blur(0); transform: translate3d(0, 0, 0) scale(1); }
+  100% { opacity: 0; filter: blur(4px); transform: translate3d(0, -5%, 0) scale(0.99); }
+}
+
+.zeb-roommate__scene:is(.scene-idle, .scene-phone, .scene-phone-vape).is-steady.action-look .zeb-roommate__pose {
   animation: zeb-roommate-look 1.35s ease-in-out both;
 }
 
-.zeb-roommate__scene:is(.scene-idle, .scene-vape, .scene-music).is-steady.action-settle .zeb-roommate__pose {
+.zeb-roommate__scene:is(.scene-idle, .scene-vape, .scene-window-vape, .scene-music).is-steady.action-settle .zeb-roommate__pose {
   animation: zeb-roommate-settle 1.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.zeb-roommate__scene.scene-vape.is-steady.action-draw .zeb-roommate__pose {
-  animation: zeb-roommate-draw 1.4s ease-in-out both;
+.zeb-roommate__scene:is(.scene-vape, .scene-window-vape, .scene-phone-vape).is-steady.action-draw .zeb-roommate__pose {
+  animation: zeb-roommate-draw 1.32s ease-in-out both;
 }
 
-.zeb-roommate__scene.scene-vape.is-steady.action-exhale .zeb-roommate__pose {
-  animation: zeb-roommate-exhale 1.65s ease-out both;
+.zeb-roommate__scene:is(.scene-vape, .scene-window-vape, .scene-phone-vape).is-steady.action-exhale .zeb-roommate__pose {
+  animation: zeb-roommate-exhale 1.54s ease-out both;
 }
 
 .zeb-roommate__scene.scene-weights.is-steady.action-rep .zeb-roommate__pose {
-  animation: zeb-roommate-rep 1.25s cubic-bezier(0.37, 0, 0.63, 1) both;
+  animation: zeb-roommate-rep 1.2s cubic-bezier(0.37, 0, 0.63, 1) both;
 }
 
-.zeb-roommate__scene.scene-phone.is-steady.action-tap .zeb-roommate__pose {
-  animation: zeb-roommate-tap 1.1s ease-in-out both;
+.zeb-roommate__scene:is(.scene-phone, .scene-phone-vape).is-steady.action-tap .zeb-roommate__pose,
+.zeb-roommate__scene:is(.scene-phone, .scene-phone-vape).is-steady.action-scroll .zeb-roommate__pose {
+  animation: zeb-roommate-tap 1.08s ease-in-out both;
 }
 
 .zeb-roommate__scene.scene-snack.is-steady.action-bite .zeb-roommate__pose {
-  animation: zeb-roommate-bite 1.2s ease-in-out both;
+  animation: zeb-roommate-bite 1.18s ease-in-out both;
 }
 
 .zeb-roommate__scene.scene-music.is-steady.action-bop .zeb-roommate__pose {
-  animation: zeb-roommate-bop 1.45s ease-in-out both;
+  animation: zeb-roommate-bop 1.4s ease-in-out both;
 }
 
 .zeb-roommate__scene:is(.scene-carry-tv, .scene-groceries).is-steady.action-step .zeb-roommate__pose {
-  animation: zeb-roommate-step 1.25s ease-in-out both;
+  animation: zeb-roommate-step 1.18s ease-in-out both;
 }
 
 @keyframes zeb-roommate-look {
@@ -583,7 +637,6 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   78% { translate: 1px -2px; rotate: 0.35deg; }
 }
 
-/* Eyelid geometry is supplied per scene, including gap, height, and rotation. */
 .zeb-roommate__eyelids {
   position: absolute;
   z-index: 5;
@@ -606,21 +659,21 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   flex: 1;
   border-bottom: max(1px, 0.07rem) solid rgba(18, 8, 24, 0.94);
   border-radius: 52% 52% 46% 46%;
-  background: linear-gradient(180deg, #8649ce 8%, #7134ba 86%);
+  background: linear-gradient(180deg, #8a51d0 10%, #733ab8 86%);
   box-shadow: inset 0 -1px rgba(25, 10, 35, 0.28);
 }
 
 .zeb-roommate__eyelids.is-blinking {
-  animation: zeb-roommate-blink 200ms ease-in-out both;
+  animation: zeb-roommate-blink 180ms ease-in-out both;
 }
 
 .zeb-roommate__eyelids.is-double-blink {
-  animation: zeb-roommate-double-blink 500ms ease-in-out both;
+  animation: zeb-roommate-double-blink 520ms ease-in-out both;
 }
 
 @keyframes zeb-roommate-blink {
   0%, 100% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--eye-rotate, 0deg)) scaleY(0.08); }
-  34%, 68% { opacity: 1; transform: translate(-50%, -50%) rotate(var(--eye-rotate, 0deg)) scaleY(1); }
+  36%, 68% { opacity: 1; transform: translate(-50%, -50%) rotate(var(--eye-rotate, 0deg)) scaleY(1); }
 }
 
 @keyframes zeb-roommate-double-blink {
@@ -628,8 +681,6 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   12%, 38%, 68% { opacity: 1; transform: translate(-50%, -50%) rotate(var(--eye-rotate, 0deg)) scaleY(1); }
 }
 
-/* Procedural effect layers sit inside the square pose viewport so every anchor
-   follows its source sprite without moving the furniture baked into the art. */
 .zeb-roommate__fx {
   position: absolute;
   z-index: 4;
@@ -647,22 +698,41 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 }
 
 .zeb-roommate__fx.effect-smoke {
-  top: 12%;
-  left: 60%;
+  top: 13%;
+  left: 61%;
   width: 21%;
-  height: 31%;
+  height: 30%;
   mix-blend-mode: screen;
 }
 
+.zeb-roommate__scene.scene-window-vape .effect-smoke {
+  top: 11%;
+  left: 64%;
+  width: 24%;
+}
+
 .zeb-roommate__scene.scene-couch-vape .effect-smoke {
-  top: 21%;
-  left: 72%;
-  width: 22%;
-  height: 28%;
+  top: 17%;
+  left: 66%;
+  width: 24%;
+  height: 30%;
+}
+
+.zeb-roommate__scene.scene-crate-vape .effect-smoke {
+  top: 13%;
+  left: 59%;
+  width: 23%;
+}
+
+.zeb-roommate__scene.scene-big-exhale .effect-smoke {
+  top: 9%;
+  left: 55%;
+  width: 34%;
+  height: 36%;
 }
 
 .zeb-roommate__fx.effect-smoke i {
-  bottom: 3%;
+  bottom: 4%;
   left: 18%;
   width: 24%;
   aspect-ratio: 1;
@@ -670,7 +740,7 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   border-left-color: transparent;
   border-radius: 50%;
   opacity: 0;
-  filter: blur(0.25px);
+  filter: blur(0.3px);
   animation: zeb-roommate-smoke-wisp 4.1s ease-out infinite;
 }
 
@@ -698,8 +768,8 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 }
 
 .zeb-roommate__fx.effect-tv {
-  top: 40.5%;
-  left: 67.3%;
+  top: 40.3%;
+  left: 67%;
   width: 15.8%;
   height: 16.8%;
   overflow: hidden;
@@ -753,7 +823,7 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 }
 
 .zeb-roommate__fx.effect-phone {
-  top: 36%;
+  top: 35%;
   left: 61.5%;
   width: 7.5%;
   height: 22%;
@@ -765,6 +835,11 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   mix-blend-mode: screen;
   transform: rotate(9deg);
   animation: zeb-roommate-phone-glow 3.2s ease-in-out infinite;
+}
+
+.zeb-roommate__scene.scene-phone-vape .effect-phone {
+  top: 35.5%;
+  left: 52.5%;
 }
 
 .zeb-roommate__fx.effect-phone::after {
@@ -786,7 +861,8 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 .zeb-roommate__fx.effect-phone i:nth-child(2) { top: 34%; width: 36%; }
 .zeb-roommate__fx.effect-phone i:nth-child(3) { top: 48%; width: 44%; }
 
-.zeb-roommate__fx.effect-phone.action-tap {
+.zeb-roommate__fx.effect-phone.action-tap,
+.zeb-roommate__fx.effect-phone.action-scroll {
   animation-duration: 900ms;
 }
 
@@ -910,7 +986,8 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   box-shadow: 0 0 4px rgba(180, 131, 227, 0.62);
 }
 
-.zeb-roommate__fx.effect-controller.action-play i {
+.zeb-roommate__fx.effect-controller.action-play i,
+.zeb-roommate__fx.effect-tv.action-focus i {
   animation: zeb-roommate-controller-tap 640ms ease-in-out 2 both;
 }
 
@@ -1046,6 +1123,186 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   100% { opacity: 0; transform: translate3d(5px, -24px, 0) rotate(8deg) scale(1.08); }
 }
 
+.zeb-roommate__fx.effect-hologram {
+  top: 20%;
+  left: 62%;
+  width: 29%;
+  height: 38%;
+  color: rgba(156, 238, 255, 0.8);
+  mix-blend-mode: screen;
+}
+
+.zeb-roommate__fx.effect-hologram::before,
+.zeb-roommate__fx.effect-hologram::after {
+  content: '';
+  border: 1px solid rgba(152, 235, 255, 0.34);
+  border-radius: 12%;
+  background:
+    linear-gradient(180deg, rgba(167, 242, 255, 0.14), rgba(67, 169, 199, 0.08)),
+    repeating-linear-gradient(180deg, rgba(176, 244, 255, 0.1) 0 1px, transparent 1px 5px);
+  box-shadow: 0 0 0.8rem rgba(89, 214, 242, 0.22);
+}
+
+.zeb-roommate__fx.effect-hologram::before {
+  inset: 0 38% 32% 0;
+  animation: zeb-roommate-holo-pulse 3.2s ease-in-out infinite;
+}
+
+.zeb-roommate__fx.effect-hologram::after {
+  inset: 10% 0 0 46%;
+  animation: zeb-roommate-holo-pulse 2.6s ease-in-out -1.3s infinite;
+}
+
+.zeb-roommate__fx.effect-hologram i {
+  left: 12%;
+  right: 46%;
+  height: 1px;
+  opacity: 0.4;
+  background: rgba(187, 250, 255, 0.82);
+  animation: zeb-roommate-code-line 1.8s steps(4, end) infinite;
+}
+
+.zeb-roommate__fx.effect-hologram i:nth-child(1) { top: 18%; }
+.zeb-roommate__fx.effect-hologram i:nth-child(2) { top: 34%; animation-delay: -0.6s; }
+.zeb-roommate__fx.effect-hologram i:nth-child(3) { top: 50%; animation-delay: -1.2s; }
+.zeb-roommate__fx.effect-hologram.action-focus::before,
+.zeb-roommate__fx.effect-hologram.action-focus::after {
+  animation-duration: 1.3s;
+}
+
+@keyframes zeb-roommate-holo-pulse {
+  0%, 100% { opacity: 0.42; scale: 0.98; }
+  50% { opacity: 0.74; scale: 1.02; }
+}
+
+.zeb-roommate__fx.effect-steam {
+  top: 9%;
+  left: 14%;
+  width: 24%;
+  height: 34%;
+  mix-blend-mode: screen;
+}
+
+.zeb-roommate__fx.effect-steam i {
+  bottom: 8%;
+  left: 18%;
+  width: 20%;
+  height: 32%;
+  border: 1px solid rgba(244, 232, 216, 0.34);
+  border-left-color: transparent;
+  border-right-color: transparent;
+  border-radius: 50%;
+  opacity: 0;
+  animation: zeb-roommate-steam-rise 3.2s ease-out infinite;
+}
+
+.zeb-roommate__fx.effect-steam i:nth-child(2) { left: 42%; animation-delay: -1s; }
+.zeb-roommate__fx.effect-steam i:nth-child(3) { left: 6%; animation-delay: -2s; }
+.zeb-roommate__fx.effect-steam.action-steam i { animation-duration: 1.7s; }
+
+@keyframes zeb-roommate-steam-rise {
+  0% { opacity: 0; transform: translate3d(0, 6px, 0) scale(0.72); }
+  22% { opacity: 0.52; }
+  100% { opacity: 0; transform: translate3d(6px, -18px, 0) scale(1.26); }
+}
+
+.zeb-roommate__fx.effect-aura {
+  top: 52%;
+  left: 19%;
+  width: 48%;
+  height: 24%;
+  mix-blend-mode: screen;
+}
+
+.zeb-roommate__fx.effect-aura::before,
+.zeb-roommate__fx.effect-aura::after {
+  content: '';
+  inset: 12% 18%;
+  border-radius: 50%;
+  border: 1px solid rgba(190, 164, 241, 0.3);
+  box-shadow: 0 0 1rem rgba(137, 177, 255, 0.14);
+  animation: zeb-roommate-aura-ring 4.2s ease-out infinite;
+}
+
+.zeb-roommate__fx.effect-aura::after {
+  inset: 0 10%;
+  animation-delay: -2.1s;
+}
+
+.zeb-roommate__fx.effect-aura i {
+  bottom: 28%;
+  left: 18%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(195, 208, 255, 0.72);
+  opacity: 0;
+  animation: zeb-roommate-aura-speck 3.6s ease-out infinite;
+}
+
+.zeb-roommate__fx.effect-aura i:nth-child(2) { left: 48%; animation-delay: -1.2s; }
+.zeb-roommate__fx.effect-aura i:nth-child(3) { left: 74%; animation-delay: -2.4s; }
+.zeb-roommate__fx.effect-aura.action-float::before,
+.zeb-roommate__fx.effect-aura.action-float::after {
+  animation-duration: 2.4s;
+}
+
+@keyframes zeb-roommate-aura-ring {
+  0% { opacity: 0; scale: 0.72; }
+  28% { opacity: 0.46; }
+  100% { opacity: 0; scale: 1.25; }
+}
+
+@keyframes zeb-roommate-aura-speck {
+  0% { opacity: 0; transform: translate3d(0, 4px, 0) scale(0.7); }
+  30% { opacity: 0.7; }
+  100% { opacity: 0; transform: translate3d(4px, -20px, 0) scale(1.2); }
+}
+
+.zeb-roommate__fx.effect-maker {
+  top: 51%;
+  left: 46%;
+  width: 31%;
+  height: 15%;
+}
+
+.zeb-roommate__fx.effect-maker::before {
+  content: '';
+  inset: auto 8% 12% auto;
+  width: 40%;
+  height: 2px;
+  opacity: 0.36;
+  background: linear-gradient(90deg, transparent, rgba(127, 223, 255, 0.72), transparent);
+  animation: zeb-roommate-maker-scan 2.3s linear infinite;
+}
+
+.zeb-roommate__fx.effect-maker i {
+  top: 16%;
+  left: 12%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  opacity: 0;
+  background: rgba(255, 214, 117, 0.86);
+  box-shadow: 0 0 0.4rem rgba(255, 184, 79, 0.35);
+  animation: zeb-roommate-maker-spark 1.7s ease-out infinite;
+}
+
+.zeb-roommate__fx.effect-maker i:nth-child(2) { left: 34%; animation-delay: -0.5s; }
+.zeb-roommate__fx.effect-maker i:nth-child(3) { left: 54%; animation-delay: -1s; }
+.zeb-roommate__fx.effect-maker.action-repair i { animation-duration: 0.85s; }
+
+@keyframes zeb-roommate-maker-scan {
+  from { translate: -120% 0; }
+  to { translate: 140% 0; }
+}
+
+@keyframes zeb-roommate-maker-spark {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) scale(0.45); }
+  25% { opacity: 0.86; }
+  100% { opacity: 0; transform: translate3d(6px, -8px, 0) scale(1.3); }
+}
+
 .zeb-roommate__fx.effect-footsteps {
   top: 78%;
   left: 27%;
@@ -1083,45 +1340,46 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 }
 
 .zeb-roommate__meta {
-  position: relative;
+  position: absolute;
   z-index: 4;
-  display: flex;
-  min-width: 0;
-  min-height: 1.5rem;
+  right: 0.45rem;
+  bottom: 0.18rem;
+  left: 0.45rem;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
-  padding: 0.34rem 0.72rem 0.42rem;
-  border-top: 0;
-  color: rgba(229, 232, 237, 0.38);
-  background: transparent;
+  gap: 0.34rem;
+  padding: 0.28rem 0.44rem;
+  color: rgba(229, 232, 237, 0.48);
+  background: linear-gradient(180deg, rgba(8, 8, 10, 0), rgba(8, 8, 10, 0.3));
+  backdrop-filter: blur(2px);
   font-family: var(--theme-font-mono);
-  font-size: 0.5rem;
+  font-size: 0.48rem;
   font-weight: 700;
   letter-spacing: 0.11em;
   line-height: 1;
   text-transform: uppercase;
+  pointer-events: none;
 }
 
 .zeb-roommate__meta::before {
   content: '';
   width: 0.28rem;
   height: 0.28rem;
-  flex: 0 0 auto;
   border-radius: 50%;
-  background: rgba(153, 105, 205, 0.72);
-  box-shadow: 0 0 0.45rem rgba(153, 105, 205, 0.35);
+  background: rgba(176, 138, 222, 0.78);
+  box-shadow: 0 0 0.45rem rgba(176, 138, 222, 0.3);
 }
 
 .zeb-roommate__meta > span:first-of-type {
-  margin-right: auto;
   white-space: nowrap;
 }
 
 .zeb-roommate__activity {
-  max-width: 7.35rem;
+  margin-left: auto;
+  max-width: 8rem;
   overflow: hidden;
-  color: rgba(240, 237, 232, 0.62);
+  color: rgba(244, 240, 234, 0.72);
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1137,6 +1395,7 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 
   .zeb-roommate__scene {
     opacity: 1 !important;
+    filter: none !important;
     transform: translate3d(0, 0, 0) !important;
   }
 
@@ -1156,7 +1415,10 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   .zeb-roommate__fx.effect-crumbs i,
   .zeb-roommate__fx.effect-weights i,
   .zeb-roommate__fx.effect-water i,
-  .zeb-roommate__fx.effect-footsteps i {
+  .zeb-roommate__fx.effect-footsteps i,
+  .zeb-roommate__fx.effect-maker i,
+  .zeb-roommate__fx.effect-aura i,
+  .zeb-roommate__fx.effect-steam i {
     opacity: 0 !important;
   }
 
