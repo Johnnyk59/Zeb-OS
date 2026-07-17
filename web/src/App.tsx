@@ -363,6 +363,15 @@ function buildRoutes(
 }
 
 const SIDEBAR_COLLAPSED_KEY = "zeb-sidebar-collapsed";
+const CONFIG_GROUP_OPEN_KEY = "zeb-nav-config-open";
+
+function readConfigGroupOpenPreference() {
+  try {
+    return localStorage.getItem(CONFIG_GROUP_OPEN_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 export default function App() {
   const { t } = useI18n();
@@ -390,6 +399,15 @@ export default function App() {
   }, []);
   const isMobile = useBelowBreakpoint(1024);
   const isDesktopCollapsed = collapsed && !isMobile;
+  const configRouteActive = BUILTIN_NAV_CONFIG.some(
+    ({ path }) => pathname === path || pathname.startsWith(`${path}/`),
+  );
+  const [sidebarConfigOpen, setSidebarConfigOpen] = useState(
+    () => configRouteActive || readConfigGroupOpenPreference(),
+  );
+  const handleSidebarConfigOpenChange = useCallback((open: boolean) => {
+    setSidebarConfigOpen(open);
+  }, []);
   const tooltipWarmRef = useRef(0);
   const sidebarStatus = useSidebarStatus();
 
@@ -657,10 +675,17 @@ export default function App() {
             <ProfileSwitcher collapsed={isDesktopCollapsed} />
 
             <nav
-              className="max-h-[52dvh] min-h-0 w-full shrink-0 overflow-y-auto overflow-x-hidden border-t border-current/10 py-2"
+              className={cn(
+                "flex min-h-0 w-full flex-col overflow-x-hidden border-t border-current/10 py-2",
+                isDesktopCollapsed
+                  ? "flex-1 overflow-y-auto"
+                  : sidebarConfigOpen
+                    ? "flex-auto overflow-y-auto overscroll-contain"
+                    : "shrink-0 overflow-y-hidden",
+              )}
               aria-label={t.app.navigation}
             >
-              <ul className="flex flex-col">
+              <ul className="flex shrink-0 flex-col">
                 {sidebarNav.coreItems
                   .filter((item) => !CONFIG_NAV_PATHS.has(item.path))
                   .map((item) => (
@@ -681,6 +706,7 @@ export default function App() {
                 items={sidebarNav.coreItems.filter((item) =>
                   CONFIG_NAV_PATHS.has(item.path),
                 )}
+                onOpenChange={handleSidebarConfigOpenChange}
                 t={t}
                 tooltipWarmRef={tooltipWarmRef}
               />
@@ -720,7 +746,8 @@ export default function App() {
 
             <div
               className={cn(
-                "min-h-36 flex-1 overflow-hidden lg:min-h-[12.5rem]",
+                "mt-auto h-[clamp(8rem,22dvh,10.5rem)] min-h-0 shrink overflow-hidden",
+                "[&_.zeb-roommate]:min-h-0",
                 isDesktopCollapsed && "lg:hidden",
               )}
             >
@@ -930,8 +957,6 @@ function SidebarNavLink({
   );
 }
 
-const CONFIG_GROUP_OPEN_KEY = "zeb-nav-config-open";
-
 /**
  * Collapsible "Configuration" section grouping the admin surfaces
  * (System, Profiles, Pairing, Webhooks, Channels, MCP, Plugins, Logs,
@@ -943,12 +968,14 @@ function SidebarConfigGroup({
   closeMobile,
   collapsed,
   items,
+  onOpenChange,
   t,
   tooltipWarmRef,
 }: {
   closeMobile: () => void;
   collapsed: boolean;
   items: NavItem[];
+  onOpenChange: (open: boolean) => void;
   t: Translations;
   tooltipWarmRef: TooltipWarmRef;
 }) {
@@ -956,14 +983,11 @@ function SidebarConfigGroup({
   const routeInside = items.some(
     (i) => pathname === i.path || pathname.startsWith(i.path + "/"),
   );
-  const [openRaw, setOpenRaw] = useState(() => {
-    try {
-      return localStorage.getItem(CONFIG_GROUP_OPEN_KEY) === "true";
-    } catch {
-      return false;
-    }
-  });
+  const [openRaw, setOpenRaw] = useState(readConfigGroupOpenPreference);
   const open = openRaw || routeInside;
+  useEffect(() => {
+    onOpenChange(open);
+  }, [onOpenChange, open]);
   const toggle = () => {
     setOpenRaw((prev) => {
       // When the route forces the group open, the first click should CLOSE
@@ -1000,13 +1024,15 @@ function SidebarConfigGroup({
   }
 
   return (
-    <div className="mt-1 flex flex-col border-t border-current/10 pt-1">
+    <div
+      className="mt-1 flex shrink-0 flex-col border-t border-current/10 pt-1"
+    >
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
         className={cn(
-          "group/cfg relative flex w-full items-center gap-3",
+          "group/cfg relative flex w-full shrink-0 items-center gap-3",
           "px-5 py-2.5",
           "font-sans text-display uppercase text-xs tracking-[0.14em]",
           "whitespace-nowrap transition-colors cursor-pointer",
