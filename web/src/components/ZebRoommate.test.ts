@@ -21,51 +21,73 @@ const EXPECTED_SCENE_IDS = [
   "carry-tv",
   "phone",
   "snack",
-  "couch-forward",
+  "window-vape",
   "couch-crossed",
-  "couch-vape",
+  "groceries",
   "gaming",
   "sleep",
   "laptop",
   "plant",
   "music",
-  "groceries",
+  "trading",
+  "ramen",
+  "meditate",
+  "maker",
+  "couch-vape",
+  "crate-vape",
+  "phone-vape",
+  "big-exhale",
 ] as const satisfies readonly RoommateSceneId[];
 
 const VALID_SHEETS = new Set([
-  "/zeb/zeb-roommate-sprites.png",
-  "/zeb/zeb-roommate-life-sprites.png",
-  "/zeb/zeb-roommate-hobbies-sprites.png",
+  "/zeb/zeb-roommate-core-sprites-v2.png",
+  "/zeb/zeb-roommate-daily-sprites-v2.png",
+  "/zeb/zeb-roommate-flow-sprites-v2.png",
+  "/zeb/zeb-roommate-extra-sprites-v2.png",
+  "/zeb/zeb-roommate-smoke-sprites-v2.png",
 ]);
 
-const EYE_SCENES_BY_POSE = {
-  standing: ["idle", "vape", "weights", "phone", "snack", "plant"],
-  seated: [
-    "couch",
-    "tv",
-    "couch-forward",
-    "couch-crossed",
-    "couch-vape",
-    "gaming",
-    "laptop",
-  ],
-  mobile: ["carry-tv", "groceries"],
-} as const satisfies Record<RoommateScene["pose"], readonly RoommateSceneId[]>;
-
-const FURNITURE_SCENE_IDS = [
+const OPEN_EYE_SCENE_IDS = [
+  "idle",
+  "vape",
+  "weights",
   "couch",
   "tv",
-  "couch-forward",
+  "carry-tv",
+  "phone",
+  "snack",
+  "window-vape",
   "couch-crossed",
-  "couch-vape",
+  "groceries",
   "gaming",
-  "sleep",
   "laptop",
+  "plant",
+  "music",
+  "trading",
+  "ramen",
+  "meditate",
+  "maker",
+  "couch-vape",
+  "crate-vape",
+  "phone-vape",
+  "big-exhale",
 ] as const satisfies readonly RoommateSceneId[];
 
 const PROP_LOCKED_SCENE_IDS = [
-  ...FURNITURE_SCENE_IDS,
+  "couch",
+  "tv",
+  "couch-crossed",
+  "gaming",
+  "sleep",
+  "laptop",
   "plant",
+  "trading",
+  "ramen",
+  "meditate",
+  "maker",
+  "couch-vape",
+  "crate-vape",
+  "big-exhale",
 ] as const satisfies readonly RoommateSceneId[];
 
 afterEach(() => {
@@ -114,7 +136,7 @@ function expectValidEyeGeometry(scene: RoommateScene): void {
 }
 
 describe("ROOMMATE_SCENES", () => {
-  it("contains the complete scene registry with keys aligned to scene ids", () => {
+  it("contains the complete upgraded scene registry with keys aligned to scene ids", () => {
     expect(Object.keys(ROOMMATE_SCENES).sort()).toEqual([...EXPECTED_SCENE_IDS].sort());
 
     for (const [id, scene] of Object.entries(ROOMMATE_SCENES)) {
@@ -141,39 +163,21 @@ describe("ROOMMATE_SCENES", () => {
     );
   });
 
-  for (const [pose, expectedIds] of Object.entries(EYE_SCENES_BY_POSE)) {
-    it(`defines valid eye geometry for applicable ${pose} scenes`, () => {
-      const scenes = Object.values(ROOMMATE_SCENES).filter(
-        (scene) => scene.pose === pose && scene.eyes !== undefined,
-      );
+  it("defines valid eye geometry for every open-eye scene", () => {
+    const scenes = Object.values(ROOMMATE_SCENES).filter((scene) => scene.eyes !== undefined);
+    expect(scenes.map((scene) => scene.id).sort()).toEqual([...OPEN_EYE_SCENE_IDS].sort());
+    for (const scene of scenes) expectValidEyeGeometry(scene);
+  });
 
-      expect(scenes.map((scene) => scene.id).sort()).toEqual([...expectedIds].sort());
-      for (const scene of scenes) expectValidEyeGeometry(scene);
-    });
-  }
-
-  it("omits eye overlays only for closed or obscured eye poses", () => {
+  it("omits eye overlays only for the closed-eye sleep pose", () => {
     const scenesWithoutEyes = Object.values(ROOMMATE_SCENES)
       .filter((scene) => scene.eyes === undefined)
       .map((scene) => scene.id);
 
-    expect(scenesWithoutEyes.sort()).toEqual(["music", "sleep"]);
+    expect(scenesWithoutEyes).toEqual(["sleep"]);
   });
 
-  it("prop-locks every seated furniture scene", () => {
-    const seatedSceneIds = Object.values(ROOMMATE_SCENES)
-      .filter((scene) => scene.pose === "seated")
-      .map((scene) => scene.id);
-
-    expect(seatedSceneIds.sort()).toEqual([...FURNITURE_SCENE_IDS].sort());
-    for (const id of FURNITURE_SCENE_IDS) {
-      expect(ROOMMATE_SCENES[id].propLocked, `${id} should remain fixed with its furniture`).toBe(
-        true,
-      );
-    }
-  });
-
-  it("limits prop locks to fixed furniture and plant composites", () => {
+  it("keeps prop locks constrained to seated/floor composites that should not drift", () => {
     const lockedSceneIds = Object.values(ROOMMATE_SCENES)
       .filter((scene) => scene.propLocked)
       .map((scene) => scene.id);
@@ -183,8 +187,8 @@ describe("ROOMMATE_SCENES", () => {
 });
 
 describe("ROOMMATE_ACTIVITY_CYCLE", () => {
-  it("covers the registry with 20 valid slots and exactly 25% smoking", () => {
-    expect(ROOMMATE_ACTIVITY_CYCLE).toHaveLength(20);
+  it("covers the 24-scene rotation with exactly 25% smoking time", () => {
+    expect(ROOMMATE_ACTIVITY_CYCLE).toHaveLength(24);
     expect(new Set(ROOMMATE_ACTIVITY_CYCLE)).toEqual(new Set(EXPECTED_SCENE_IDS));
 
     for (const id of ROOMMATE_ACTIVITY_CYCLE) {
@@ -194,7 +198,7 @@ describe("ROOMMATE_ACTIVITY_CYCLE", () => {
     const smokeSlots = ROOMMATE_ACTIVITY_CYCLE.filter(
       (id) => ROOMMATE_SCENES[id].effect === "smoke",
     );
-    expect(smokeSlots).toHaveLength(5);
+    expect(smokeSlots).toHaveLength(6);
     expect(smokeSlots.length / ROOMMATE_ACTIVITY_CYCLE.length).toBe(0.25);
   });
 });
@@ -225,9 +229,10 @@ describe("selectNextRoommateScene", () => {
 });
 
 describe("ZebRoommate structure", () => {
-  it("keeps the pose, aligned eyelids, and effects inside a stable ambient wrapper", () => {
-    const markup = renderRoommate("vape");
+  it("keeps the pose, eyelids, and effects inside the stage without a separate card shell", () => {
+    const markup = renderRoommate("phone-vape");
 
+    expect(markup).toContain('<div class="zeb-roommate__stage">');
     expect(markup).toContain(
       '<div class="zeb-roommate__ambient"><div class="zeb-roommate__pose"',
     );
@@ -237,10 +242,13 @@ describe("ZebRoommate structure", () => {
     expect(markup.indexOf("zeb-roommate__eyelids")).toBeLessThan(
       markup.indexOf("zeb-roommate__fx"),
     );
+    expect(markup.indexOf("zeb-roommate__floor")).toBeLessThan(
+      markup.indexOf("zeb-roommate__meta"),
+    );
   });
 
   it("propagates fixed-composite locking to the scene and ambient wrapper", () => {
-    const markup = renderRoommate("couch");
+    const markup = renderRoommate("couch-vape");
 
     expect(markup).toMatch(/zeb-roommate__scene[^"]*is-prop-locked/);
     expect(markup).toContain(
@@ -250,23 +258,27 @@ describe("ZebRoommate structure", () => {
 });
 
 describe("roommateTransition", () => {
-  const sceneByPose = {
+  const sceneByRole = {
     standing: ROOMMATE_SCENES.idle,
     seated: ROOMMATE_SCENES.couch,
     mobile: ROOMMATE_SCENES["carry-tv"],
-  } satisfies Record<RoommateScene["pose"], RoommateScene>;
+    floor: ROOMMATE_SCENES.ramen,
+    desk: ROOMMATE_SCENES.laptop,
+  } satisfies Record<"standing" | "seated" | "mobile" | "floor" | "desk", RoommateScene>;
 
   it.each([
     ["standing", "standing", "crossfade"],
-    ["standing", "seated", "sit"],
+    ["standing", "seated", "lounge"],
     ["standing", "mobile", "walk"],
-    ["seated", "standing", "stand"],
-    ["seated", "seated", "crossfade"],
-    ["seated", "mobile", "stand"],
-    ["mobile", "standing", "walk"],
-    ["mobile", "seated", "sit"],
-    ["mobile", "mobile", "walk"],
+    ["standing", "floor", "floor"],
+    ["standing", "desk", "desk"],
+    ["seated", "standing", "rise"],
+    ["seated", "desk", "desk"],
+    ["seated", "floor", "floor"],
+    ["mobile", "desk", "walk"],
+    ["floor", "standing", "floor"],
+    ["desk", "desk", "desk"],
   ] as const)("classifies %s to %s as %s", (from, to, expected) => {
-    expect(roommateTransition(sceneByPose[from], sceneByPose[to])).toBe(expected);
+    expect(roommateTransition(sceneByRole[from], sceneByRole[to])).toBe(expected);
   });
 });

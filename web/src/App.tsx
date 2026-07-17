@@ -746,7 +746,7 @@ export default function App() {
 
             <div
               className={cn(
-                "mt-auto h-[clamp(8rem,22dvh,10.5rem)] min-h-0 shrink overflow-hidden",
+                "mt-auto h-[clamp(10.5rem,27dvh,14rem)] min-h-0 shrink overflow-hidden",
                 "[&_.zeb-roommate]:min-h-0",
                 isDesktopCollapsed && "lg:hidden",
               )}
