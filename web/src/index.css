@@ -277,6 +277,13 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   height: 34%;
   pointer-events: none;
   background: radial-gradient(ellipse at 50% 100%, rgba(124, 63, 199, 0.075), transparent 68%);
+  transform-origin: 50% 100%;
+  animation: zeb-roommate-room-glow 9s ease-in-out infinite;
+}
+
+@keyframes zeb-roommate-room-glow {
+  0%, 100% { opacity: 0.58; transform: scaleX(0.96); }
+  50% { opacity: 1; transform: scaleX(1.03); }
 }
 
 .zeb-roommate__floor {
@@ -330,6 +337,29 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 .zeb-roommate__scene.is-outgoing {
   z-index: 1;
   will-change: opacity, transform;
+}
+
+.zeb-roommate__ambient {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+  backface-visibility: hidden;
+}
+
+.zeb-roommate__scene:is(
+  .scene-idle,
+  .scene-vape,
+  .scene-phone,
+  .scene-snack,
+  .scene-music
+).is-steady .zeb-roommate__ambient {
+  animation: zeb-roommate-breathe 7.2s ease-in-out infinite;
+}
+
+@keyframes zeb-roommate-breathe {
+  0%, 100% { transform: scale3d(1, 1, 1); }
+  44% { transform: scale3d(1.004, 1.006, 1); }
+  62% { transform: scale3d(0.999, 1.002, 1); }
 }
 
 .zeb-roommate__pose {
@@ -1057,14 +1087,14 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   z-index: 4;
   display: flex;
   min-width: 0;
-  min-height: 1.75rem;
+  min-height: 1.5rem;
   align-items: center;
   justify-content: space-between;
   gap: 0.6rem;
   padding: 0.34rem 0.72rem 0.42rem;
-  border-top: 1px solid rgba(235, 238, 243, 0.055);
+  border-top: 0;
   color: rgba(229, 232, 237, 0.38);
-  background: linear-gradient(180deg, rgba(5, 6, 8, 0.2), rgba(5, 6, 8, 0.58));
+  background: transparent;
   font-family: var(--theme-font-mono);
   font-size: 0.5rem;
   font-weight: 700;

@@ -256,6 +256,20 @@ async def _lifespan(app: "FastAPI"):
     # + verification happen off the event loop and never block startup.
     _start_local_model_autostart()
 
+    # The bare-metal unit runs only the dashboard process, unlike Docker's
+    # supervised gateway+dashboard pair. Start autonomy in-process there so it
+    # shares the already-resident local model instead of loading a second GGUF
+    # copy in a companion service. ZEB_ENV_FILE is stamped by the bare-metal
+    # unit and keeps ordinary desktop/Docker dashboards from double-scheduling.
+    embedded_autonomy = False
+    if os.getenv("ZEB_DASHBOARD") == "1" and os.getenv("ZEB_ENV_FILE"):
+        try:
+            from zeb_autonomy.registry import start_autonomy
+
+            embedded_autonomy = start_autonomy(config=load_config()) is not None
+        except Exception as exc:
+            _log.warning("Bare-metal autonomy startup failed: %s", exc)
+
     # Desktop-spawned backends (ZEB_DESKTOP=1) fire cron jobs themselves,
     # since the app has no gateway running the scheduler. Server `zeb
     # dashboard` is unaffected — it relies on its own gateway.
@@ -276,6 +290,13 @@ async def _lifespan(app: "FastAPI"):
     finally:
         if cron_stop is not None:
             cron_stop.set()
+        if embedded_autonomy:
+            try:
+                from zeb_autonomy.registry import stop_autonomy
+
+                stop_autonomy()
+            except Exception as exc:
+                _log.warning("Bare-metal autonomy shutdown failed: %s", exc)
 
 
 def _get_event_state(app: "FastAPI"):

@@ -345,7 +345,7 @@ export const ROOMMATE_ACTIVITY_CYCLE: RoommateSceneId[] = [
   "groceries",
 ];
 
-const MICRO_ACTIONS: Record<RoommateSceneId, MicroAction[]> = {
+const MICRO_ACTIONS: Record<RoommateSceneId, readonly MicroAction[]> = {
   idle: ["look", "settle", "look"],
   vape: ["draw", "exhale", "settle"],
   weights: ["rep", "rep", "settle"],
@@ -365,6 +365,22 @@ const MICRO_ACTIONS: Record<RoommateSceneId, MicroAction[]> = {
   groceries: ["step", "settle"],
 };
 
+const MICRO_ACTION_DELAYS: Record<RoommateMotion, readonly [number, number]> = {
+  rest: [7_000, 13_000],
+  smoke: [5_000, 10_000],
+  lift: [4_500, 8_500],
+  lounge: [8_000, 15_000],
+  watch: [8_000, 15_000],
+  walk: [5_000, 10_000],
+  phone: [4_500, 9_000],
+  snack: [5_000, 10_000],
+  game: [4_000, 8_000],
+  sleep: [11_000, 18_000],
+  type: [4_500, 9_000],
+  water: [6_000, 11_000],
+  music: [4_000, 8_000],
+};
+
 function shuffledCycle(): RoommateSceneId[] {
   const next = [...ROOMMATE_ACTIVITY_CYCLE];
   for (let i = next.length - 1; i > 0; i -= 1) {
@@ -372,6 +388,32 @@ function shuffledCycle(): RoommateSceneId[] {
     [next[i], next[j]] = [next[j], next[i]];
   }
   return next;
+}
+
+export function selectNextRoommateScene(
+  current: RoommateSceneId,
+  queued: readonly RoommateSceneId[],
+  replenish: () => RoommateSceneId[] = shuffledCycle,
+): { sceneId: RoommateSceneId; remaining: RoommateSceneId[] } {
+  const remaining = [...queued];
+  let replenished = false;
+
+  while (true) {
+    const candidateIndex = remaining.findIndex((candidate) => candidate !== current);
+    if (candidateIndex >= 0) {
+      const [sceneId] = remaining.splice(candidateIndex, 1);
+      if (sceneId) return { sceneId, remaining };
+    }
+
+    if (replenished) break;
+    remaining.push(...replenish());
+    replenished = true;
+  }
+
+  // The registry has multiple scenes, so this is only a guard against a bad
+  // injected replenishment source rather than part of the normal schedule.
+  const fallback = ROOMMATE_ACTIVITY_CYCLE.find((candidate) => candidate !== current);
+  return { sceneId: fallback ?? current, remaining: [] };
 }
 
 function randomBetween(min: number, max: number): number {
@@ -485,28 +527,35 @@ function RoommateSceneLayer({
         if (role === "incoming" && event.target === event.currentTarget) onSettled?.();
       }}
     >
-      <div className="zeb-roommate__pose" style={sceneVariables(scene)}>
-        <img
-          src={scene.sheet}
-          alt=""
-          draggable={false}
-          className="zeb-roommate__sheet"
-          style={spritePosition(scene)}
-        />
-        {scene.eyes && role !== "outgoing" ? (
-          <span
-            className={classes(
-              "zeb-roommate__eyelids",
-              blinking && "is-blinking",
-              blinking && blinkPattern === "double" && "is-double-blink",
-            )}
-            style={eyeVariables(scene.eyes)}
-          >
-            <i />
-            <i />
-          </span>
-        ) : null}
-        {role !== "outgoing" ? <RoommateEffects scene={scene} action={action} /> : null}
+      <div
+        className={classes(
+          "zeb-roommate__ambient",
+          scene.propLocked && "is-ambient-locked",
+        )}
+      >
+        <div className="zeb-roommate__pose" style={sceneVariables(scene)}>
+          <img
+            src={scene.sheet}
+            alt=""
+            draggable={false}
+            className="zeb-roommate__sheet"
+            style={spritePosition(scene)}
+          />
+          {scene.eyes && role !== "outgoing" ? (
+            <span
+              className={classes(
+                "zeb-roommate__eyelids",
+                blinking && "is-blinking",
+                blinking && blinkPattern === "double" && "is-double-blink",
+              )}
+              style={eyeVariables(scene.eyes)}
+            >
+              <i />
+              <i />
+            </span>
+          ) : null}
+          {role !== "outgoing" ? <RoommateEffects scene={scene} action={action} /> : null}
+        </div>
       </div>
     </div>
   );
@@ -526,6 +575,7 @@ export function ZebRoommate() {
   const queueRef = useRef<RoommateSceneId[]>([]);
   const sceneTimerRef = useRef<number | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
+  const lastMicroActionRef = useRef<MicroAction>("none");
 
   const scene = ROOMMATE_SCENES[sceneId];
   const previousScene = previousSceneId ? ROOMMATE_SCENES[previousSceneId] : null;
@@ -574,11 +624,16 @@ export function ZebRoommate() {
           return;
         }
 
-        if (queueRef.current.length === 0) queueRef.current = shuffledCycle();
-        let next = queueRef.current.shift() ?? "idle";
-        if (next === sceneRef.current) next = queueRef.current.shift() ?? "idle";
-
         const fromId = sceneRef.current;
+        const selection = selectNextRoommateScene(fromId, queueRef.current);
+        const next = selection.sceneId;
+        queueRef.current = selection.remaining;
+
+        if (next === fromId) {
+          schedule();
+          return;
+        }
+
         const nextTransition = roommateTransition(
           ROOMMATE_SCENES[fromId],
           ROOMMATE_SCENES[next],
@@ -646,11 +701,19 @@ export function ZebRoommate() {
     let actionEnd = 0;
     let timer = 0;
     let cancelled = false;
+    lastMicroActionRef.current = "none";
     const scheduleAction = () => {
+      const [minDelay, maxDelay] = MICRO_ACTION_DELAYS[scene.motion];
       timer = window.setTimeout(() => {
         if (!document.hidden && !cancelled) {
           const options = MICRO_ACTIONS[sceneId];
-          const nextAction = options[Math.floor(Math.random() * options.length)] ?? "none";
+          const variedOptions = options.filter(
+            (action) => action !== lastMicroActionRef.current,
+          );
+          const candidates = variedOptions.length > 0 ? variedOptions : options;
+          const nextAction =
+            candidates[Math.floor(Math.random() * candidates.length)] ?? "none";
+          lastMicroActionRef.current = nextAction;
           setMicroAction(nextAction);
           actionEnd = window.setTimeout(
             () => setMicroAction("none"),
@@ -658,7 +721,7 @@ export function ZebRoommate() {
           );
         }
         if (!cancelled) scheduleAction();
-      }, randomBetween(5_500, 12_500));
+      }, randomBetween(minDelay, maxDelay));
     };
     scheduleAction();
     return () => {
@@ -667,7 +730,7 @@ export function ZebRoommate() {
       window.clearTimeout(actionEnd);
       setMicroAction("none");
     };
-  }, [previousSceneId, reducedMotion, sceneId]);
+  }, [previousSceneId, reducedMotion, scene.motion, sceneId]);
 
   return (
     <section className="zeb-roommate" aria-label={`Zeb is ${scene.label}`}>

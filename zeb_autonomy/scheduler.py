@@ -43,6 +43,7 @@ _BOT_ACTIVITY = {
     "memory_learning": "learning",
     "self_evolution": "learning",
     "self_review": "learning",
+    "gwen": "learning",
     "review": "learning",
     "decision": "processing",
     "state_sync": "processing",

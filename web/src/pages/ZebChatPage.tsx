@@ -23,6 +23,7 @@ import {
   ChevronDown,
   CircleStop,
   ExternalLink,
+  FileText,
   Mic,
   Plus,
   Send,
@@ -31,12 +32,23 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { cn } from "@/lib/utils";
 import { BrainCanvas } from "@/components/BrainCanvas";
 import { Markdown } from "@/components/Markdown";
 import { GatewayClient } from "@/lib/gatewayClient";
+import {
+  chatSessionStorageKey,
+  restoreChatMessages,
+  storedSessionId,
+  type GatewaySessionPayload,
+} from "@/lib/zeb-chat-session";
+import {
+  deriveBrainEnergy,
+  estimateTaskIntensity,
+} from "@/lib/brain-activity";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
 import { api } from "@/lib/api";
@@ -50,44 +62,82 @@ interface ToolChip {
 
 interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | "shared";
+  role: "user" | "assistant";
   content: string;
   streaming?: boolean;
   tools?: ToolChip[];
   error?: boolean;
   provider?: string;
+  delivery?: "queued" | "steered";
+}
+
+interface PendingAttachment {
+  id: string;
+  file: File;
+  state: "uploading" | "ready" | "error";
+  promptRef?: string;
+  error?: string;
+}
+
+interface QueuedPrompt {
+  id: string;
+  text: string;
+  files: File[];
 }
 
 let _mid = 0;
 const nextId = () => `m${++_mid}`;
+const MAX_BROWSER_ATTACHMENT_BYTES = 24 * 1024 * 1024;
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadChatAttachment(
+  gateway: GatewayClient,
+  sessionId: string,
+  file: File,
+): Promise<string> {
+  const dataUrl = await fileToDataUrl(file);
+  if (file.type.startsWith("image/")) {
+    const result = await gateway.request<{ text?: string }>("image.attach_bytes", {
+      session_id: sessionId,
+      content_base64: dataUrl,
+      filename: file.name,
+    });
+    return result.text || `[User attached image: ${file.name}]`;
+  }
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    try {
+      const result = await gateway.request<{ text?: string }>("pdf.attach", {
+        session_id: sessionId,
+        content_base64: dataUrl,
+        filename: file.name,
+      });
+      return result.text || `[User attached PDF: ${file.name}]`;
+    } catch {
+      // A PDF remains usable as a normal file if poppler is unavailable.
+    }
+  }
+  const result = await gateway.request<{ ref_text?: string }>("file.attach", {
+    session_id: sessionId,
+    path: file.name,
+    data_url: dataUrl,
+    name: file.name,
+  });
+  return result.ref_text || `@file:${file.name}`;
+}
 
 const AGENT_SLOTS = [
   { id: "quant", label: "Quant Bot" },
   { id: "socials", label: "Socials Agent" },
   { id: "jewelry", label: "Jew" },
 ] as const;
-
-function estimateTaskIntensity(text: string): number {
-  const normalized = text.toLowerCase();
-  const complexitySignals = [
-    "analyze",
-    "build",
-    "compare",
-    "debug",
-    "design",
-    "investigate",
-    "plan",
-    "research",
-    "review",
-    "strategy",
-  ].filter((term) => normalized.includes(term)).length;
-  const lengthWeight = Math.min(0.34, text.length / 900);
-  const structureWeight = Math.min(
-    0.18,
-    ((text.match(/[\n,:;?]/g) ?? []).length / 18) * 0.18,
-  );
-  return Math.min(1, 0.38 + lengthWeight + structureWeight + complexitySignals * 0.07);
-}
 
 export default function ZebChatPage({
   isActive = true,
@@ -96,29 +146,82 @@ export default function ZebChatPage({
   isActive?: boolean;
   sidebarCollapsed?: boolean;
 }) {
-  const [dual, setDual] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const routedPrimary =
+    searchParams.get("primary") || searchParams.get("resume") || "";
+  const routedSecondary = searchParams.get("secondary") || "";
+  const routedSplit = searchParams.get("split") === "1";
+  const [dualOpen, setDualOpen] = useState(false);
+  const dual = dualOpen || Boolean(routedSecondary || routedSplit);
 
-  const openDual = useCallback(() => setDual(true), []);
-  const closeDual = useCallback(() => setDual(false), []);
+  const updateRoute = useCallback(
+    (pane: "primary" | "secondary", sessionId: string) => {
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.delete("resume");
+          next.set(pane, sessionId);
+          if (pane === "secondary") next.delete("split");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const openDual = useCallback(() => {
+    setDualOpen(true);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set("split", "1");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+  const closeDual = useCallback(() => {
+    setDualOpen(false);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("secondary");
+        next.delete("split");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   return (
     <div className={cn("flex min-h-0 min-w-0 flex-1", dual ? "flex-row" : "flex-col")}>
       <div className={cn("flex min-h-0 min-w-0", dual ? "w-1/2 border-r border-current/10" : "flex-1")}>
         <ChatPane
+          pane="primary"
+          requestedStoredSessionId={routedPrimary}
           isActive={isActive}
           sidebarCollapsed={sidebarCollapsed}
           showBrain={!dual}
           showAgentNav={!dual}
-          onNewChat={!dual ? openDual : undefined}
+          onOpenSplit={!dual ? openDual : undefined}
+          onStoredSessionChange={(sessionId) => {
+            if (isActive) updateRoute("primary", sessionId);
+          }}
         />
       </div>
       {dual ? (
         <div className="flex min-h-0 min-w-0 w-1/2">
           <ChatPane
+            pane="secondary"
+            requestedStoredSessionId={routedSecondary}
             isActive={isActive}
             sidebarCollapsed={false}
             showBrain={false}
             showAgentNav={false}
+            onStoredSessionChange={(sessionId) => {
+              if (isActive) updateRoute("secondary", sessionId);
+            }}
             onClose={closeDual}
           />
         </div>
@@ -128,18 +231,24 @@ export default function ZebChatPage({
 }
 
 function ChatPane({
+  pane,
+  requestedStoredSessionId,
   isActive = true,
   sidebarCollapsed = false,
   showBrain = true,
   showAgentNav = true,
-  onNewChat,
+  onOpenSplit,
+  onStoredSessionChange,
   onClose,
 }: {
+  pane: "primary" | "secondary";
+  requestedStoredSessionId?: string;
   isActive?: boolean;
   sidebarCollapsed?: boolean;
   showBrain?: boolean;
   showAgentNav?: boolean;
-  onNewChat?: () => void;
+  onOpenSplit?: () => void;
+  onStoredSessionChange?: (sessionId: string) => void;
   onClose?: () => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -156,12 +265,40 @@ function ChatPane({
   const [nonce, setNonce] = useState(0);
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [taskIntensity, setTaskIntensity] = useState(0.55);
+  const [toolStarts, setToolStarts] = useState(0);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [draggingFile, setDraggingFile] = useState(false);
+  const [queuedCount, setQueuedCount] = useState(0);
 
   const gwRef = useRef<GatewayClient | null>(null);
   const sessionIdRef = useRef<string>("");
+  const storedSessionIdRef = useRef<string>("");
+  const requestedSessionIdRef = useRef(requestedStoredSessionId || "");
+  const observedRouteRef = useRef(false);
+  const busyRef = useRef(false);
+  const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
+  const dispatchPromptRef = useRef<(prompt: QueuedPrompt) => void>(() => {});
+  const drainQueueRef = useRef<() => void>(() => {});
+  const onStoredSessionChangeRef = useRef(onStoredSessionChange);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const { profile: scopedProfile } = useProfileScope();
+  busyRef.current = busy;
+  onStoredSessionChangeRef.current = onStoredSessionChange;
+
+  useEffect(() => {
+    requestedSessionIdRef.current = requestedStoredSessionId || "";
+    if (!observedRouteRef.current) {
+      observedRouteRef.current = true;
+      return;
+    }
+    if (
+      requestedStoredSessionId &&
+      requestedStoredSessionId !== storedSessionIdRef.current
+    ) {
+      setNonce((value) => value + 1);
+    }
+  }, [requestedStoredSessionId]);
 
   useEffect(() => {
     let alive = true;
@@ -233,17 +370,13 @@ function ChatPane({
     return { label: "Idle", dot: "bg-white/35", text: "text-text-secondary" };
   }, [conn, thinking, busy, bgStatus]);
 
-  // Brain energy: prompt complexity controls how hard work looks. Idle is a
-  // true zero so the cortex settles completely instead of constantly spinning.
-  const energy = thinking
-    ? Math.min(1, 0.78 + taskIntensity * 0.22)
-    : busy
-      ? 0.42 + taskIntensity * 0.38
-      : bgStatus === "learning"
-        ? 0.46
-        : bgStatus === "processing"
-          ? 0.34
-          : 0;
+  const energy = deriveBrainEnergy({
+    busy,
+    thinking,
+    taskIntensity,
+    toolStarts,
+    bgStatus,
+  });
   const split = sidebarCollapsed && showBrain;
 
   // Model label for the top bar (best-effort).
@@ -308,7 +441,8 @@ function ChatPane({
     });
   }, []);
 
-  // Connect + wire events. Re-runs on New Chat (nonce) or profile switch.
+  // Connect to the exact durable session for this pane. The live gateway id is
+  // transport-only; the stored id survives refreshes and is routed in the URL.
   useEffect(() => {
     let cancelled = false;
     const gw = new GatewayClient();
@@ -319,10 +453,14 @@ function ChatPane({
     setMessages([]);
     setBusy(false);
     setThinking(false);
+    setAttachments([]);
+    queuedPromptsRef.current = [];
+    setQueuedCount(0);
     sessionIdRef.current = "";
+    storedSessionIdRef.current = "";
 
     const mine = (sid?: string) =>
-      !sid || !sessionIdRef.current || sid === sessionIdRef.current;
+      Boolean(sid && sessionIdRef.current && sid === sessionIdRef.current);
 
     (async () => {
       try {
@@ -332,6 +470,7 @@ function ChatPane({
         offs.push(
           gw.on<{ text?: string }>("message.start", (ev) => {
             if (!mine(ev.session_id)) return;
+            setBusy(true);
             setThinking(false);
             setMessages((msgs) => [
               ...msgs,
@@ -345,7 +484,6 @@ function ChatPane({
           }),
           gw.on<{ text?: string }>("message.complete", (ev) => {
             if (!mine(ev.session_id)) return;
-            setBusy(false);
             setThinking(false);
             // Read the reply aloud when voice mode is on (no-op otherwise).
             speakRef.current(ev.payload?.text ?? "");
@@ -376,6 +514,7 @@ function ChatPane({
           }),
           gw.on<{ tool_id?: string; name?: string }>("tool.start", (ev) => {
             if (!mine(ev.session_id)) return;
+            setToolStarts((count) => count + 1);
             const chip: ToolChip = {
               id: ev.payload?.tool_id || nextId(),
               name: ev.payload?.name || "tool",
@@ -420,6 +559,7 @@ function ChatPane({
           gw.on<{ message?: string; text?: string }>("error", (ev) => {
             if (!mine(ev.session_id)) return;
             setBusy(false);
+            busyRef.current = false;
             setThinking(false);
             const msg =
               ev.payload?.message || ev.payload?.text || "Something went wrong";
@@ -427,31 +567,17 @@ function ChatPane({
               ...msgs,
               { id: nextId(), role: "assistant", content: msg, error: true },
             ]);
+            queueMicrotask(() => drainQueueRef.current());
           }),
-          gw.on<{
-            role?: string;
-            content?: string;
-            provider?: string;
-            source_session_id?: string;
-          }>("shared.context", (ev) => {
-            const payload = ev.payload;
-            const content = payload?.content;
-            const provider = payload?.provider;
-            if (
-              typeof content !== "string" ||
-              payload?.source_session_id === sessionIdRef.current
-            ) {
-              return;
+          gw.on<{ running?: boolean }>("session.info", (ev) => {
+            if (!mine(ev.session_id)) return;
+            const running = Boolean(ev.payload?.running);
+            setBusy(running);
+            busyRef.current = running;
+            if (!running) {
+              setThinking(false);
+              queueMicrotask(() => drainQueueRef.current());
             }
-            setMessages((msgs) => [
-              ...msgs,
-              {
-                id: nextId(),
-                role: "shared",
-                content,
-                provider,
-              },
-            ]);
           }),
           gw.onState((s) => {
             if (cancelled) return;
@@ -459,12 +585,68 @@ function ChatPane({
           }),
         );
 
-        const res = await gw.request<{ session_id: string }>(
-          "session.create",
-          {},
-        );
+        const storageKey = chatSessionStorageKey(scopedProfile, pane);
+        let resumeTarget = requestedSessionIdRef.current;
+        if (!resumeTarget) {
+          try {
+            resumeTarget = localStorage.getItem(storageKey) || "";
+          } catch {
+            resumeTarget = "";
+          }
+        }
+        if (!resumeTarget && pane === "primary") {
+          try {
+            const latest = await gw.request<{ session_id?: string | null }>(
+              "session.most_recent",
+              scopedProfile ? { profile: scopedProfile } : {},
+            );
+            resumeTarget = latest.session_id || "";
+          } catch {
+            // A first-run install simply has no recent session.
+          }
+        }
+
+        let res: GatewaySessionPayload;
+        if (resumeTarget) {
+          try {
+            res = await gw.request<GatewaySessionPayload>("session.resume", {
+              session_id: resumeTarget,
+              source: "web",
+              ...(scopedProfile ? { profile: scopedProfile } : {}),
+            });
+          } catch {
+            res = await gw.request<GatewaySessionPayload>("session.create", {
+              source: "web",
+              ...(scopedProfile ? { profile: scopedProfile } : {}),
+            });
+          }
+        } else {
+          res = await gw.request<GatewaySessionPayload>("session.create", {
+            source: "web",
+            ...(scopedProfile ? { profile: scopedProfile } : {}),
+          });
+        }
         if (cancelled) return;
         sessionIdRef.current = res.session_id;
+        const durableId = storedSessionId(res);
+        storedSessionIdRef.current = durableId;
+        setMessages(
+          restoreChatMessages(res).map((message) => ({
+            ...message,
+            id: nextId(),
+          })),
+        );
+        const running = Boolean(res.running || res.status === "streaming");
+        setBusy(running);
+        busyRef.current = running;
+        if (durableId) {
+          try {
+            localStorage.setItem(storageKey, durableId);
+          } catch {
+            // URL routing remains the durable fallback when storage is blocked.
+          }
+          onStoredSessionChangeRef.current?.(durableId);
+        }
         setConn("open");
       } catch (e) {
         if (cancelled) return;
@@ -480,8 +662,7 @@ function ChatPane({
       offs.forEach((off) => off());
       gw.close();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, scopedProfile]);
+  }, [appendAssistantDelta, nonce, pane, scopedProfile]);
 
   // Autoscroll on new content while the tab is active.
   useEffect(() => {
@@ -490,63 +671,179 @@ function ChatPane({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isActive]);
 
-  const sendText = useCallback(
-    (raw: string) => {
-      const text = raw.trim();
-      const gw = gwRef.current;
-      if (!text || !gw || conn !== "open" || !sessionIdRef.current) return;
-      setInput("");
-      setTaskIntensity(estimateTaskIntensity(text));
-      setBusy(true);
-      setMessages((msgs) => [
-        ...msgs,
-        { id: nextId(), role: "user", content: text },
-      ]);
-      gw.request("prompt.submit", {
-        session_id: sessionIdRef.current,
-        text,
-      }).catch((e) => {
+  const dispatchPrompt = useCallback((prompt: QueuedPrompt) => {
+    const gw = gwRef.current;
+    const sessionId = sessionIdRef.current;
+    if (!gw || !sessionId) return;
+    busyRef.current = true;
+    setBusy(true);
+    setTaskIntensity(
+      estimateTaskIntensity(
+        `${prompt.text}\n${prompt.files.map((file) => file.name).join("\n")}`,
+      ),
+    );
+    setToolStarts(0);
+
+    void (async () => {
+      try {
+        const attachmentRefs: string[] = [];
+        for (const file of prompt.files) {
+          attachmentRefs.push(await uploadChatAttachment(gw, sessionId, file));
+        }
+        const text = [attachmentRefs.join("\n"), prompt.text]
+          .filter(Boolean)
+          .join("\n\n") || "Review the attached file.";
+        await gw.request("prompt.submit", { session_id: sessionId, text });
+      } catch (error) {
+        busyRef.current = false;
         setBusy(false);
-        setMessages((msgs) => [
-          ...msgs,
+        setThinking(false);
+        setMessages((current) => [
+          ...current,
           {
             id: nextId(),
             role: "assistant",
-            content: e instanceof Error ? e.message : "Failed to send",
+            content: error instanceof Error ? error.message : "Failed to send",
             error: true,
           },
         ]);
-      });
+        queueMicrotask(() => drainQueueRef.current());
+      }
+    })();
+  }, []);
+  dispatchPromptRef.current = dispatchPrompt;
+
+  const drainQueue = useCallback(() => {
+    if (busyRef.current || conn !== "open") return;
+    const next = queuedPromptsRef.current.shift();
+    setQueuedCount(queuedPromptsRef.current.length);
+    if (next) dispatchPromptRef.current(next);
+  }, [conn]);
+  drainQueueRef.current = drainQueue;
+
+  const sendText = useCallback(
+    (raw: string) => {
+      const text = raw.trim();
+      const files = attachments
+        .filter((attachment) => attachment.state === "ready")
+        .map((attachment) => attachment.file);
+      if (
+        (!text && files.length === 0) ||
+        conn !== "open" ||
+        !sessionIdRef.current
+      ) {
+        return;
+      }
+
+      const prompt: QueuedPrompt = { id: nextId(), text, files };
+      const queued = busyRef.current;
+      const fileSummary = files.length
+        ? `\n${files.map((file) => `Attached: ${file.name}`).join("\n")}`
+        : "";
+      setInput("");
+      setAttachments([]);
+      setMessages((current) => [
+        ...current,
+        {
+          id: prompt.id,
+          role: "user",
+          content: `${text}${fileSummary}`.trim(),
+          delivery: queued ? "queued" : undefined,
+        },
+      ]);
+      if (queued) {
+        queuedPromptsRef.current.push(prompt);
+        setQueuedCount(queuedPromptsRef.current.length);
+      } else {
+        dispatchPromptRef.current(prompt);
+      }
     },
-    [conn],
+    [attachments, conn],
   );
 
   const send = useCallback(() => sendText(input), [sendText, input]);
 
-  // Voice chat — same gateway path, same permissions. A spoken utterance is
-  // sent exactly like a typed one; Zeb's replies are read back aloud when
-  // voice mode is on.
-  const voice = useVoiceChat((transcript) => sendText(transcript));
-  const speakRef = useRef(voice.speak);
-  speakRef.current = voice.speak;
-
   const interrupt = useCallback(() => {
     const gw = gwRef.current;
-    if (!gw || !sessionIdRef.current) return;
+    if (!gw || !sessionIdRef.current || !busyRef.current) return;
     gw.request("session.interrupt", { session_id: sessionIdRef.current }).catch(
       () => {},
     );
-    setBusy(false);
     setThinking(false);
   }, []);
 
-  const newChat = useCallback(() => {
-    if (onNewChat) {
-      onNewChat();
+  const voice = useVoiceChat(
+    (transcript) => sendText(transcript),
+    () => {
+      if (busyRef.current) interrupt();
+    },
+  );
+  const speakRef = useRef(voice.speak);
+  speakRef.current = voice.speak;
+
+  const steer = useCallback(() => {
+    const text = input.trim();
+    const gw = gwRef.current;
+    if (
+      !text ||
+      !gw ||
+      !sessionIdRef.current ||
+      !busyRef.current ||
+      attachments.some((attachment) => attachment.state === "ready")
+    ) {
       return;
     }
-    setNonce((n) => n + 1);
-  }, [onNewChat]);
+    setInput("");
+    void gw
+      .request("session.steer", { session_id: sessionIdRef.current, text })
+      .then(() => {
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId(),
+            role: "user",
+            content: text,
+            delivery: "steered",
+          },
+        ]);
+      })
+      .catch(() => {
+        const prompt = { id: nextId(), text, files: [] };
+        queuedPromptsRef.current.push(prompt);
+        setQueuedCount(queuedPromptsRef.current.length);
+        setMessages((current) => [
+          ...current,
+          {
+            id: prompt.id,
+            role: "user",
+            content: text,
+            delivery: "queued",
+          },
+        ]);
+      });
+  }, [attachments, input]);
+
+  const openSplit = useCallback(() => onOpenSplit?.(), [onOpenSplit]);
+
+  const addDroppedFiles = useCallback((files: FileList | File[]) => {
+    const incoming = Array.from(files).map<PendingAttachment>((file) =>
+      file.size > MAX_BROWSER_ATTACHMENT_BYTES
+        ? {
+            id: `${nextId()}-${file.name}`,
+            file,
+            state: "error",
+            error: "File is larger than the 24 MB browser upload limit",
+          }
+        : { id: `${nextId()}-${file.name}`, file, state: "ready" },
+    );
+    setAttachments((current) => [...current, ...incoming]);
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((current) =>
+      current.filter((attachment) => attachment.id !== id),
+    );
+  }, []);
 
   const statusDot = useMemo(() => {
     const color =
@@ -560,7 +857,9 @@ function ChatPane({
         ? busy
           ? thinking
             ? "Thinking…"
-            : "Working…"
+            : queuedCount
+              ? `Working · ${queuedCount} queued`
+              : "Working…"
           : "Ready"
         : conn === "connecting"
           ? "Connecting…"
@@ -571,7 +870,7 @@ function ChatPane({
         {label}
       </span>
     );
-  }, [conn, busy, thinking]);
+  }, [conn, busy, queuedCount, thinking]);
 
   const agentSlots: AgentRecord[] = AGENT_SLOTS.map((slot) => {
     const record = agents.find((agent) => agent.id === slot.id);
@@ -593,15 +892,52 @@ function ChatPane({
   }, []);
 
   return (
-    <div className="zeb-chat-pane relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <div
+      className="zeb-chat-pane relative flex min-h-0 min-w-0 flex-1 flex-col"
+      onDragEnter={(event) => {
+        if (event.dataTransfer.types.includes("Files")) {
+          event.preventDefault();
+          setDraggingFile(true);
+        }
+      }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes("Files")) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }
+      }}
+      onDragLeave={(event) => {
+        const next = event.relatedTarget;
+        if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
+          setDraggingFile(false);
+        }
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDraggingFile(false);
+        if (event.dataTransfer.files.length) {
+          addDroppedFiles(event.dataTransfer.files);
+        }
+      }}
+    >
+      {draggingFile ? (
+        <div className="pointer-events-none absolute inset-3 z-50 flex items-center justify-center rounded-2xl border-2 border-dashed border-[#69d5ff]/60 bg-black/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <FileText className="h-9 w-9 text-[#69d5ff]" />
+            <span className="font-mono text-sm uppercase tracking-[0.16em] text-white">
+              Drop files into this chat
+            </span>
+          </div>
+        </div>
+      ) : null}
       {/* Brain overlay — removed entirely while two independent chats are open. */}
       {showBrain ? (
         <div
           aria-hidden
           className={cn(
-            "pointer-events-none absolute right-0 top-0 z-10",
+            "pointer-events-none absolute -right-[4%] top-0 z-10",
             "transition-[width,height] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)]",
-            split ? "h-full w-1/2" : "h-[54%] w-[43%] min-w-80",
+            split ? "h-full w-[44%]" : "h-[58%] w-[44%] min-w-80",
           )}
           style={{
             WebkitMaskImage:
@@ -714,15 +1050,17 @@ function ChatPane({
               {modelLabel}
             </span>
           ) : null}
-          <Button
-            ghost
-            size="sm"
-            onClick={newChat}
-            prefix={<Plus className="h-3.5 w-3.5" />}
-            className="uppercase"
-          >
-            New chat
-          </Button>
+          {onOpenSplit ? (
+            <Button
+              ghost
+              size="icon"
+              onClick={openSplit}
+              aria-label="Open split chat"
+              title="Open split chat"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          ) : null}
           {onClose ? (
             <Button
               ghost
@@ -746,7 +1084,7 @@ function ChatPane({
         <div
           className={cn(
             "flex flex-col items-start gap-3",
-            split ? "w-1/2 max-w-[50%] pr-6" : "max-w-3xl",
+            split ? "w-[60%] max-w-[60%] pr-6" : "max-w-4xl",
           )}
         >
           {banner ? (
@@ -771,11 +1109,9 @@ function ChatPane({
             <div
               key={m.id}
               className={cn(
-                "zeb-message max-w-full rounded-[var(--radius)] px-4 py-3",
+                "zeb-message max-w-full rounded-[var(--radius)] px-5 py-4",
                 m.role === "user"
                   ? "border border-midground/20 bg-midground/10"
-                  : m.role === "shared"
-                    ? "border border-[#a884ff]/25 bg-[#a884ff]/[0.06]"
                   : m.error
                     ? "border border-destructive/40 bg-destructive/10"
                     : "border border-current/10 bg-midground/[0.04]",
@@ -800,19 +1136,17 @@ function ChatPane({
                   ))}
                 </div>
               ) : null}
+              {m.delivery ? (
+                <div className="mb-1.5 font-mono text-[0.62rem] uppercase tracking-[0.13em] text-[#69d5ff]">
+                  {m.delivery === "steered" ? "Steered into live task" : "Queued next"}
+                </div>
+              ) : null}
               {m.role === "user" ? (
-                <div className="whitespace-pre-wrap text-sm text-midground">
+                <div className="whitespace-pre-wrap text-[1.0625rem] leading-7 text-midground">
                   {m.content}
                 </div>
-              ) : m.role === "shared" ? (
-                <div>
-                  <div className="mb-1 font-mono text-[0.6rem] uppercase tracking-[0.12em] text-[#a884ff]">
-                    Shared context{m.provider ? ` · ${m.provider}` : ""}
-                  </div>
-                  <Markdown content={m.content} />
-                </div>
               ) : (
-                <Markdown content={m.content} streaming={m.streaming} />
+                <Markdown content={m.content} streaming={m.streaming} size="chat" />
               )}
             </div>
           ))}
@@ -828,6 +1162,41 @@ function ChatPane({
 
       {/* Composer — full width, floats above the brain */}
       <footer className="zeb-composer relative z-20 shrink-0 border-t border-current/10 px-4 py-3 sm:px-6">
+        {attachments.length ? (
+          <div className="mb-2 flex flex-wrap gap-2" aria-label="Attached files">
+            {attachments.map((attachment) => (
+              <span
+                key={attachment.id}
+                className={cn(
+                  "flex max-w-full items-center gap-2 rounded-full border px-3 py-1 font-mono text-xs",
+                  attachment.state === "error"
+                    ? "border-destructive/40 text-destructive"
+                    : "border-[#69d5ff]/25 bg-[#69d5ff]/[0.06] text-[#bdeeff]",
+                )}
+                title={attachment.error || attachment.file.name}
+              >
+                <FileText className="h-3 w-3 shrink-0" />
+                <span className="max-w-52 truncate">{attachment.file.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(attachment.id)}
+                  aria-label={`Remove ${attachment.file.name}`}
+                  className="rounded-full p-0.5 opacity-70 transition-opacity hover:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {voice.listening && voice.transcript ? (
+          <div className="mb-2 rounded-lg border border-[#69d5ff]/20 bg-[#69d5ff]/[0.05] px-3 py-2 text-sm text-[#bdeeff]">
+            {voice.transcript}
+            <span className="ml-2 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-text-tertiary">
+              sends after {voice.silenceMs / 1000}s silence
+            </span>
+          </div>
+        ) : null}
         <form
           className="flex items-end gap-2"
           onSubmit={(e) => {
@@ -851,9 +1220,9 @@ function ChatPane({
             }
             disabled={conn !== "open"}
             className={cn(
-              "max-h-[40vh] min-h-[2.75rem] flex-1 resize-none overflow-y-auto rounded-xl",
-              "border border-current/15 bg-black/20 px-4 py-3 shadow-inner",
-              "font-sans text-sm text-midground placeholder:text-text-tertiary",
+              "max-h-[40vh] min-h-14 flex-1 resize-none overflow-y-auto rounded-xl",
+              "border border-current/15 bg-black/20 px-5 py-4 shadow-inner",
+              "font-sans text-base text-midground placeholder:text-text-tertiary",
               "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground/50",
               "disabled:cursor-not-allowed disabled:opacity-60",
             )}
@@ -869,7 +1238,7 @@ function ChatPane({
                 size="icon"
                 onClick={voice.toggleVoiceMode}
                 aria-label={voice.voiceMode ? "Mute Zeb's voice" : "Let Zeb speak"}
-                title={voice.voiceMode ? "Voice replies on" : "Voice replies off"}
+                title={voice.voiceMode ? "Voice conversation on" : "Voice conversation off"}
                 className={
                   voice.voiceMode ? "text-[#d1d4da]" : "text-text-tertiary"
                 }
@@ -889,7 +1258,13 @@ function ChatPane({
                 }
                 disabled={conn !== "open"}
                 aria-label={voice.listening ? "Stop listening" : "Talk to Zeb"}
-                title="Talk to Zeb"
+                title={
+                  voice.listening
+                    ? "Listening until 2.5 seconds of silence"
+                    : voice.speaking
+                      ? "Interrupt Zeb and speak"
+                      : "Start voice conversation"
+                }
                 className={
                   voice.listening
                     ? "animate-pulse bg-destructive/15 text-destructive"
@@ -904,6 +1279,23 @@ function ChatPane({
             <Button
               type="button"
               ghost
+              size="sm"
+              onClick={steer}
+              disabled={
+                !input.trim() ||
+                attachments.some((attachment) => attachment.state === "ready")
+              }
+              aria-label="Steer current task"
+              title="Inject this into Zeb's current work without stopping it"
+              className="font-mono text-xs uppercase tracking-[0.1em] text-[#69d5ff]"
+            >
+              Steer
+            </Button>
+          ) : null}
+          {busy ? (
+            <Button
+              type="button"
+              ghost
               size="icon"
               onClick={interrupt}
               aria-label="Stop"
@@ -911,16 +1303,20 @@ function ChatPane({
             >
               <CircleStop className="h-4 w-4" />
             </Button>
-          ) : (
-            <Button
-              type="submit"
-              size="icon"
-              disabled={conn !== "open" || !input.trim()}
-              aria-label="Send"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          )}
+          ) : null}
+          <Button
+            type="submit"
+            size="icon"
+            disabled={
+              conn !== "open" ||
+              (!input.trim() &&
+                !attachments.some((attachment) => attachment.state === "ready"))
+            }
+            aria-label={busy ? "Queue message" : "Send"}
+            title={busy ? "Queue for the next turn" : "Send"}
+          >
+            <Send className="h-4 w-4" />
+          </Button>
         </form>
       </footer>
     </div>

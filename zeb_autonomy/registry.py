@@ -146,6 +146,20 @@ def build_scheduler(
         )
         sched.register(ReviewBot(), interval_seconds=hrs * 3600)
 
+    # Gwen — private, restart-safe local reflection with an hourly
+    # credential-aware mentor attempt. The bot's SQLite store owns the real
+    # due times; this short scheduler tick only gives it a chance to claim work.
+    def _gwen() -> None:
+        from zeb_autonomy.bots.gwen import GwenBot
+
+        if not _cfg(config, "autonomy", "gwen", "enabled", default=True):
+            return
+        mins = float(
+            _cfg(config, "autonomy", "gwen", "scheduler_interval_minutes", default=5)
+            or 5
+        )
+        sched.register(GwenBot(), interval_seconds=max(1.0, mins) * 60)
+
     _try(_decision, "decision_engine")
     _try(_memory, "memory_learning")
     _try(_sync, "state_sync")
@@ -155,6 +169,7 @@ def build_scheduler(
     _try(_evolution, "self_evolution")
     _try(_always_on, "always_on")
     _try(_review, "self_review")
+    _try(_gwen, "gwen")
 
     return sched
 

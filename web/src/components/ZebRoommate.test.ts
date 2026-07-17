@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ROOMMATE_ACTIVITY_CYCLE,
   ROOMMATE_SCENES,
+  ZebRoommate,
   roommateTransition,
+  selectNextRoommateScene,
   type RoommateScene,
   type RoommateSceneId,
 } from "./ZebRoommate";
@@ -58,6 +62,24 @@ const FURNITURE_SCENE_IDS = [
   "sleep",
   "laptop",
 ] as const satisfies readonly RoommateSceneId[];
+
+const PROP_LOCKED_SCENE_IDS = [
+  ...FURNITURE_SCENE_IDS,
+  "plant",
+] as const satisfies readonly RoommateSceneId[];
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function renderRoommate(sceneId?: RoommateSceneId): string {
+  if (sceneId) {
+    vi.stubGlobal("window", {
+      location: { search: `?roommateScene=${sceneId}` },
+    });
+  }
+  return renderToStaticMarkup(createElement(ZebRoommate));
+}
 
 function expectValidEyeGeometry(scene: RoommateScene): void {
   expect(scene.eyes, `${scene.id} should define eye geometry`).toBeDefined();
@@ -150,6 +172,14 @@ describe("ROOMMATE_SCENES", () => {
       );
     }
   });
+
+  it("limits prop locks to fixed furniture and plant composites", () => {
+    const lockedSceneIds = Object.values(ROOMMATE_SCENES)
+      .filter((scene) => scene.propLocked)
+      .map((scene) => scene.id);
+
+    expect(lockedSceneIds.sort()).toEqual([...PROP_LOCKED_SCENE_IDS].sort());
+  });
 });
 
 describe("ROOMMATE_ACTIVITY_CYCLE", () => {
@@ -166,6 +196,56 @@ describe("ROOMMATE_ACTIVITY_CYCLE", () => {
     );
     expect(smokeSlots).toHaveLength(5);
     expect(smokeSlots.length / ROOMMATE_ACTIVITY_CYCLE.length).toBe(0.25);
+  });
+});
+
+describe("selectNextRoommateScene", () => {
+  it("selects the first queued scene that differs from the current scene", () => {
+    const selection = selectNextRoommateScene("vape", ["vape", "vape", "phone", "tv"]);
+
+    expect(selection).toEqual({ sceneId: "phone", remaining: ["vape", "vape", "tv"] });
+  });
+
+  it("replenishes once when only duplicate current scenes are queued", () => {
+    const replenish = vi.fn(() => ["idle", "couch", "gaming"] as RoommateSceneId[]);
+    const selection = selectNextRoommateScene("idle", ["idle"], replenish);
+
+    expect(selection).toEqual({ sceneId: "couch", remaining: ["idle", "idle", "gaming"] });
+    expect(replenish).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to a different registered scene when replenishment is invalid", () => {
+    const replenish = vi.fn(() => ["idle", "idle"] as RoommateSceneId[]);
+    const selection = selectNextRoommateScene("idle", [], replenish);
+
+    expect(selection.sceneId).not.toBe("idle");
+    expect(ROOMMATE_SCENES[selection.sceneId]).toBeDefined();
+    expect(replenish).toHaveBeenCalledOnce();
+  });
+});
+
+describe("ZebRoommate structure", () => {
+  it("keeps the pose, aligned eyelids, and effects inside a stable ambient wrapper", () => {
+    const markup = renderRoommate("vape");
+
+    expect(markup).toContain(
+      '<div class="zeb-roommate__ambient"><div class="zeb-roommate__pose"',
+    );
+    expect(markup.indexOf("zeb-roommate__pose")).toBeLessThan(
+      markup.indexOf("zeb-roommate__eyelids"),
+    );
+    expect(markup.indexOf("zeb-roommate__eyelids")).toBeLessThan(
+      markup.indexOf("zeb-roommate__fx"),
+    );
+  });
+
+  it("propagates fixed-composite locking to the scene and ambient wrapper", () => {
+    const markup = renderRoommate("couch");
+
+    expect(markup).toMatch(/zeb-roommate__scene[^"]*is-prop-locked/);
+    expect(markup).toContain(
+      'class="zeb-roommate__ambient is-ambient-locked"',
+    );
   });
 });
 

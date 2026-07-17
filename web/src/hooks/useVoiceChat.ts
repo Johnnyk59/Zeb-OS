@@ -1,20 +1,18 @@
-/**
- * useVoiceChat — real-time talk-to-Zeb voice, browser-native.
- *
- * Voice is not a separate assistant: it feeds the exact same gateway path as
- * the text composer, so it inherits identical permissions and full workspace
- * access. This is Zeb hearing and speaking with one of its own faculties, not
- * a bolt-on service.
- *
- * Uses the Web Speech API (SpeechRecognition for listening, speechSynthesis
- * for talking back) — no network calls, no external host. `onFinalTranscript`
- * fires with the recognized utterance so the caller can drop it into the
- * composer and send it just like a typed message. When voice mode is on,
- * `speak()` reads Zeb's replies aloud.
- */
+/** Browser-native, silence-aware voice conversation mode for Zeb chat. */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-// The Web Speech API isn't in TS's DOM lib; treat it structurally.
+export const VOICE_SILENCE_MS = 2500;
+
+type SpeechRecognitionResultLike = {
+  0: { transcript: string };
+  isFinal: boolean;
+};
+
+type SpeechRecognitionEventLike = {
+  resultIndex?: number;
+  results: ArrayLike<SpeechRecognitionResultLike>;
+};
+
 type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
@@ -22,129 +20,236 @@ type SpeechRecognitionLike = {
   start: () => void;
   stop: () => void;
   abort: () => void;
-  onresult: ((e: unknown) => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onend: (() => void) | null;
   onerror: (() => void) | null;
 };
 
 function getRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   if (typeof window === "undefined") return null;
-  const w = window as unknown as {
+  const browser = window as unknown as {
     SpeechRecognition?: new () => SpeechRecognitionLike;
     webkitSpeechRecognition?: new () => SpeechRecognitionLike;
   };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+  return browser.SpeechRecognition ?? browser.webkitSpeechRecognition ?? null;
 }
 
-export function useVoiceChat(onFinalTranscript: (text: string) => void) {
+export function useVoiceChat(
+  onFinalTranscript: (text: string) => void,
+  onBargeIn?: () => void,
+) {
   const [supported] = useState(() => getRecognitionCtor() !== null);
   const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
+  const [transcript, setTranscript] = useState("");
 
-  const recogRef = useRef<SpeechRecognitionLike | null>(null);
-  const onFinalRef = useRef(onFinalTranscript);
-  onFinalRef.current = onFinalTranscript;
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finalTranscriptRef = useRef("");
+  const interimTranscriptRef = useRef("");
+  const listeningWantedRef = useRef(false);
+  const automaticListenRef = useRef(false);
   const voiceModeRef = useRef(false);
-  voiceModeRef.current = voiceMode;
+  const startListeningRef = useRef<() => void>(() => {});
+  const onFinalRef = useRef(onFinalTranscript);
+  const onBargeInRef = useRef(onBargeIn);
 
-  const stopListening = useCallback(() => {
-    try {
-      recogRef.current?.stop();
-    } catch {
-      /* already stopped */
-    }
-    setListening(false);
+  useEffect(() => {
+    onFinalRef.current = onFinalTranscript;
+    onBargeInRef.current = onBargeIn;
+    voiceModeRef.current = voiceMode;
+  }, [onBargeIn, onFinalTranscript, voiceMode]);
+
+  const clearTimers = useCallback(() => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+    silenceTimerRef.current = null;
+    restartTimerRef.current = null;
   }, []);
 
-  const startListening = useCallback(() => {
-    const Ctor = getRecognitionCtor();
-    if (!Ctor) return;
-    // Cancel any in-flight speech so Zeb doesn't hear itself.
+  const stopSpeaking = useCallback(() => {
     try {
       window.speechSynthesis?.cancel();
     } catch {
-      /* no synth */
+      // Speech synthesis is optional.
     }
-    const recog = new Ctor();
-    recog.lang = navigator.language || "en-US";
-    recog.continuous = false;
-    recog.interimResults = true;
-    recog.onresult = (e: unknown) => {
-      // e.results is a list of alternatives; take the last final one.
-      const ev = e as {
-        results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }>;
-      };
-      let finalText = "";
-      for (let i = 0; i < ev.results.length; i++) {
-        const r = ev.results[i];
-        if (r.isFinal) finalText += r[0].transcript;
-      }
-      if (finalText.trim()) {
-        onFinalRef.current(finalText.trim());
-        stopListening();
-      }
-    };
-    recog.onend = () => setListening(false);
-    recog.onerror = () => setListening(false);
-    recogRef.current = recog;
+    setSpeaking(false);
+  }, []);
+
+  const stopListening = useCallback(() => {
+    listeningWantedRef.current = false;
+    clearTimers();
     try {
-      recog.start();
+      recognitionRef.current?.abort();
+    } catch {
+      // Recognition may already be stopped.
+    }
+    recognitionRef.current = null;
+    finalTranscriptRef.current = "";
+    interimTranscriptRef.current = "";
+    setTranscript("");
+    setListening(false);
+  }, [clearTimers]);
+
+  const flushTranscript = useCallback(() => {
+    const text = `${finalTranscriptRef.current} ${interimTranscriptRef.current}`
+      .replace(/\s+/g, " ")
+      .trim();
+    listeningWantedRef.current = false;
+    clearTimers();
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      // Recognition may have ended while the silence timer fired.
+    }
+    recognitionRef.current = null;
+    finalTranscriptRef.current = "";
+    interimTranscriptRef.current = "";
+    setTranscript("");
+    setListening(false);
+    if (text) onFinalRef.current(text);
+  }, [clearTimers]);
+
+  const armSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    silenceTimerRef.current = setTimeout(flushTranscript, VOICE_SILENCE_MS);
+  }, [flushTranscript]);
+
+  const startListening = useCallback(() => {
+    const Recognition = getRecognitionCtor();
+    if (!Recognition) return;
+
+    if (automaticListenRef.current) automaticListenRef.current = false;
+    else onBargeInRef.current?.();
+    stopSpeaking();
+    clearTimers();
+    setVoiceMode(true);
+    voiceModeRef.current = true;
+    listeningWantedRef.current = true;
+    finalTranscriptRef.current = "";
+    interimTranscriptRef.current = "";
+    setTranscript("");
+
+    const recognition = new Recognition();
+    recognition.lang = navigator.language || "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onresult = (event) => {
+      let interim = "";
+      const first = Math.max(0, event.resultIndex ?? 0);
+      for (let index = first; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const chunk = result[0]?.transcript ?? "";
+        if (result.isFinal) finalTranscriptRef.current += ` ${chunk}`;
+        else interim += ` ${chunk}`;
+      }
+      interimTranscriptRef.current = interim;
+      const live = `${finalTranscriptRef.current} ${interim}`
+        .replace(/\s+/g, " ")
+        .trim();
+      setTranscript(live);
+      if (live) armSilenceTimer();
+    };
+    recognition.onerror = () => {
+      listeningWantedRef.current = false;
+      clearTimers();
+      setListening(false);
+    };
+    recognition.onend = () => {
+      setListening(false);
+      if (!listeningWantedRef.current) return;
+      restartTimerRef.current = setTimeout(() => {
+        try {
+          recognition.start();
+          setListening(true);
+        } catch {
+          listeningWantedRef.current = false;
+        }
+      }, 120);
+    };
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
       setListening(true);
     } catch {
+      listeningWantedRef.current = false;
       setListening(false);
     }
-  }, [stopListening]);
+  }, [armSilenceTimer, clearTimers, stopSpeaking]);
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
 
   const speak = useCallback((text: string) => {
     if (!voiceModeRef.current || !text.trim()) return;
     try {
       const synth = window.speechSynthesis;
       if (!synth) return;
-      // Strip markdown/code fences so speech stays natural.
+      synth.cancel();
       const clean = text
         .replace(/```[\s\S]*?```/g, " code block ")
         .replace(/[*_`#>]/g, "")
-        .slice(0, 1200);
-      const utter = new SpeechSynthesisUtterance(clean);
-      utter.lang = navigator.language || "en-US";
-      synth.speak(utter);
+        .slice(0, 2400);
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.lang = navigator.language || "en-US";
+      utterance.onstart = () => setSpeaking(true);
+      utterance.onend = () => {
+        setSpeaking(false);
+        if (voiceModeRef.current) {
+          restartTimerRef.current = setTimeout(
+            () => {
+              automaticListenRef.current = true;
+              startListeningRef.current();
+            },
+            220,
+          );
+        }
+      };
+      utterance.onerror = () => setSpeaking(false);
+      synth.speak(utterance);
     } catch {
-      /* synthesis unavailable */
+      setSpeaking(false);
     }
   }, []);
 
   const toggleVoiceMode = useCallback(() => {
-    setVoiceMode((v) => {
-      const next = !v;
+    setVoiceMode((current) => {
+      const next = !current;
+      voiceModeRef.current = next;
       if (!next) {
-        try {
-          window.speechSynthesis?.cancel();
-        } catch {
-          /* ignore */
-        }
+        stopListening();
+        stopSpeaking();
       }
       return next;
     });
-  }, []);
+  }, [stopListening, stopSpeaking]);
 
   useEffect(
     () => () => {
+      listeningWantedRef.current = false;
+      clearTimers();
       try {
-        recogRef.current?.abort();
+        recognitionRef.current?.abort();
         window.speechSynthesis?.cancel();
       } catch {
-        /* teardown */
+        // Browser voice APIs are best-effort during teardown.
       }
     },
-    [],
+    [clearTimers],
   );
 
   return {
     supported,
     listening,
+    speaking,
+    transcript,
     voiceMode,
+    silenceMs: VOICE_SILENCE_MS,
     startListening,
     stopListening,
+    stopSpeaking,
     toggleVoiceMode,
     speak,
   };
