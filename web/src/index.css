@@ -314,7 +314,7 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 .zeb-roommate__sprite-window {
   position: absolute;
   z-index: 2;
-  inset: 0 0 0.55rem;
+  inset: 0 0 0.08rem;
   overflow: hidden;
 }
 
