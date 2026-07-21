@@ -602,7 +602,7 @@ class AgentStore:
     _ALLOWED = ("label", "dashboard_url", "status")
     # The three seed agents the top bar ships with. Zeb can register more ids.
     _SEED = {
-        "quant": "Qompot",
+        "quant": "Quant Bot",
         "socials": "Socials Agent",
         "jewelry": "Jew",
     }

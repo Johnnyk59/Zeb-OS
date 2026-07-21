@@ -1,12 +1,12 @@
 /**
- * Zeb's cognitive observatory: a depth-sorted, activity-aware cortical network.
- * Rendering is bounded by explicit frame and signal budgets so high activity
- * increases information density without monopolizing the browser main thread.
+ * A freeform, depth-sorted neural field whose camera and signal density track
+ * live activity. Every expensive dimension has an explicit or adaptive bound.
  */
 import { useEffect, useRef } from "react";
-import { getBrainMotionProfile } from "@/lib/brain-activity";
+import { getBrainFrameEnergy, getBrainMotionProfile } from "@/lib/brain-activity";
 
 type RGB = readonly [number, number, number];
+type Point3 = readonly [number, number, number];
 
 interface Node {
   bx: number;
@@ -19,6 +19,8 @@ interface Node {
   drift: number;
   fire: number;
   palette: number;
+  cluster: number;
+  radius: number;
 }
 
 interface ProjectedNode {
@@ -30,29 +32,59 @@ interface ProjectedNode {
   fire: number;
   seed: number;
   palette: number;
+  radius: number;
 }
 
 interface Signal {
+  edge: number;
   from: number;
   to: number;
   t: number;
-  bend: number;
   palette: number;
+  phase: number;
+  speed: number;
 }
 
 interface Edge {
   from: number;
   to: number;
   color: RGB;
+  bend: number;
+  reach: number;
+}
+
+interface Connection {
+  edge: number;
+  peer: number;
+}
+
+interface ClusterSpec {
+  center: Point3;
+  spread: Point3;
+  count: number;
+  palette: number;
 }
 
 const TAU = Math.PI * 2;
-const TILT = 0.32;
+const TILT = 0.3;
 const CT = Math.cos(TILT);
 const ST = Math.sin(TILT);
+const BASE_CAMERA_DEPTH = 0.46;
+const MAX_EDGES = 620;
 
-function rnd(a: number, b: number): number {
-  return a + Math.random() * (b - a);
+function createRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function rnd(random: () => number, a: number, b: number): number {
+  return a + random() * (b - a);
 }
 
 function mixColor(a: RGB, b: RGB): RGB {
@@ -87,60 +119,6 @@ function createGlowSprite(color: RGB, whiteCore = false): HTMLCanvasElement {
   return sprite;
 }
 
-function createBrainHull(): Path2D {
-  const path = new Path2D();
-  path.moveTo(0, -0.98);
-  path.bezierCurveTo(-0.12, -1.08, -0.28, -1.04, -0.39, -0.98);
-  path.bezierCurveTo(-0.76, -1.01, -1.04, -0.76, -1.08, -0.43);
-  path.bezierCurveTo(-1.2, -0.18, -1.13, 0.15, -0.94, 0.34);
-  path.bezierCurveTo(-0.91, 0.66, -0.62, 0.91, -0.23, 0.87);
-  path.bezierCurveTo(-0.08, 0.84, -0.04, 0.68, 0, 0.53);
-  path.bezierCurveTo(0.04, 0.68, 0.08, 0.84, 0.23, 0.87);
-  path.bezierCurveTo(0.62, 0.91, 0.91, 0.66, 0.94, 0.34);
-  path.bezierCurveTo(1.13, 0.15, 1.2, -0.18, 1.08, -0.43);
-  path.bezierCurveTo(1.04, -0.76, 0.76, -1.01, 0.39, -0.98);
-  path.bezierCurveTo(0.28, -1.04, 0.12, -1.08, 0, -0.98);
-  path.closePath();
-  return path;
-}
-
-function createCorticalContours(): readonly Path2D[] {
-  const paths: Path2D[] = [];
-  const add = (draw: (path: Path2D) => void) => {
-    const path = new Path2D();
-    draw(path);
-    paths.push(path);
-  };
-
-  add((path) => {
-    path.moveTo(-0.95, -0.35);
-    path.bezierCurveTo(-0.7, -0.55, -0.46, -0.46, -0.23, -0.64);
-  });
-  add((path) => {
-    path.moveTo(0.95, -0.35);
-    path.bezierCurveTo(0.7, -0.55, 0.46, -0.46, 0.23, -0.64);
-  });
-  add((path) => {
-    path.moveTo(-1.02, 0.06);
-    path.bezierCurveTo(-0.78, -0.06, -0.58, 0.08, -0.35, -0.11);
-    path.bezierCurveTo(-0.23, -0.2, -0.15, -0.15, -0.1, -0.28);
-  });
-  add((path) => {
-    path.moveTo(1.02, 0.06);
-    path.bezierCurveTo(0.78, -0.06, 0.58, 0.08, 0.35, -0.11);
-    path.bezierCurveTo(0.23, -0.2, 0.15, -0.15, 0.1, -0.28);
-  });
-  add((path) => {
-    path.moveTo(-0.85, 0.42);
-    path.bezierCurveTo(-0.63, 0.28, -0.45, 0.46, -0.2, 0.31);
-  });
-  add((path) => {
-    path.moveTo(0.85, 0.42);
-    path.bezierCurveTo(0.63, 0.28, 0.45, 0.46, 0.2, 0.31);
-  });
-  return paths;
-}
-
 export function BrainCanvas({
   energy = 0,
   className,
@@ -172,32 +150,37 @@ export function BrainCanvas({
     let lastFrame = 0;
     let fireAccumulator = 0;
     let currentEnergy = 0;
+    let sustainedDive = 0;
+    let cameraZoom = 1;
+    let cameraDepth = BASE_CAMERA_DEPTH;
+    let cameraX = 0;
+    let cameraY = 0;
+    let cameraZ = 0;
+    let focusTimer = 0;
+    let focusIndex = 0;
     let raf = 0;
     let disposed = false;
     let inViewport = true;
     let adaptiveQuality = 1;
     let averageFrameCost = 0;
-    let shellGradient: CanvasGradient | string = "rgba(28,72,118,0.08)";
     const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     let reducedMotion = reducedMotionQuery.matches;
+    const random = createRandom(0x5eb05);
 
-    // Cyan and blue carry the structure; violet, amber, and coral are accents.
     const palette: readonly RGB[] = [
-      [70, 224, 246],
-      [77, 132, 255],
-      [156, 112, 255],
-      [255, 184, 80],
-      [255, 99, 128],
+      [66, 226, 246],
+      [74, 137, 255],
+      [91, 239, 184],
+      [255, 185, 79],
+      [255, 101, 132],
     ];
     const nodeSprites = palette.map((color) => createGlowSprite(color));
     const signalSprites = palette.map((color) => createGlowSprite(color, true));
     const fieldSprites = [
       createGlowSprite(palette[0]),
+      createGlowSprite(palette[1]),
       createGlowSprite(palette[2]),
-      createGlowSprite(palette[3]),
     ];
-    const brainHull = createBrainHull();
-    const corticalContours = createCorticalContours();
 
     const drawSprite = (
       sprite: HTMLCanvasElement,
@@ -211,30 +194,28 @@ export function BrainCanvas({
       ctx.drawImage(sprite, x - radius, y - radius, radius * 2, radius * 2);
     };
 
-    // A lobed two-hemisphere surface with a readable longitudinal fissure.
-    const nodeCount = 148;
+    // Uneven, overlapping constellations keep the network spatially legible
+    // without collecting the points into a recognizable perimeter.
+    const clusterSpecs: readonly ClusterSpec[] = [
+      { center: [-0.72, -0.14, -0.14], spread: [0.5, 0.4, 0.42], count: 32, palette: 0 },
+      { center: [-0.4, 0.54, 0.28], spread: [0.39, 0.34, 0.34], count: 29, palette: 2 },
+      { center: [0.02, 0.04, -0.5], spread: [0.38, 0.48, 0.31], count: 28, palette: 1 },
+      { center: [0.34, -0.5, 0.22], spread: [0.43, 0.33, 0.4], count: 30, palette: 4 },
+      { center: [0.78, 0.12, -0.12], spread: [0.47, 0.4, 0.37], count: 32, palette: 1 },
+      { center: [0.32, 0.62, 0.4], spread: [0.38, 0.3, 0.32], count: 26, palette: 3 },
+    ];
     const nodes: Node[] = [];
-    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-    for (let index = 0; index < nodeCount; index += 1) {
-      const normalizedY = 1 - (index / (nodeCount - 1)) * 2;
-      const radial = Math.sqrt(Math.max(0, 1 - normalizedY * normalizedY));
-      const angle = goldenAngle * index;
-      let x = Math.cos(angle) * radial;
-      let z = Math.sin(angle) * radial;
-      let y = normalizedY;
-      const lobe = 0.91 + Math.cos(y * Math.PI * 1.55) * 0.09;
-      const variation = rnd(0.88, 1) * lobe;
-      x *= 1.24 * variation;
-      y *= 0.9 * variation;
-      z *= 0.98 * variation;
-      x += x >= 0 ? 0.064 : -0.064;
-      z += (1 - y * y) * 0.035;
-      x += rnd(-0.035, 0.035);
-      y += rnd(-0.035, 0.035);
-      z += rnd(-0.035, 0.035);
-      const seed = Math.random();
-      const paletteIndex =
-        seed < 0.04 ? 4 : seed < 0.1 ? 3 : seed < 0.22 ? 2 : x < 0 ? 0 : 1;
+    const clusterAnchors: number[] = [];
+
+    const addNode = (
+      x: number,
+      y: number,
+      z: number,
+      cluster: number,
+      paletteIndex: number,
+      radius = rnd(random, 0.72, 1.42),
+    ) => {
+      const seed = random();
       nodes.push({
         bx: x,
         by: y,
@@ -243,46 +224,157 @@ export function BrainCanvas({
         y,
         z,
         seed,
-        drift: rnd(0, TAU),
+        drift: rnd(random, 0, TAU),
         fire: 0,
         palette: paletteIndex,
+        cluster,
+        radius,
       });
+    };
+
+    for (let cluster = 0; cluster < clusterSpecs.length; cluster += 1) {
+      const spec = clusterSpecs[cluster];
+      clusterAnchors.push(nodes.length);
+      addNode(spec.center[0], spec.center[1], spec.center[2], cluster, spec.palette, 1.5);
+
+      for (let index = 1; index < spec.count; index += 1) {
+        const azimuth = random() * TAU;
+        const vertical = rnd(random, -1, 1);
+        const planar = Math.sqrt(Math.max(0, 1 - vertical * vertical));
+        const radial = Math.pow(random(), 0.58);
+        const curl = (1 - radial) * 0.24 + cluster * 0.17;
+        const x =
+          spec.center[0] +
+          Math.cos(azimuth + curl) * planar * spec.spread[0] * radial +
+          rnd(random, -0.018, 0.018);
+        const y =
+          spec.center[1] +
+          vertical * spec.spread[1] * radial +
+          Math.sin(azimuth * 1.7) * spec.spread[1] * 0.08;
+        const z =
+          spec.center[2] +
+          Math.sin(azimuth + curl) * planar * spec.spread[2] * radial +
+          rnd(random, -0.018, 0.018);
+        const accent = random();
+        const paletteIndex =
+          accent < 0.08 ? 4 : accent < 0.16 ? 3 : accent < 0.26 ? (spec.palette + 1) % 3 : spec.palette;
+        addNode(x, y, z, cluster, paletteIndex);
+      }
     }
 
-    const distance3 = (a: Node, b: Node) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-    const edgeKeys = new Set<string>();
-    const edgePairs: Array<[number, number]> = [];
-    const addEdge = (a: number, b: number) => {
+    // These loose chains create branching depth and several readable long
+    // routes through the field while remaining independent of any boundary.
+    const clusterLinks: ReadonlyArray<readonly [number, number]> = [
+      [0, 1],
+      [0, 2],
+      [0, 3],
+      [1, 5],
+      [2, 3],
+      [2, 4],
+      [3, 4],
+      [4, 5],
+    ];
+    const filamentChains: number[][] = [];
+    for (let link = 0; link < clusterLinks.length; link += 1) {
+      const [fromCluster, toCluster] = clusterLinks[link];
+      const from = clusterSpecs[fromCluster].center;
+      const to = clusterSpecs[toCluster].center;
+      const dx = to[0] - from[0];
+      const dy = to[1] - from[1];
+      const planarLength = Math.max(0.001, Math.hypot(dx, dy));
+      const direction = link % 2 === 0 ? 1 : -1;
+      const arc = rnd(random, 0.12, 0.26) * direction;
+      const chain = [clusterAnchors[fromCluster]];
+
+      for (let step = 1; step <= 3; step += 1) {
+        const progress = step / 4;
+        const bow = Math.sin(Math.PI * progress);
+        const x =
+          from[0] +
+          dx * progress +
+          (-dy / planarLength) * arc * bow +
+          rnd(random, -0.025, 0.025);
+        const y =
+          from[1] +
+          dy * progress +
+          (dx / planarLength) * arc * bow +
+          rnd(random, -0.025, 0.025);
+        const z =
+          from[2] +
+          (to[2] - from[2]) * progress +
+          bow * rnd(random, -0.18, 0.18);
+        const nodeIndex = nodes.length;
+        addNode(x, y, z, -1, link % 3, rnd(random, 0.7, 1.08));
+        chain.push(nodeIndex);
+      }
+      chain.push(clusterAnchors[toCluster]);
+      filamentChains.push(chain);
+    }
+
+    const distance3 = (a: Node, b: Node) =>
+      Math.hypot(a.bx - b.bx, a.by - b.by, a.bz - b.bz);
+    const edgeKeys = new Map<string, number>();
+    const edgePairs: Array<{ from: number; to: number; longRange: boolean }> = [];
+    const addEdge = (a: number, b: number, longRange = false) => {
+      if (a === b) return;
       const from = Math.min(a, b);
       const to = Math.max(a, b);
       const key = `${from}:${to}`;
-      if (edgeKeys.has(key)) return;
-      edgeKeys.add(key);
-      edgePairs.push([from, to]);
+      const existing = edgeKeys.get(key);
+      if (existing !== undefined) {
+        if (longRange) edgePairs[existing].longRange = true;
+        return;
+      }
+      if (edgePairs.length >= MAX_EDGES) return;
+      edgeKeys.set(key, edgePairs.length);
+      edgePairs.push({ from, to, longRange });
     };
 
-    for (let from = 0; from < nodeCount; from += 1) {
-      for (let to = from + 1; to < nodeCount; to += 1) {
-        if (distance3(nodes[from], nodes[to]) < 0.365) addEdge(from, to);
+    for (let index = 0; index < nodes.length; index += 1) {
+      const nearest = nodes
+        .map((node, peer) => ({
+          peer,
+          distance: peer === index ? Infinity : distance3(nodes[index], node),
+        }))
+        .sort((a, b) => a.distance - b.distance);
+      const neighborCount = nodes[index].seed < 0.22 ? 4 : 3;
+      for (let neighbor = 0; neighbor < neighborCount; neighbor += 1) {
+        addEdge(index, nearest[neighbor].peer);
       }
     }
-    for (let index = 0; index < nodeCount; index += 1) {
-      const nearest = nodes
-        .map((node, peer) => ({ peer, distance: peer === index ? Infinity : distance3(nodes[index], node) }))
-        .sort((a, b) => a.distance - b.distance);
-      addEdge(index, nearest[0].peer);
-      addEdge(index, nearest[1].peer);
+
+    for (const chain of filamentChains) {
+      for (let index = 1; index < chain.length; index += 1) {
+        addEdge(chain[index - 1], chain[index], true);
+      }
     }
 
-    const edges: Edge[] = edgePairs.map(([from, to]) => ({
-      from,
-      to,
-      color: mixColor(palette[nodes[from].palette], palette[nodes[to].palette]),
-    }));
-    const adjacency: number[][] = Array.from({ length: nodeCount }, () => []);
-    for (const edge of edges) {
-      adjacency[edge.from].push(edge.to);
-      adjacency[edge.to].push(edge.from);
+    let longAxons = 0;
+    for (let attempt = 0; attempt < 180 && longAxons < 24; attempt += 1) {
+      const from = Math.floor(random() * nodes.length);
+      const to = Math.floor(random() * nodes.length);
+      const distance = distance3(nodes[from], nodes[to]);
+      if (nodes[from].cluster === nodes[to].cluster || distance < 0.58 || distance > 1.48) continue;
+      const before = edgePairs.length;
+      addEdge(from, to, true);
+      if (edgePairs.length > before) longAxons += 1;
+    }
+
+    const edges: Edge[] = edgePairs.map(({ from, to, longRange }) => {
+      const distance = distance3(nodes[from], nodes[to]);
+      return {
+        from,
+        to,
+        color: mixColor(palette[nodes[from].palette], palette[nodes[to].palette]),
+        bend: rnd(random, -1, 1) * (longRange ? 1 : 0.52),
+        reach: longRange ? Math.max(0.7, Math.min(1, distance / 1.35)) : Math.min(0.68, distance / 1.1),
+      };
+    });
+    const adjacency: Connection[][] = Array.from({ length: nodes.length }, () => []);
+    for (let edgeIndex = 0; edgeIndex < edges.length; edgeIndex += 1) {
+      const edge = edges[edgeIndex];
+      adjacency[edge.from].push({ edge: edgeIndex, peer: edge.to });
+      adjacency[edge.to].push({ edge: edgeIndex, peer: edge.from });
     }
 
     const projected: ProjectedNode[] = nodes.map((node, index) => ({
@@ -294,13 +386,20 @@ export function BrainCanvas({
       fire: 0,
       seed: node.seed,
       palette: node.palette,
+      radius: node.radius,
     }));
     const depthOrder = projected.slice();
     const signals: Signal[] = [];
+    focusIndex = clusterAnchors[2];
 
     const projectNodes = () => {
       const cosine = Math.cos(rotation);
       const sine = Math.sin(rotation);
+      const focusRotatedX = cameraX * cosine - cameraZ * sine;
+      const focusRotatedZ = cameraX * sine + cameraZ * cosine;
+      const focusTiltedY = cameraY * CT - focusRotatedZ * ST;
+      const focusDepth = cameraY * ST + focusRotatedZ * CT;
+
       for (let index = 0; index < nodes.length; index += 1) {
         const node = nodes[index];
         const point = projected[index];
@@ -308,10 +407,11 @@ export function BrainCanvas({
         const z = node.x * sine + node.z * cosine;
         const tiltedY = node.y * CT - z * ST;
         const depth = node.y * ST + z * CT;
-        const perspective = 1 / (2 - depth * 0.58);
-        point.sx = centerX + x * scale * perspective;
-        point.sy = centerY + tiltedY * scale * perspective;
-        point.depth = depth;
+        const relativeDepth = depth - focusDepth;
+        const perspective = 1 / Math.max(0.82, 2.08 - relativeDepth * cameraDepth);
+        point.sx = centerX + (x - focusRotatedX) * scale * cameraZoom * perspective;
+        point.sy = centerY + (tiltedY - focusTiltedY) * scale * cameraZoom * perspective;
+        point.depth = relativeDepth;
         point.persp = perspective;
         point.fire = node.fire;
       }
@@ -320,16 +420,21 @@ export function BrainCanvas({
 
     const emitFrom = (index: number, fanoutChance: number, signalLimit: number) => {
       nodes[index].fire = 1;
-      const peers = adjacency[index];
-      for (let peerIndex = 0; peerIndex < peers.length; peerIndex += 1) {
+      const connections = adjacency[index];
+      for (let peerIndex = 0; peerIndex < connections.length; peerIndex += 1) {
         if (signals.length >= signalLimit) break;
-        if (Math.random() < fanoutChance) {
+        const connection = connections[peerIndex];
+        const reach = edges[connection.edge].reach;
+        const propagationChance = fanoutChance * (reach > 0.68 ? 0.58 + currentEnergy * 0.38 : 1);
+        if (random() < propagationChance) {
           signals.push({
+            edge: connection.edge,
             from: index,
-            to: peers[peerIndex],
+            to: connection.peer,
             t: 0,
-            bend: rnd(-1, 1),
             palette: nodes[index].palette,
+            phase: rnd(random, 0, TAU),
+            speed: rnd(random, 0.82, 1.18),
           });
         }
       }
@@ -345,6 +450,13 @@ export function BrainCanvas({
       if (reducedMotion) {
         signals.length = 0;
         fireAccumulator = 0;
+        sustainedDive = 0;
+        cameraZoom = 1;
+        cameraDepth = BASE_CAMERA_DEPTH;
+        cameraX = 0;
+        cameraY = 0;
+        cameraZ = 0;
+        rotation = 0;
         for (const node of nodes) {
           node.x = node.bx;
           node.y = node.by;
@@ -358,11 +470,38 @@ export function BrainCanvas({
       globalTime += delta * profile.driftSpeed;
       for (const node of nodes) {
         const phase = globalTime + node.drift;
-        node.x = node.bx + Math.sin(phase) * profile.driftAmplitude;
-        node.y = node.by + Math.cos(phase * 0.91) * profile.driftAmplitude;
-        node.z = node.bz + Math.sin(phase * 1.09) * profile.driftAmplitude;
+        const amplitude = profile.driftAmplitude * (0.7 + node.radius * 0.3);
+        node.x = node.bx + Math.sin(phase) * amplitude;
+        node.y = node.by + Math.cos(phase * 0.91) * amplitude;
+        node.z = node.bz + Math.sin(phase * 1.09) * amplitude;
         node.fire = Math.max(0, node.fire - delta * profile.fireDecay);
       }
+
+      const intenseTarget = Math.max(0, Math.min(1, (currentEnergy - 0.68) / 0.32));
+      const diveResponse = intenseTarget > sustainedDive ? 0.22 : 0.52;
+      sustainedDive += (intenseTarget - sustainedDive) * Math.min(1, delta * diveResponse);
+      const diveBlend = 0.72 + sustainedDive * 0.28;
+      const cameraEase = 1 - Math.exp(-delta * (1.25 + currentEnergy * 0.9));
+      const zoomTarget = 1 + (profile.cameraZoom - 1) * diveBlend;
+      const depthTarget = BASE_CAMERA_DEPTH + (profile.cameraDepth - BASE_CAMERA_DEPTH) * diveBlend;
+      cameraZoom += (zoomTarget - cameraZoom) * cameraEase;
+      cameraDepth += (depthTarget - cameraDepth) * cameraEase;
+
+      focusTimer -= delta;
+      if (currentEnergy > 0.12 && focusTimer <= 0) {
+        if (signals.length > 0 && currentEnergy > 0.46) {
+          focusIndex = signals[Math.floor(random() * signals.length)].to;
+        } else {
+          focusIndex = clusterAnchors[Math.floor(random() * clusterAnchors.length)];
+        }
+        focusTimer = 6.8 - currentEnergy * 4.3;
+      }
+      const focusNode = nodes[focusIndex];
+      const focusBlend = profile.cameraFocus * (0.58 + sustainedDive * 0.42);
+      const focusEase = 1 - Math.exp(-delta * (0.72 + currentEnergy * 0.58));
+      cameraX += (focusNode.x * focusBlend - cameraX) * focusEase;
+      cameraY += (focusNode.y * focusBlend - cameraY) * focusEase;
+      cameraZ += (focusNode.z * focusBlend - cameraZ) * focusEase;
 
       const signalLimit = Math.max(8, Math.round(profile.signalBudget * adaptiveQuality));
       if (signals.length > signalLimit) signals.length = signalLimit;
@@ -370,54 +509,25 @@ export function BrainCanvas({
       const rootBursts = Math.min(3, Math.floor(fireAccumulator));
       fireAccumulator -= rootBursts;
       for (let burst = 0; burst < rootBursts; burst += 1) {
-        emitFrom((Math.random() * nodes.length) | 0, profile.fanoutChance, signalLimit);
+        emitFrom(Math.floor(random() * nodes.length), profile.fanoutChance, signalLimit);
       }
 
       let cascadeBudget = 3 + Math.floor(currentEnergy * 5);
       for (let index = signals.length - 1; index >= 0; index -= 1) {
         const signal = signals[index];
-        signal.t += delta * profile.signalSpeed;
+        const reach = edges[signal.edge].reach;
+        signal.t += (delta * profile.signalSpeed * signal.speed) / (1 + reach * 0.3);
         if (signal.t < 1) continue;
         const destination = signal.to;
         nodes[destination].fire = Math.min(1, nodes[destination].fire + 0.82);
         signals[index] = signals[signals.length - 1];
         signals.pop();
-        if (cascadeBudget > 0 && Math.random() < profile.cascadeChance) {
+        if (cascadeBudget > 0 && random() < profile.cascadeChance) {
           cascadeBudget -= 1;
           emitFrom(destination, profile.fanoutChance, signalLimit);
         }
       }
       return profile;
-    };
-
-    const drawShell = (fieldStrength: number) => {
-      ctx.save();
-      ctx.translate(centerX, centerY);
-      ctx.scale(scale * 0.59, scale * 0.49);
-      ctx.rotate(Math.sin(rotation * 0.45) * 0.018);
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = 0.58 + currentEnergy * 0.2;
-      ctx.fillStyle = shellGradient;
-      ctx.fill(brainHull);
-      ctx.globalAlpha = 0.25 + currentEnergy * 0.28;
-      ctx.strokeStyle = "rgba(111,210,255,0.42)";
-      ctx.lineWidth = 2.2 / Math.max(1, scale);
-      ctx.stroke(brainHull);
-
-      ctx.globalAlpha = 0.14 + fieldStrength * 1.8;
-      ctx.strokeStyle = "rgba(121,153,255,0.55)";
-      ctx.lineWidth = 1.25 / Math.max(1, scale);
-      for (const contour of corticalContours) ctx.stroke(contour);
-
-      ctx.globalAlpha = 0.22 + currentEnergy * 0.3;
-      ctx.strokeStyle = "rgba(208,223,255,0.58)";
-      ctx.lineWidth = 1.8 / Math.max(1, scale);
-      ctx.beginPath();
-      ctx.moveTo(0, -0.94);
-      ctx.bezierCurveTo(-0.055, -0.68, 0.045, -0.42, -0.025, -0.13);
-      ctx.bezierCurveTo(-0.06, 0.08, 0.015, 0.28, 0, 0.52);
-      ctx.stroke();
-      ctx.restore();
     };
 
     const draw = (profile: ReturnType<typeof getBrainMotionProfile>) => {
@@ -426,57 +536,99 @@ export function BrainCanvas({
         ctx.clearRect(0, 0, width, height);
       } else {
         ctx.globalCompositeOperation = "destination-out";
-        ctx.fillStyle = `rgba(0,0,0,${0.25 + 0.13 * (1 - currentEnergy)})`;
+        ctx.fillStyle = `rgba(0,0,0,${0.27 + 0.15 * (1 - currentEnergy)})`;
         ctx.fillRect(0, 0, width, height);
       }
       ctx.globalCompositeOperation = "lighter";
+      projectNodes();
 
-      drawShell(profile.fieldStrength);
-      const fieldAlpha = profile.fieldStrength * (0.7 + currentEnergy * 0.3);
-      drawSprite(fieldSprites[0], centerX - scale * 0.23, centerY - scale * 0.05, scale, fieldAlpha);
-      drawSprite(fieldSprites[1], centerX + scale * 0.23, centerY - scale * 0.06, scale, fieldAlpha * 0.82);
-      if (currentEnergy > 0.36) {
-        drawSprite(fieldSprites[2], centerX, centerY + scale * 0.18, scale * 0.72, fieldAlpha * 0.42);
+      const fieldAlpha = profile.fieldStrength * (0.6 + currentEnergy * 0.4);
+      const fieldStride = adaptiveQuality < 0.68 ? 2 : 1;
+      for (let index = 0; index < clusterAnchors.length; index += fieldStride) {
+        const point = projected[clusterAnchors[index]];
+        const sprite = fieldSprites[index % fieldSprites.length];
+        const radius = scale * cameraZoom * (0.34 + currentEnergy * 0.09) * point.persp;
+        drawSprite(sprite, point.sx, point.sy, radius, fieldAlpha * (0.68 + (index % 3) * 0.1));
       }
 
-      projectNodes();
-      const edgeStride = adaptiveQuality < 0.68 ? 2 : 1;
+      const edgeStride = adaptiveQuality < 0.64 ? 2 : 1;
       for (let index = 0; index < edges.length; index += edgeStride) {
         const edge = edges[index];
         const from = projected[edge.from];
         const to = projected[edge.to];
+        const dx = to.sx - from.sx;
+        const dy = to.sy - from.sy;
+        const length = Math.max(1, Math.hypot(dx, dy));
+        const bend = scale * cameraZoom * (0.012 + edge.reach * 0.05) * edge.bend;
+        const controlX = (from.sx + to.sx) * 0.5 - (dy / length) * bend;
+        const controlY = (from.sy + to.sy) * 0.5 + (dx / length) * bend;
         const depth = (from.depth + to.depth) * 0.5;
         const heat = Math.max(from.fire, to.fire);
-        const depthAlpha = 0.3 + 0.7 * Math.max(0, Math.min(1, (depth + 1.15) / 2.3));
-        const alpha = (profile.edgeOpacity + heat * 0.31) * depthAlpha;
+        const depthAlpha = 0.24 + 0.76 * Math.max(0, Math.min(1, (depth + 1.55) / 3.1));
+        const alpha = (profile.edgeOpacity + heat * 0.31) * depthAlpha * (1 - edge.reach * 0.16);
+
+        if (edge.reach > 0.68 && adaptiveQuality > 0.76) {
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = `rgba(${edge.color[0]},${edge.color[1]},${edge.color[2]},${alpha * 0.17})`;
+          ctx.lineWidth = Math.max(1.1, scale * cameraZoom * 0.011 * from.persp);
+          ctx.beginPath();
+          ctx.moveTo(from.sx, from.sy);
+          ctx.quadraticCurveTo(controlX, controlY, to.sx, to.sy);
+          ctx.stroke();
+        }
+
         ctx.globalAlpha = 1;
         ctx.strokeStyle = `rgba(${edge.color[0]},${edge.color[1]},${edge.color[2]},${alpha})`;
-        ctx.lineWidth = Math.max(0.38, scale * (0.0048 + heat * 0.006) * from.persp);
+        ctx.lineWidth = Math.max(0.36, scale * cameraZoom * (0.0036 + heat * 0.0048) * from.persp);
         ctx.beginPath();
         ctx.moveTo(from.sx, from.sy);
-        ctx.lineTo(to.sx, to.sy);
+        ctx.quadraticCurveTo(controlX, controlY, to.sx, to.sy);
         ctx.stroke();
       }
 
       for (const signal of signals) {
-        const from = projected[signal.from];
-        const to = projected[signal.to];
+        const edge = edges[signal.edge];
+        const from = projected[edge.from];
+        const to = projected[edge.to];
         const eased = signal.t * signal.t * (3 - 2 * signal.t);
+        const trailProgress = Math.max(0, eased - 0.07 - edge.reach * 0.025);
+        const tailProgress = Math.max(0, eased - 0.145 - edge.reach * 0.04);
+        const forward = signal.from === edge.from;
+        const headT = forward ? eased : 1 - eased;
+        const trailT = forward ? trailProgress : 1 - trailProgress;
+        const tailT = forward ? tailProgress : 1 - tailProgress;
         const dx = to.sx - from.sx;
         const dy = to.sy - from.sy;
         const length = Math.max(1, Math.hypot(dx, dy));
-        const bend = Math.sin(Math.PI * eased) * scale * 0.018 * signal.bend;
-        const x = from.sx + dx * eased - (dy / length) * bend;
-        const y = from.sy + dy * eased + (dx / length) * bend;
-        const trailT = Math.max(0, eased - 0.075);
-        const trailBend = Math.sin(Math.PI * trailT) * scale * 0.018 * signal.bend;
-        const trailX = from.sx + dx * trailT - (dy / length) * trailBend;
-        const trailY = from.sy + dy * trailT + (dx / length) * trailBend;
+        const bendScale = scale * cameraZoom * (0.012 + edge.reach * 0.05) * edge.bend;
+        const normalX = -dy / length;
+        const normalY = dx / length;
+        const headBend = 2 * headT * (1 - headT) * bendScale;
+        const trailBend = 2 * trailT * (1 - trailT) * bendScale;
+        const tailBend = 2 * tailT * (1 - tailT) * bendScale;
+        const x = from.sx + dx * headT + normalX * headBend;
+        const y = from.sy + dy * headT + normalY * headBend;
+        const trailX = from.sx + dx * trailT + normalX * trailBend;
+        const trailY = from.sy + dy * trailT + normalY * trailBend;
+        const tailX = from.sx + dx * tailT + normalX * tailBend;
+        const tailY = from.sy + dy * tailT + normalY * tailBend;
         const perspective = (from.persp + to.persp) * 0.5;
-        const radius = scale * (0.011 + currentEnergy * 0.01) * perspective;
+        const radius = scale * cameraZoom * (0.0085 + currentEnergy * 0.0085) * perspective;
         const sprite = signalSprites[signal.palette];
-        drawSprite(sprite, trailX, trailY, radius * 2.8, 0.23 + currentEnergy * 0.22);
-        drawSprite(sprite, x, y, radius * 4, 0.72 + currentEnergy * 0.2);
+        const shimmer = 0.9 + Math.sin(globalTime * 4.2 + signal.phase) * 0.1;
+
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = `rgba(${palette[signal.palette][0]},${palette[signal.palette][1]},${palette[signal.palette][2]},${0.2 + currentEnergy * 0.28})`;
+        ctx.lineWidth = Math.max(0.55, radius * 0.35);
+        ctx.beginPath();
+        ctx.moveTo(trailX, trailY);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        if (adaptiveQuality > 0.68 && currentEnergy > 0.42) {
+          drawSprite(sprite, tailX, tailY, radius * 2.2, (0.12 + currentEnergy * 0.13) * shimmer);
+        }
+        drawSprite(sprite, trailX, trailY, radius * 2.8, (0.22 + currentEnergy * 0.22) * shimmer);
+        drawSprite(sprite, x, y, radius * 4.1, (0.72 + currentEnergy * 0.22) * shimmer);
       }
 
       const renderWideGlow = adaptiveQuality >= 0.62;
@@ -485,24 +637,25 @@ export function BrainCanvas({
           ? 0
           : currentEnergy *
             (0.5 + 0.5 * Math.sin(globalTime * (0.72 + currentEnergy * 1.65) + point.seed * TAU));
-        const normalizedDepth = Math.max(0, Math.min(1, (point.depth + 1.15) / 2.3));
-        const baseRadius = scale * (0.007 + 0.012 * normalizedDepth) * point.persp;
+        const normalizedDepth = Math.max(0, Math.min(1, (point.depth + 1.55) / 3.1));
+        const baseRadius =
+          scale * cameraZoom * (0.0052 + 0.0092 * normalizedDepth) * point.persp * point.radius;
         const visibleFire = point.fire * (0.32 + currentEnergy * 0.68);
-        const radius = baseRadius * (1 + pulse * 0.18 + visibleFire * 0.9 + currentEnergy * 0.2);
+        const radius = baseRadius * (1 + pulse * 0.2 + visibleFire * 0.92 + currentEnergy * 0.16);
         const brightness = Math.min(
           1,
-          0.24 + visibleFire * 0.61 + currentEnergy * 0.3 + normalizedDepth * 0.14,
+          0.22 + visibleFire * 0.62 + currentEnergy * 0.3 + normalizedDepth * 0.16,
         );
         const sprite = nodeSprites[point.palette];
 
-        if (renderWideGlow && (normalizedDepth > 0.22 || visibleFire > 0.2)) {
-          drawSprite(sprite, point.sx, point.sy, radius * 4.4, brightness * 0.42);
+        if (renderWideGlow && (normalizedDepth > 0.2 || visibleFire > 0.2)) {
+          drawSprite(sprite, point.sx, point.sy, radius * 4.35, brightness * 0.4);
         }
-        drawSprite(sprite, point.sx, point.sy, radius * 1.65, brightness * 0.9);
+        drawSprite(sprite, point.sx, point.sy, radius * 1.7, brightness * 0.9);
         ctx.globalAlpha = 1;
-        ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.2 + visibleFire * 0.72 + currentEnergy * 0.11)})`;
+        ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.19 + visibleFire * 0.74 + currentEnergy * 0.11)})`;
         ctx.beginPath();
-        ctx.arc(point.sx, point.sy, Math.max(0.42, radius * (0.31 + visibleFire * 0.32)), 0, TAU);
+        ctx.arc(point.sx, point.sy, Math.max(0.4, radius * (0.3 + visibleFire * 0.33)), 0, TAU);
         ctx.fill();
       }
 
@@ -522,19 +675,7 @@ export function BrainCanvas({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       centerX = width * 0.5;
       centerY = height * 0.5;
-      scale = Math.min(width, height) * 0.48;
-      shellGradient = ctx.createRadialGradient(
-        centerX - scale * 0.12,
-        centerY - scale * 0.2,
-        scale * 0.08,
-        centerX,
-        centerY,
-        scale * 0.74,
-      );
-      shellGradient.addColorStop(0, "rgba(65,154,232,0.17)");
-      shellGradient.addColorStop(0.54, "rgba(40,84,158,0.09)");
-      shellGradient.addColorStop(0.83, "rgba(118,92,220,0.055)");
-      shellGradient.addColorStop(1, "rgba(10,28,54,0.015)");
+      scale = Math.min(width, height) * 0.46;
       ctx.clearRect(0, 0, width, height);
     };
 
@@ -555,8 +696,8 @@ export function BrainCanvas({
     function frame(timestamp: number) {
       raf = 0;
       if (!shouldRun()) return;
-      const targetEnergy = Number.isFinite(energyRef.current) ? energyRef.current : 0;
-      const targetProfile = getBrainMotionProfile(targetEnergy);
+      const frameEnergy = getBrainFrameEnergy(energyRef.current, currentEnergy, cameraZoom);
+      const targetProfile = getBrainMotionProfile(frameEnergy);
       const targetFrameRate = reducedMotion ? 8 : targetProfile.frameRate * (0.78 + adaptiveQuality * 0.22);
       const interval = 1000 / targetFrameRate;
       const elapsed = timestamp - lastFrame;

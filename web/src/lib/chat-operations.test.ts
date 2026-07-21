@@ -4,6 +4,7 @@ import {
   mergeModelIdentity,
   modelIdentityLabel,
   reduceLiveTasks,
+  resolveAgentDashboardUrl,
 } from "./chat-operations";
 
 describe("chat operations", () => {
@@ -11,6 +12,43 @@ describe("chat operations", () => {
     expect(gatewayModelSwitchValue("anthropic", "claude-sonnet-4.6")).toBe(
       "claude-sonnet-4.6 --provider anthropic",
     );
+  });
+
+  it("resolves built-in agent dashboards through the deployment base path", () => {
+    const location = {
+      origin: "https://example.test",
+      basePath: "/zeb",
+      pageHostname: "example.test",
+    };
+
+    expect(resolveAgentDashboardUrl("/agent-dashboards/quant/", location)).toBe(
+      "/zeb/agent-dashboards/quant/",
+    );
+    expect(resolveAgentDashboardUrl("/zeb/agent-dashboards/quant/", location)).toBe(
+      "/zeb/agent-dashboards/quant/",
+    );
+    expect(resolveAgentDashboardUrl("https://quant.example.test/", location)).toBe(
+      "https://quant.example.test/",
+    );
+  });
+
+  it("rejects unsafe and browser-local agent dashboard targets on public hosts", () => {
+    const publicLocation = {
+      origin: "https://example.test",
+      basePath: "",
+      pageHostname: "example.test",
+    };
+    expect(resolveAgentDashboardUrl("", publicLocation)).toBe("");
+    expect(resolveAgentDashboardUrl("agent-dashboards/quant/", publicLocation)).toBe("");
+    expect(resolveAgentDashboardUrl("//evil.example/quant", publicLocation)).toBe("");
+    expect(resolveAgentDashboardUrl("/\\evil.example/quant", publicLocation)).toBe("");
+    expect(resolveAgentDashboardUrl("http://127.0.0.1:9200/quant", publicLocation)).toBe("");
+    expect(
+      resolveAgentDashboardUrl("http://127.0.0.1:9200/quant", {
+        origin: "http://127.0.0.1:9119",
+        pageHostname: "127.0.0.1",
+      }),
+    ).toBe("http://127.0.0.1:9200/quant");
   });
 
   it("merges and formats the actual gateway model identity", () => {

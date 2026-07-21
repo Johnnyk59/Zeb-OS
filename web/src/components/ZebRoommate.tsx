@@ -796,6 +796,9 @@ export function ZebRoommate() {
   const sceneTimerRef = useRef<number | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
   const lastMicroActionRef = useRef<MicroAction>("none");
+  const collapseControlRef = useRef<HTMLButtonElement | null>(null);
+  const miniatureControlRef = useRef<HTMLButtonElement | null>(null);
+  const focusAfterToggleRef = useRef(false);
 
   const scene = ROOMMATE_SCENES[sceneId];
   const previousScene = previousSceneId ? ROOMMATE_SCENES[previousSceneId] : null;
@@ -809,12 +812,18 @@ export function ZebRoommate() {
   };
 
   const toggleCollapsed = () => {
-    setCollapsed((current) => {
-      const next = !current;
-      persistRoommateCollapsed(next);
-      return next;
-    });
+    const next = !collapsed;
+    focusAfterToggleRef.current = true;
+    persistRoommateCollapsed(next);
+    setCollapsed(next);
   };
+
+  useEffect(() => {
+    if (!focusAfterToggleRef.current) return;
+    focusAfterToggleRef.current = false;
+    const control = collapsed ? miniatureControlRef.current : collapseControlRef.current;
+    control?.focus({ preventScroll: true });
+  }, [collapsed]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -832,13 +841,14 @@ export function ZebRoommate() {
   }, []);
 
   useEffect(() => {
+    if (collapsed) return;
     for (const src of new Set(Object.values(ROOMMATE_SCENES).map((item) => item.sheet))) {
       const image = new Image();
       image.decoding = "async";
       image.src = src;
       void image.decode().catch(() => undefined);
     }
-  }, []);
+  }, [collapsed]);
 
   useEffect(() => {
     if (collapsed || reducedMotion || previewScene) return;
@@ -1003,6 +1013,7 @@ export function ZebRoommate() {
           <span className="zeb-roommate__activity">{scene.label}</span>
         </div>
         <button
+          ref={collapseControlRef}
           type="button"
           className="zeb-roommate__collapse-control"
           aria-controls="zeb-roommate-stage"
@@ -1015,6 +1026,7 @@ export function ZebRoommate() {
         </button>
       </div>
       <button
+        ref={miniatureControlRef}
         type="button"
         className="zeb-roommate__miniature"
         aria-controls="zeb-roommate-stage"

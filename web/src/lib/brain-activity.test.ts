@@ -4,6 +4,7 @@ import {
   deriveBrainEnergy,
   estimateTaskIntensity,
   getBrainActivityTier,
+  getBrainFrameEnergy,
   getBrainMotionProfile,
 } from "./brain-activity";
 
@@ -77,6 +78,21 @@ describe("getBrainMotionProfile", () => {
     expect(idle.rotationSpeed).toBeGreaterThan(0);
     expect(idle.firingRate * 10).toBeCloseTo(5, 5);
     expect(idle.fanoutChance).toBeLessThan(0.02);
+    expect(idle.cameraZoom).toBe(1);
+    expect(idle.cameraFocus).toBe(0);
+  });
+
+  it("moves from calm framing through a modest zoom to a deep high-work focus", () => {
+    const idle = getBrainMotionProfile(0);
+    const ordinary = getBrainMotionProfile(0.5);
+    const intense = getBrainMotionProfile(1);
+
+    expect(idle.cameraZoom).toBe(1);
+    expect(ordinary.cameraZoom).toBeGreaterThan(1.1);
+    expect(ordinary.cameraZoom).toBeLessThan(1.25);
+    expect(intense.cameraZoom).toBeGreaterThan(1.5);
+    expect(intense.cameraFocus).toBeGreaterThan(ordinary.cameraFocus * 3);
+    expect(intense.cameraDepth).toBeGreaterThan(0.65);
   });
 
   it("separates medium activity from an intense hard-task storm", () => {
@@ -102,6 +118,12 @@ describe("getBrainMotionProfile", () => {
       expect(profile.signalBudget).toBeLessThanOrEqual(186);
       expect(profile.fanoutChance).toBeLessThanOrEqual(0.65);
       expect(profile.cascadeChance).toBeLessThanOrEqual(0.65);
+      expect(profile.cameraZoom).toBeGreaterThanOrEqual(1);
+      expect(profile.cameraZoom).toBeLessThanOrEqual(1.58);
+      expect(profile.cameraFocus).toBeGreaterThanOrEqual(0);
+      expect(profile.cameraFocus).toBeLessThanOrEqual(0.465);
+      expect(profile.cameraDepth).toBeGreaterThanOrEqual(0.46);
+      expect(profile.cameraDepth).toBeLessThanOrEqual(0.71);
     }
   });
 
@@ -118,6 +140,9 @@ describe("getBrainMotionProfile", () => {
       "signalBudget",
       "edgeOpacity",
       "fieldStrength",
+      "cameraZoom",
+      "cameraFocus",
+      "cameraDepth",
     ] as const;
 
     for (const key of keys) {
@@ -125,6 +150,20 @@ describe("getBrainMotionProfile", () => {
         expect(profiles[index][key]).toBeGreaterThanOrEqual(profiles[index - 1][key]);
       }
     }
+  });
+});
+
+describe("getBrainFrameEnergy", () => {
+  it("keeps frame cadence elevated while energy and camera easing settle", () => {
+    expect(getBrainFrameEnergy(1, 0, 1)).toBe(1);
+    expect(getBrainFrameEnergy(0, 0.78, 1.4)).toBe(0.78);
+    expect(getBrainFrameEnergy(0, 0.02, 1.18)).toBe(0.4);
+    expect(getBrainFrameEnergy(0, 0, 1.004)).toBe(0);
+  });
+
+  it("clamps invalid activity without letting an invalid zoom hold cadence open", () => {
+    expect(getBrainFrameEnergy(Number.NaN, -2, Number.NaN)).toBe(0);
+    expect(getBrainFrameEnergy(9, Number.POSITIVE_INFINITY, 1)).toBe(1);
   });
 });
 

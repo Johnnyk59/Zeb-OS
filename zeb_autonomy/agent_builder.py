@@ -61,7 +61,7 @@ PERMISSION_PROFILES = {
 # Ready-made starting templates for the three seed agents plus a generic one.
 TEMPLATES = {
     "quant": {
-        "label": "Qompot",
+        "label": "Quant Bot",
         "purpose": "Quantitative market research, signals and backtests.",
         "suggested_skills": ["data-fetch", "backtest", "risk-report"],
         "model": "local",

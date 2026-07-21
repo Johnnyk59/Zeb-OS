@@ -269,10 +269,7 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   min-height: 0;
   overflow: hidden;
   isolation: isolate;
-  background:
-    radial-gradient(ellipse at 50% 112%, rgba(181, 116, 73, 0.11), transparent 56%),
-    radial-gradient(circle at 72% 20%, rgba(126, 82, 172, 0.06), transparent 32%),
-    linear-gradient(180deg, transparent 4%, rgba(255, 255, 255, 0.008) 58%, rgba(0, 0, 0, 0.07));
+  background: transparent;
   opacity: 1;
   transform: translate3d(0, 0, 0) scale(1);
   transform-origin: 1.7rem calc(100% - 1.6rem);
@@ -357,33 +354,6 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   background: transparent;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-}
-
-.zeb-roommate__collapse-control::after {
-  content: 'MINIMIZE';
-  position: absolute;
-  top: 0.45rem;
-  right: 0.55rem;
-  padding: 0.22rem 0.34rem;
-  border: 1px solid rgba(227, 216, 237, 0.09);
-  border-radius: 999px;
-  opacity: 0;
-  color: rgba(235, 226, 242, 0.5);
-  background: rgba(11, 10, 13, 0.5);
-  box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.16);
-  backdrop-filter: blur(8px);
-  font-family: var(--theme-font-mono);
-  font-size: 0.42rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  transform: translateY(-0.2rem);
-  transition: opacity 180ms ease, transform 240ms ease;
-}
-
-.zeb-roommate__collapse-control:hover::after,
-.zeb-roommate__collapse-control:focus-visible::after {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .zeb-roommate__collapse-control:focus-visible {
@@ -1618,6 +1588,7 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .zeb-roommate-slot,
   .zeb-roommate *,
   .zeb-roommate *::before,
   .zeb-roommate *::after {

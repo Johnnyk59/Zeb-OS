@@ -44,6 +44,7 @@ import {
   mergeModelIdentity,
   modelIdentityLabel,
   reduceLiveTasks,
+  resolveAgentDashboardUrl,
   type LiveTask,
   type ModelIdentity,
 } from "@/lib/chat-operations";
@@ -59,7 +60,7 @@ import {
 } from "@/lib/brain-activity";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
-import { api } from "@/lib/api";
+import { api, ZEB_BASE_PATH } from "@/lib/api";
 import type { AgentRecord, ModelOptionsResponse } from "@/lib/api";
 
 interface ToolChip {
@@ -143,7 +144,7 @@ async function uploadChatAttachment(
 }
 
 const AGENT_SLOTS = [
-  { id: "quant", label: "Qompot", defaultUrl: "/agent-dashboards/quant/" },
+  { id: "quant", label: "Quant Bot", defaultUrl: "/agent-dashboards/quant/" },
   { id: "socials", label: "Socials Agent", defaultUrl: "" },
   { id: "jewelry", label: "Jew", defaultUrl: "" },
 ] as const;
@@ -1568,14 +1569,9 @@ function ChatPane({
 }
 
 function agentDashboardUrl(raw: string): string {
-  const value = String(raw || "").trim();
-  if (value.startsWith("/")) return value;
-  try {
-    const url = new URL(value, window.location.origin);
-    if (url.protocol === "https:") return url.href;
-    const localDevelopment = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-    return url.protocol === "http:" && localDevelopment ? url.href : "";
-  } catch {
-    return "";
-  }
+  return resolveAgentDashboardUrl(raw, {
+    origin: window.location.origin,
+    basePath: ZEB_BASE_PATH,
+    pageHostname: window.location.hostname,
+  });
 }

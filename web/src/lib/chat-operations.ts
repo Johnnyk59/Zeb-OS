@@ -12,6 +12,12 @@ export interface LiveTask {
   startedAt: number;
 }
 
+interface AgentDashboardLocation {
+  origin: string;
+  basePath?: string;
+  pageHostname: string;
+}
+
 type EventPayload = Record<string, unknown>;
 
 const text = (value: unknown): string =>
@@ -21,6 +27,34 @@ const finiteNumber = (value: unknown): number | undefined => {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 };
+
+export function resolveAgentDashboardUrl(
+  raw: string,
+  location: AgentDashboardLocation,
+): string {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  const basePath = String(location.basePath || "").replace(/\/+$/, "");
+  if (value.startsWith("//") || value.includes("\\")) return "";
+  if (value.startsWith("/")) {
+    if (!basePath || value === basePath || value.startsWith(`${basePath}/`)) {
+      return value;
+    }
+    return `${basePath}${value}`;
+  }
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(value)) return "";
+
+  try {
+    const url = new URL(value, location.origin);
+    if (url.protocol === "https:") return url.href;
+    const localHosts = ["localhost", "127.0.0.1", "::1"];
+    const localDevelopment = localHosts.includes(url.hostname);
+    const localDashboard = localHosts.includes(location.pageHostname);
+    return url.protocol === "http:" && localDevelopment && localDashboard ? url.href : "";
+  } catch {
+    return "";
+  }
+}
 
 export function mergeModelIdentity(
   payload: unknown,

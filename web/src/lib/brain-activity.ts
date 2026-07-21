@@ -20,9 +20,25 @@ export interface BrainMotionProfile {
   signalBudget: number;
   edgeOpacity: number;
   fieldStrength: number;
+  cameraZoom: number;
+  cameraFocus: number;
+  cameraDepth: number;
 }
 
 export type BrainActivityTier = "idle" | "small" | "medium" | "high";
+
+export function getBrainFrameEnergy(
+  targetEnergy: number,
+  currentEnergy: number,
+  cameraZoom: number,
+): number {
+  const normalize = (value: number) =>
+    Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+  const settlingFloor = Math.abs((Number.isFinite(cameraZoom) ? cameraZoom : 1) - 1) > 0.006
+    ? 0.4
+    : 0;
+  return Math.max(normalize(targetEnergy), normalize(currentEnergy), settlingFloor);
+}
 
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -107,5 +123,10 @@ export function getBrainMotionProfile(energy: number): BrainMotionProfile {
     signalBudget: Math.round(14 + small * 22 + medium * 58 + high * 92),
     edgeOpacity: 0.05 + small * 0.035 + medium * 0.11 + high * 0.13,
     fieldStrength: 0.012 + small * 0.018 + medium * 0.055 + high * 0.07,
+    // The renderer eases toward these targets and reserves the final portion
+    // of the dive for sustained high activity rather than snapping on prompt.
+    cameraZoom: 1 + small * 0.075 + medium * 0.19 + high * 0.315,
+    cameraFocus: small * 0.035 + medium * 0.16 + high * 0.27,
+    cameraDepth: 0.46 + small * 0.03 + medium * 0.09 + high * 0.13,
   };
 }
