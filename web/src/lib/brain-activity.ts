@@ -16,11 +16,47 @@ export interface BrainMotionProfile {
   cascadeChance: number;
   signalSpeed: number;
   fireDecay: number;
+  frameRate: number;
+  signalBudget: number;
+  edgeOpacity: number;
+  fieldStrength: number;
+  cameraZoom: number;
+  cameraFocus: number;
+  cameraDepth: number;
+}
+
+export type BrainActivityTier = "idle" | "small" | "medium" | "high";
+
+export function getBrainFrameEnergy(
+  targetEnergy: number,
+  currentEnergy: number,
+  cameraZoom: number,
+): number {
+  const normalize = (value: number) =>
+    Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+  const settlingFloor = Math.abs((Number.isFinite(cameraZoom) ? cameraZoom : 1) - 1) > 0.006
+    ? 0.4
+    : 0;
+  return Math.max(normalize(targetEnergy), normalize(currentEnergy), settlingFloor);
 }
 
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+function smoothstep(start: number, end: number, value: number): number {
+  const normalized = clamp01((value - start) / (end - start));
+  return normalized * normalized * (3 - 2 * normalized);
+}
+
+/** Stable labels for UI copy, diagnostics, and renderer quality decisions. */
+export function getBrainActivityTier(energy: number): BrainActivityTier {
+  const value = clamp01(energy);
+  if (value < 0.16) return "idle";
+  if (value < 0.46) return "small";
+  if (value < 0.78) return "medium";
+  return "high";
 }
 
 /** Estimate prompt complexity without assigning every short prompt a hard-work floor. */
@@ -67,16 +103,30 @@ export function deriveBrainEnergy({
 /** Convert energy into animation rates. Kept pure so activity tiers stay testable. */
 export function getBrainMotionProfile(energy: number): BrainMotionProfile {
   const value = clamp01(energy);
+  const small = smoothstep(0.06, 0.36, value);
+  const medium = smoothstep(0.34, 0.72, value);
+  const high = smoothstep(0.68, 1, value);
+
   return {
-    // At idle this is one revolution in roughly nine minutes.
-    rotationSpeed: 0.012 + 0.78 * Math.pow(value, 1.5),
-    driftSpeed: 0.12 + 1.5 * Math.pow(value, 1.2),
-    driftAmplitude: 0.0025 + 0.055 * Math.pow(value, 1.3),
-    // Five small root flashes per ten seconds at idle; propagation is negligible.
-    firingRate: 0.5 + 30 * Math.pow(value, 2.4),
-    fanoutChance: 0.008 + 0.68 * Math.pow(value, 1.2),
-    cascadeChance: 0.01 + 0.72 * Math.pow(value, 1.35),
-    signalSpeed: 0.55 + value * 4.55,
-    fireDecay: 2.8 - value * 1.2,
+    // Idle is a near-still observatory; each tier adds a distinct motion layer.
+    rotationSpeed: 0.007 + small * 0.025 + medium * 0.09 + high * 0.22,
+    driftSpeed: 0.09 + small * 0.28 + medium * 0.7 + high * 0.85,
+    driftAmplitude: 0.0018 + small * 0.006 + medium * 0.018 + high * 0.025,
+    // Five root flashes per ten seconds at idle, with bounded propagation.
+    firingRate: 0.5 + small * 1.8 + medium * 9 + high * 18,
+    fanoutChance: 0.006 + small * 0.07 + medium * 0.25 + high * 0.32,
+    cascadeChance: 0.004 + small * 0.035 + medium * 0.23 + high * 0.38,
+    signalSpeed: 0.42 + small * 0.45 + medium * 0.9 + high * 2.2,
+    fireDecay: 3 - small * 0.18 - medium * 0.3 - high * 0.5,
+    // These are renderer ceilings, not targets that can grow without bound.
+    frameRate: 18 + small * 6 + medium * 8 + high * 10,
+    signalBudget: Math.round(14 + small * 22 + medium * 58 + high * 92),
+    edgeOpacity: 0.05 + small * 0.035 + medium * 0.11 + high * 0.13,
+    fieldStrength: 0.012 + small * 0.018 + medium * 0.055 + high * 0.07,
+    // The renderer eases toward these targets and reserves the final portion
+    // of the dive for sustained high activity rather than snapping on prompt.
+    cameraZoom: 1 + small * 0.075 + medium * 0.19 + high * 0.315,
+    cameraFocus: small * 0.035 + medium * 0.16 + high * 0.27,
+    cameraDepth: 0.46 + small * 0.03 + medium * 0.09 + high * 0.13,
   };
 }

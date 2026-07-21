@@ -1824,6 +1824,8 @@ export interface SavedRepo {
   extracted?: boolean;
   /** "manual" | "scan" | "skills-sync" — where the entry came from. */
   source?: string;
+  /** Absolute checkout path when Zeb discovered this repo on the VPS. */
+  local_path?: string;
   /** Skill names extracted from this repo (skills-sync entries). */
   skills?: string[];
 }

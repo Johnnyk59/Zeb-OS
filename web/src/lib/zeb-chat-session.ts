@@ -1,6 +1,14 @@
 export interface GatewayHistoryMessage {
   role?: string;
   text?: string;
+  model?: string;
+  provider?: string;
+}
+
+export interface GatewaySessionInfo {
+  model?: string;
+  provider?: string;
+  running?: boolean;
 }
 
 export interface GatewaySessionPayload {
@@ -16,12 +24,15 @@ export interface GatewaySessionPayload {
     assistant?: string;
     streaming?: boolean;
   } | null;
+  info?: GatewaySessionInfo;
 }
 
 export interface RestoredChatMessage {
   role: "user" | "assistant";
   content: string;
   streaming?: boolean;
+  model?: string;
+  provider?: string;
 }
 
 export function storedSessionId(payload: GatewaySessionPayload): string {
@@ -41,7 +52,12 @@ export function restoreChatMessages(
     if (message.role !== "user" && message.role !== "assistant") continue;
     const content = String(message.text ?? "");
     if (!content.trim()) continue;
-    restored.push({ role: message.role, content });
+    restored.push({
+      role: message.role,
+      content,
+      ...(message.model ? { model: message.model } : {}),
+      ...(message.provider ? { provider: message.provider } : {}),
+    });
   }
 
   const inflight = payload.inflight;

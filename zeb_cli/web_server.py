@@ -3263,7 +3263,9 @@ async def list_saved_repos(q: Optional[str] = None):
         from zeb_chat.stores import RepoStore
 
         def _work() -> Dict[str, Any]:
-            repos = RepoStore().list(query=q or "")
+            store = RepoStore()
+            store.sync_local_clones()
+            repos = store.list(query=q or "")
             repos, totals = _enrich_repos(repos)
             return {"repos": repos, **totals}
 
@@ -3374,8 +3376,8 @@ async def sync_repos():
         from zeb_chat.stores import RepoStore
 
         store = RepoStore()
+        added = store.sync_local_clones(force=True)
         repos = store.list()
-        added = 0
         # Normalize legacy entries so the enabled flag is always present.
         for r in repos:
             if "enabled" not in r:
@@ -15003,6 +15005,17 @@ def mount_spa(application: FastAPI):
             and file_path.is_file()
         ):
             return FileResponse(file_path)
+        # Public assets can ship a directory-style dashboard with an
+        # ``index.html``. This keeps stable URLs such as
+        # ``/agent-dashboards/quant/`` editable without changing the top-bar
+        # registration every time Zeb rebuilds that dashboard.
+        directory_index = file_path / "index.html"
+        if (
+            full_path
+            and directory_index.resolve().is_relative_to(WEB_DIST.resolve())
+            and directory_index.is_file()
+        ):
+            return FileResponse(directory_index)
         return _serve_index(prefix)
 
 

@@ -756,6 +756,7 @@ AUTHOR_MAP = {
     "binhnt.ht.92@gmail.com": "binhnt92",
     "li.long15@xydigit.com": "Alix-007",  # PR #54620 salvage (sms: bound Twilio webhook body reads)
     "johnny@Jons-MBA-M4.local": "acesjohnny",
+    "johnny@Johns-MacBook-Pro.local": "Johnnyk59",  # PR #37 dashboard operations upgrade
     "1581133593@qq.com": "liu-collab",
     "haidaoe@proton.me": "haidao1919",
     "50561768+zhanggttry@users.noreply.github.com": "zhanggttry",

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quant Bot Workspace</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        background: #08090b;
+        color: #e7e9ed;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
+          radial-gradient(circle at 72% 18%, rgba(73, 169, 208, .08), transparent 28%),
+          #08090b;
+        background-size: 36px 36px, 36px 36px, auto, auto;
+      }
+      main { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+      header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 18px 24px; border-bottom: 1px solid #24272d;
+        background: rgba(10, 11, 14, .82); backdrop-filter: blur(16px);
+      }
+      .mark { display: flex; align-items: center; gap: 12px; letter-spacing: .16em; text-transform: uppercase; }
+      .signal { width: 8px; height: 8px; border-radius: 999px; background: #65c9ef; box-shadow: 0 0 18px #65c9ef; }
+      .status { color: #7f858f; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+      section { display: grid; place-items: center; padding: 28px; }
+      .workspace {
+        width: min(1180px, 100%); min-height: min(72vh, 760px);
+        border: 1px solid #252932; border-radius: 18px;
+        background: linear-gradient(145deg, rgba(255,255,255,.025), rgba(255,255,255,.008));
+        box-shadow: 0 28px 90px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.035);
+        display: grid; place-items: center; text-align: center; padding: 40px;
+      }
+      h1 { margin: 0 0 12px; font: 500 clamp(26px, 4vw, 52px)/1.05 Georgia, serif; letter-spacing: -.03em; }
+      p { max-width: 620px; margin: 0; color: #858b95; line-height: 1.7; font-size: 13px; }
+      code { color: #a9dff3; }
+    </style>
+  </head>
+  <body data-agent-dashboard="quant">
+    <main>
+      <header>
+        <div class="mark"><span class="signal"></span><span>Quant Bot</span></div>
+        <div class="status">Starter dashboard · ready to edit</div>
+      </header>
+      <section>
+        <div class="workspace" id="quant-bot-workspace">
+          <div>
+            <h1>Quant Bot Workspace</h1>
+            <p>
+              This route is wired by default to the Quant Bot button. Zeb can replace
+              this file at <code>web/public/agent-dashboards/quant/index.html</code>
+              or register a different dashboard URL when the trading interface is ready.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

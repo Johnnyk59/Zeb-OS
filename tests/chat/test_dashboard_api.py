@@ -610,7 +610,7 @@ def test_agents_seed_and_register(client):
     # Auth required.
     assert client.get("/api/agents").status_code == 401
 
-    # Seeds the three default agents, none wired yet.
+    # Seeds the three default agents with the Quant Bot starter wired by default.
     res = client.get("/api/agents", headers=AUTH)
     assert res.status_code == 200
     agents = {a["id"]: a for a in res.json()["agents"]}
@@ -620,7 +620,7 @@ def test_agents_seed_and_register(client):
         "Socials Agent",
         "Jew",
     ]
-    assert agents["quant"]["dashboard_url"] == ""
+    assert agents["quant"]["dashboard_url"] == "/agent-dashboards/quant/"
 
     # Zeb registers a dashboard for quant at runtime.
     res = client.post(

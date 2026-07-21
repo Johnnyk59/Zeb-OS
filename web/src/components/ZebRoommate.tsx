@@ -85,6 +85,8 @@ type MicroAction =
   | "none"
   | "look"
   | "settle"
+  | "stretch"
+  | "lean"
   | "draw"
   | "exhale"
   | "rep"
@@ -133,6 +135,9 @@ const SHEET_DAILY = "/zeb/zeb-roommate-daily-sprites-v2.png";
 const SHEET_FLOW = "/zeb/zeb-roommate-flow-sprites-v2.png";
 const SHEET_EXTRA = "/zeb/zeb-roommate-extra-sprites-v2.png";
 const SHEET_SMOKE = "/zeb/zeb-roommate-smoke-sprites-v2.png";
+const MINIATURE_PORTRAIT = "/zeb/zeb-roommate-mini-frame-v2.png";
+
+export const ROOMMATE_COLLAPSED_STORAGE_KEY = "zeb.roommate.collapsed";
 
 const STANDING_EYES: EyeGeometry = { x: 50, y: 22, width: 21.5, height: 7.5, gap: 5.1 };
 const SEATED_EYES: EyeGeometry = { x: 33, y: 24, width: 18.6, height: 7.2, gap: 4.6 };
@@ -520,16 +525,16 @@ export const ROOMMATE_ACTIVITY_CYCLE: RoommateSceneId[] = [
 ];
 
 const MICRO_ACTIONS: Record<RoommateSceneId, readonly MicroAction[]> = {
-  idle: ["look", "settle", "look"],
+  idle: ["look", "settle", "stretch", "look"],
   vape: ["draw", "exhale", "settle"],
   weights: ["rep", "rep", "settle"],
-  couch: ["settle", "look"],
+  couch: ["settle", "lean", "look"],
   tv: ["focus", "focus", "settle"],
   "carry-tv": ["step", "step", "settle"],
   phone: ["tap", "scroll", "look"],
   snack: ["bite", "settle", "bite"],
   "window-vape": ["draw", "exhale", "look"],
-  "couch-crossed": ["settle", "look"],
+  "couch-crossed": ["settle", "lean", "look"],
   groceries: ["step", "settle"],
   gaming: ["play", "play", "focus"],
   sleep: ["dream", "dream"],
@@ -613,6 +618,29 @@ function readPreviewScene(): RoommateSceneId | null {
   return candidate && Object.hasOwn(ROOMMATE_SCENES, candidate)
     ? (candidate as RoommateSceneId)
     : null;
+}
+
+export function readRoommateCollapsed(
+  storage?: Pick<Storage, "getItem">,
+): boolean {
+  try {
+    const source = storage ?? (typeof window !== "undefined" ? window.localStorage : null);
+    return source?.getItem(ROOMMATE_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function persistRoommateCollapsed(
+  collapsed: boolean,
+  storage?: Pick<Storage, "setItem">,
+): void {
+  try {
+    const target = storage ?? (typeof window !== "undefined" ? window.localStorage : null);
+    target?.setItem(ROOMMATE_COLLAPSED_STORAGE_KEY, String(collapsed));
+  } catch {
+    // Storage can be unavailable in locked-down browser contexts; the UI still works.
+  }
 }
 
 export function roommateTransition(
@@ -754,6 +782,7 @@ function RoommateSceneLayer({
 
 export function ZebRoommate() {
   const [previewScene] = useState(readPreviewScene);
+  const [collapsed, setCollapsed] = useState(readRoommateCollapsed);
   const [sceneId, setSceneId] = useState<RoommateSceneId>(previewScene ?? "idle");
   const [previousSceneId, setPreviousSceneId] = useState<RoommateSceneId | null>(null);
   const [transition, setTransition] = useState<RoommateTransition>("crossfade");
@@ -767,6 +796,9 @@ export function ZebRoommate() {
   const sceneTimerRef = useRef<number | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
   const lastMicroActionRef = useRef<MicroAction>("none");
+  const collapseControlRef = useRef<HTMLButtonElement | null>(null);
+  const miniatureControlRef = useRef<HTMLButtonElement | null>(null);
+  const focusAfterToggleRef = useRef(false);
 
   const scene = ROOMMATE_SCENES[sceneId];
   const previousScene = previousSceneId ? ROOMMATE_SCENES[previousSceneId] : null;
@@ -778,6 +810,20 @@ export function ZebRoommate() {
     }
     setPreviousSceneId(null);
   };
+
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    focusAfterToggleRef.current = true;
+    persistRoommateCollapsed(next);
+    setCollapsed(next);
+  };
+
+  useEffect(() => {
+    if (!focusAfterToggleRef.current) return;
+    focusAfterToggleRef.current = false;
+    const control = collapsed ? miniatureControlRef.current : collapseControlRef.current;
+    control?.focus({ preventScroll: true });
+  }, [collapsed]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -795,16 +841,17 @@ export function ZebRoommate() {
   }, []);
 
   useEffect(() => {
+    if (collapsed) return;
     for (const src of new Set(Object.values(ROOMMATE_SCENES).map((item) => item.sheet))) {
       const image = new Image();
       image.decoding = "async";
       image.src = src;
       void image.decode().catch(() => undefined);
     }
-  }, []);
+  }, [collapsed]);
 
   useEffect(() => {
-    if (reducedMotion || previewScene) return;
+    if (collapsed || reducedMotion || previewScene) return;
 
     let cancelled = false;
     const schedule = (delay = sceneDelay(ROOMMATE_SCENES[sceneRef.current])) => {
@@ -856,10 +903,10 @@ export function ZebRoommate() {
       if (sceneTimerRef.current !== null) window.clearTimeout(sceneTimerRef.current);
       if (transitionTimerRef.current !== null) window.clearTimeout(transitionTimerRef.current);
     };
-  }, [previewScene, reducedMotion]);
+  }, [collapsed, previewScene, reducedMotion]);
 
   useEffect(() => {
-    if (reducedMotion || !scene.eyes || previousSceneId) return;
+    if (collapsed || reducedMotion || !scene.eyes || previousSceneId) return;
 
     let blinkEnd = 0;
     let timer = 0;
@@ -884,10 +931,10 @@ export function ZebRoommate() {
       window.clearTimeout(timer);
       window.clearTimeout(blinkEnd);
     };
-  }, [previousSceneId, reducedMotion, scene.eyes, sceneId]);
+  }, [collapsed, previousSceneId, reducedMotion, scene.eyes, sceneId]);
 
   useEffect(() => {
-    if (reducedMotion || previousSceneId) return;
+    if (collapsed || reducedMotion || previousSceneId) return;
 
     let actionEnd = 0;
     let timer = 0;
@@ -921,11 +968,22 @@ export function ZebRoommate() {
       window.clearTimeout(actionEnd);
       setMicroAction("none");
     };
-  }, [previousSceneId, reducedMotion, scene.motion, sceneId]);
+  }, [collapsed, previousSceneId, reducedMotion, scene.motion, sceneId]);
 
   return (
-    <section className="zeb-roommate" aria-label={`Zeb is ${scene.label}`}>
-      <div className="zeb-roommate__stage">
+    <section
+      className={classes(
+        "zeb-roommate",
+        collapsed ? "is-collapsed" : "is-expanded",
+      )}
+      data-roommate-state={collapsed ? "collapsed" : "expanded"}
+      aria-label={`Zeb is ${scene.label}`}
+    >
+      <div
+        className="zeb-roommate__stage"
+        id="zeb-roommate-stage"
+        aria-hidden={collapsed}
+      >
         <div className="zeb-roommate__sprite-window">
           {previousScene ? (
             <RoommateSceneLayer
@@ -954,7 +1012,42 @@ export function ZebRoommate() {
           <span>ZEB / OFF CLOCK</span>
           <span className="zeb-roommate__activity">{scene.label}</span>
         </div>
+        <button
+          ref={collapseControlRef}
+          type="button"
+          className="zeb-roommate__collapse-control"
+          aria-controls="zeb-roommate-stage"
+          aria-expanded="true"
+          aria-label="Minimize Zeb roommate"
+          tabIndex={collapsed ? -1 : 0}
+          onClick={toggleCollapsed}
+        >
+          <span className="sr-only">Minimize Zeb roommate</span>
+        </button>
       </div>
+      <button
+        ref={miniatureControlRef}
+        type="button"
+        className="zeb-roommate__miniature"
+        aria-controls="zeb-roommate-stage"
+        aria-expanded="false"
+        aria-hidden={!collapsed}
+        aria-label={`Restore Zeb roommate. Zeb is ${scene.label}`}
+        tabIndex={collapsed ? 0 : -1}
+        onClick={toggleCollapsed}
+      >
+        <span className="zeb-roommate__miniature-frame" aria-hidden>
+          <img
+            src={MINIATURE_PORTRAIT}
+            alt=""
+            draggable={false}
+            className="zeb-roommate__miniature-image"
+          />
+          <span className="zeb-roommate__miniature-glass" />
+          <span className="zeb-roommate__miniature-status" />
+        </span>
+        <span className="sr-only">Restore Zeb roommate</span>
+      </button>
     </section>
   );
 }

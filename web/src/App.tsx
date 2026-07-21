@@ -95,7 +95,7 @@ import type { PluginManifest } from "@/plugins";
 import { useTheme } from "@/themes";
 import { isDashboardEmbeddedChatEnabled } from "@/lib/dashboard-flags";
 import { api } from "@/lib/api";
-import type { DashboardSelfState } from "@/lib/api";
+import type { DashboardSelfState, SavedRepo } from "@/lib/api";
 
 function RootRedirect() {
   return <Navigate to="/sessions" replace />;
@@ -410,6 +410,31 @@ export default function App() {
   }, []);
   const tooltipWarmRef = useRef(0);
   const sidebarStatus = useSidebarStatus();
+  const [clonedRepos, setClonedRepos] = useState<SavedRepo[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    const poll = () => {
+      if (document.hidden) return;
+      api
+        .getRepos()
+        .then(({ repos }) => {
+          if (!alive) return;
+          setClonedRepos(
+            (repos ?? [])
+              .filter((repo) => repo.source === "local-clone" || Boolean(repo.local_path))
+              .sort((a, b) => a.full_name.localeCompare(b.full_name)),
+          );
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = window.setInterval(poll, 30_000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, []);
 
   // Live dashboard state Zeb can rewrite in real time (brand, tagline, a
   // pinned note). Polled so Zeb's own edits — Zeb reshaping its own face —
@@ -698,6 +723,34 @@ export default function App() {
                       tooltipWarmRef={tooltipWarmRef}
                     />
                   ))}
+                {clonedRepos.length > 0 && !isDesktopCollapsed ? (
+                  <li className="mx-3 mb-1 border-l border-white/10 pl-3">
+                    <div className="mb-1 flex items-center justify-between gap-2 pr-2 text-[0.62rem] uppercase tracking-[0.13em] text-text-tertiary">
+                      <span>Cloned on VPS</span>
+                      <NavLink
+                        to="/repos"
+                        onClick={closeMobile}
+                        className="text-[#bfc4cc] transition-colors hover:text-white"
+                      >
+                        {clonedRepos.length}
+                      </NavLink>
+                    </div>
+                    <ul className="flex max-h-[5.75rem] flex-col overflow-y-auto pr-1">
+                      {clonedRepos.map((repo) => (
+                        <li key={repo.id}>
+                          <NavLink
+                            to="/repos"
+                            onClick={closeMobile}
+                            title={repo.local_path || repo.full_name}
+                            className="block truncate py-1 font-mono text-[0.68rem] text-text-secondary transition-colors hover:text-white"
+                          >
+                            {repo.full_name.split("/").pop() || repo.full_name}
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ) : null}
               </ul>
 
               <SidebarConfigGroup
@@ -746,7 +799,7 @@ export default function App() {
 
             <div
               className={cn(
-                "mt-auto h-[clamp(12.0rem,33dvh,18rem)] min-h-0 shrink overflow-hidden",
+                "zeb-roommate-slot mt-auto h-[clamp(12.0rem,33dvh,18rem)] min-h-0 shrink overflow-hidden",
                 "[&_.zeb-roommate]:min-h-0",
                 isDesktopCollapsed && "lg:hidden",
               )}

@@ -40,6 +40,15 @@ import { BrainCanvas } from "@/components/BrainCanvas";
 import { Markdown } from "@/components/Markdown";
 import { GatewayClient } from "@/lib/gatewayClient";
 import {
+  gatewayModelSwitchValue,
+  mergeModelIdentity,
+  modelIdentityLabel,
+  reduceLiveTasks,
+  resolveAgentDashboardUrl,
+  type LiveTask,
+  type ModelIdentity,
+} from "@/lib/chat-operations";
+import {
   chatSessionStorageKey,
   restoreChatMessages,
   storedSessionId,
@@ -51,7 +60,7 @@ import {
 } from "@/lib/brain-activity";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
-import { api } from "@/lib/api";
+import { api, ZEB_BASE_PATH } from "@/lib/api";
 import type { AgentRecord, ModelOptionsResponse } from "@/lib/api";
 
 interface ToolChip {
@@ -67,6 +76,7 @@ interface ChatMessage {
   streaming?: boolean;
   tools?: ToolChip[];
   error?: boolean;
+  model?: string;
   provider?: string;
   delivery?: "queued" | "steered";
 }
@@ -134,9 +144,9 @@ async function uploadChatAttachment(
 }
 
 const AGENT_SLOTS = [
-  { id: "quant", label: "Quant Bot" },
-  { id: "socials", label: "Socials Agent" },
-  { id: "jewelry", label: "Jew" },
+  { id: "quant", label: "Quant Bot", defaultUrl: "/agent-dashboards/quant/" },
+  { id: "socials", label: "Socials Agent", defaultUrl: "" },
+  { id: "jewelry", label: "Jew", defaultUrl: "" },
 ] as const;
 
 export default function ZebChatPage({
@@ -269,13 +279,17 @@ function ChatPane({
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [draggingFile, setDraggingFile] = useState(false);
   const [queuedCount, setQueuedCount] = useState(0);
+  const [activeTasks, setActiveTasks] = useState<LiveTask[]>([]);
 
   const gwRef = useRef<GatewayClient | null>(null);
   const sessionIdRef = useRef<string>("");
   const storedSessionIdRef = useRef<string>("");
   const requestedSessionIdRef = useRef(requestedStoredSessionId || "");
   const observedRouteRef = useRef(false);
+  const forceFreshSessionRef = useRef(false);
   const busyRef = useRef(false);
+  const currentModelRef = useRef<ModelIdentity>({});
+  const responseModelRef = useRef<ModelIdentity>({});
   const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
   const dispatchPromptRef = useRef<(prompt: QueuedPrompt) => void>(() => {});
   const drainQueueRef = useRef<() => void>(() => {});
@@ -285,6 +299,24 @@ function ChatPane({
   const { profile: scopedProfile } = useProfileScope();
   busyRef.current = busy;
   onStoredSessionChangeRef.current = onStoredSessionChange;
+
+  const adoptModelIdentity = useCallback((identity: ModelIdentity) => {
+    currentModelRef.current = identity;
+    setModelLabel(modelIdentityLabel(identity));
+    setModelOpts((previous) =>
+      previous
+        ? {
+            ...previous,
+            model: identity.model || previous.model,
+            provider: identity.provider || previous.provider,
+          }
+        : previous,
+    );
+  }, []);
+
+  const applyTaskEvent = useCallback((type: string, payload: unknown) => {
+    setActiveTasks((current) => reduceLiveTasks(current, type, payload));
+  }, []);
 
   useEffect(() => {
     requestedSessionIdRef.current = requestedStoredSessionId || "";
@@ -384,46 +416,57 @@ function ChatPane({
     api
       .getModelInfo()
       .then((info) => {
-        const m = info?.model || "";
-        const p = info?.provider || "";
-        setModelLabel(m ? (p ? `${p}/${m}` : m) : "");
+        if (!sessionIdRef.current) {
+          adoptModelIdentity(mergeModelIdentity(info));
+        }
       })
       .catch(() => setModelLabel(""));
-  }, [nonce]);
+  }, [adoptModelIdentity, nonce]);
 
   // Available models (local + every connected provider) for the in-chat
   // switcher. One dropdown, one click to change who's answering.
   useEffect(() => {
     api
       .getModelOptions()
-      .then(setModelOpts)
+      .then((options) => {
+        if (!sessionIdRef.current) setModelOpts(options);
+      })
       .catch(() => setModelOpts(null));
   }, [nonce]);
 
-  // Switch the main model on the fly. Value is "provider model".
+  // Switch the already-open gateway session, not only persisted config.
   const switchModel = useCallback(
     async (value: string) => {
       const [provider, model] = value.split(" ");
-      if (!provider || !model) return;
+      const gateway = gwRef.current;
+      const sessionId = sessionIdRef.current;
+      if (!provider || !model || !gateway || !sessionId || busyRef.current) return;
       setSwitching(true);
+      setBanner(null);
       try {
-        const res = await api.setModelAssignment({
-          scope: "main",
-          provider,
-          model,
-          confirm_expensive_model: true, // single-user box: no nag
+        const result = await gateway.request<{
+          value?: string;
+          warning?: string;
+          confirm_required?: boolean;
+          confirm_message?: string;
+        }>("config.set", {
+          session_id: sessionId,
+          key: "model",
+          value: gatewayModelSwitchValue(provider, model),
+          confirm_expensive_model: true,
         });
-        if (res.ok) {
-          setModelLabel(`${provider}/${model}`);
-          setModelOpts((prev) => (prev ? { ...prev, provider, model } : prev));
+        if (result.confirm_required) {
+          throw new Error(result.confirm_message || "Model switch needs confirmation");
         }
-      } catch {
-        /* leave the label as-is on failure */
+        adoptModelIdentity({ provider, model: result.value || model });
+        if (result.warning) setBanner(result.warning);
+      } catch (error) {
+        setBanner(error instanceof Error ? error.message : "Could not switch model");
       } finally {
         setSwitching(false);
       }
     },
-    [],
+    [adoptModelIdentity],
   );
 
   const appendAssistantDelta = useCallback((text: string) => {
@@ -436,7 +479,13 @@ function ChatPane({
       }
       return [
         ...msgs,
-        { id: nextId(), role: "assistant", content: text, streaming: true },
+        {
+          id: nextId(),
+          role: "assistant",
+          content: text,
+          streaming: true,
+          ...responseModelRef.current,
+        },
       ];
     });
   }, []);
@@ -453,6 +502,7 @@ function ChatPane({
     setMessages([]);
     setBusy(false);
     setThinking(false);
+    setActiveTasks([]);
     setAttachments([]);
     queuedPromptsRef.current = [];
     setQueuedCount(0);
@@ -468,13 +518,21 @@ function ChatPane({
         if (cancelled) return;
 
         offs.push(
-          gw.on<{ text?: string }>("message.start", (ev) => {
+          gw.on<{ text?: string; model?: string; provider?: string }>("message.start", (ev) => {
             if (!mine(ev.session_id)) return;
+            const identity = mergeModelIdentity(ev.payload, currentModelRef.current);
+            responseModelRef.current = identity;
             setBusy(true);
             setThinking(false);
             setMessages((msgs) => [
               ...msgs,
-              { id: nextId(), role: "assistant", content: "", streaming: true },
+              {
+                id: nextId(),
+                role: "assistant",
+                content: "",
+                streaming: true,
+                ...identity,
+              },
             ]);
           }),
           gw.on<{ text?: string }>("message.delta", (ev) => {
@@ -482,9 +540,16 @@ function ChatPane({
             setThinking(false);
             appendAssistantDelta(ev.payload?.text ?? "");
           }),
-          gw.on<{ text?: string }>("message.complete", (ev) => {
+          gw.on<{ text?: string; model?: string; provider?: string }>("message.complete", (ev) => {
             if (!mine(ev.session_id)) return;
+            const identity = mergeModelIdentity(
+              ev.payload,
+              responseModelRef.current.model
+                ? responseModelRef.current
+                : currentModelRef.current,
+            );
             setThinking(false);
+            setActiveTasks([]);
             // Read the reply aloud when voice mode is on (no-op otherwise).
             speakRef.current(ev.payload?.text ?? "");
             setMessages((msgs) => {
@@ -494,6 +559,7 @@ function ChatPane({
                 const next = msgs.slice(0, -1);
                 next.push({
                   ...last,
+                  ...identity,
                   streaming: false,
                   content: last.content || finalText,
                 });
@@ -502,7 +568,7 @@ function ChatPane({
               if (finalText) {
                 return [
                   ...msgs,
-                  { id: nextId(), role: "assistant", content: finalText },
+                  { id: nextId(), role: "assistant", content: finalText, ...identity },
                 ];
               }
               return msgs;
@@ -514,6 +580,7 @@ function ChatPane({
           }),
           gw.on<{ tool_id?: string; name?: string }>("tool.start", (ev) => {
             if (!mine(ev.session_id)) return;
+            applyTaskEvent("tool.start", ev.payload);
             setToolStarts((count) => count + 1);
             const chip: ToolChip = {
               id: ev.payload?.tool_id || nextId(),
@@ -535,12 +602,14 @@ function ChatPane({
                   content: "",
                   streaming: true,
                   tools: [chip],
+                  ...responseModelRef.current,
                 },
               ];
             });
           }),
           gw.on<{ tool_id?: string }>("tool.complete", (ev) => {
             if (!mine(ev.session_id)) return;
+            applyTaskEvent("tool.complete", ev.payload);
             const tid = ev.payload?.tool_id;
             if (!tid) return;
             setMessages((msgs) =>
@@ -556,11 +625,31 @@ function ChatPane({
               ),
             );
           }),
+          gw.on("tool.progress", (ev) => {
+            if (!mine(ev.session_id)) return;
+            applyTaskEvent("tool.progress", ev.payload);
+          }),
+          gw.on("tool.generating", (ev) => {
+            if (!mine(ev.session_id)) return;
+            applyTaskEvent("tool.generating", ev.payload);
+          }),
+          gw.on("status.update", (ev) => {
+            if (!mine(ev.session_id)) return;
+            applyTaskEvent("status.update", ev.payload);
+          }),
+          ...(["subagent.start", "subagent.progress", "subagent.complete"] as const).map(
+            (type) =>
+              gw.on(type, (ev) => {
+                if (!mine(ev.session_id)) return;
+                applyTaskEvent(type, ev.payload);
+              }),
+          ),
           gw.on<{ message?: string; text?: string }>("error", (ev) => {
             if (!mine(ev.session_id)) return;
             setBusy(false);
             busyRef.current = false;
             setThinking(false);
+            setActiveTasks([]);
             const msg =
               ev.payload?.message || ev.payload?.text || "Something went wrong";
             setMessages((msgs) => [
@@ -569,8 +658,15 @@ function ChatPane({
             ]);
             queueMicrotask(() => drainQueueRef.current());
           }),
-          gw.on<{ running?: boolean }>("session.info", (ev) => {
+          gw.on<{ running?: boolean; model?: string; provider?: string }>("session.info", (ev) => {
             if (!mine(ev.session_id)) return;
+            const identity = mergeModelIdentity(ev.payload, currentModelRef.current);
+            adoptModelIdentity(identity);
+            setMessages((current) => {
+              const last = current[current.length - 1];
+              if (!last || last.role !== "assistant" || !last.streaming) return current;
+              return [...current.slice(0, -1), { ...last, ...identity }];
+            });
             const running = Boolean(ev.payload?.running);
             setBusy(running);
             busyRef.current = running;
@@ -586,6 +682,8 @@ function ChatPane({
         );
 
         const storageKey = chatSessionStorageKey(scopedProfile, pane);
+        const forceFreshSession = forceFreshSessionRef.current;
+        forceFreshSessionRef.current = false;
         let resumeTarget = requestedSessionIdRef.current;
         if (!resumeTarget) {
           try {
@@ -594,7 +692,7 @@ function ChatPane({
             resumeTarget = "";
           }
         }
-        if (!resumeTarget && pane === "primary") {
+        if (!forceFreshSession && !resumeTarget && pane === "primary") {
           try {
             const latest = await gw.request<{ session_id?: string | null }>(
               "session.most_recent",
@@ -628,6 +726,7 @@ function ChatPane({
         }
         if (cancelled) return;
         sessionIdRef.current = res.session_id;
+        adoptModelIdentity(mergeModelIdentity(res.info, currentModelRef.current));
         const durableId = storedSessionId(res);
         storedSessionIdRef.current = durableId;
         setMessages(
@@ -648,6 +747,14 @@ function ChatPane({
           onStoredSessionChangeRef.current?.(durableId);
         }
         setConn("open");
+        void gw
+          .request<ModelOptionsResponse>("model.options", {
+            session_id: res.session_id,
+          })
+          .then((options) => {
+            if (!cancelled) setModelOpts(options);
+          })
+          .catch(() => {});
       } catch (e) {
         if (cancelled) return;
         setConn("error");
@@ -662,7 +769,14 @@ function ChatPane({
       offs.forEach((off) => off());
       gw.close();
     };
-  }, [appendAssistantDelta, nonce, pane, scopedProfile]);
+  }, [
+    adoptModelIdentity,
+    appendAssistantDelta,
+    applyTaskEvent,
+    nonce,
+    pane,
+    scopedProfile,
+  ]);
 
   // Autoscroll on new content while the tab is active.
   useEffect(() => {
@@ -825,6 +939,32 @@ function ChatPane({
 
   const openSplit = useCallback(() => onOpenSplit?.(), [onOpenSplit]);
 
+  const startNewChat = useCallback(() => {
+    if (pane !== "primary") return;
+    const storageKey = chatSessionStorageKey(scopedProfile, pane);
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {
+      // The route is replaced once the fresh durable session is created.
+    }
+    requestedSessionIdRef.current = "";
+    forceFreshSessionRef.current = true;
+    storedSessionIdRef.current = "";
+    queuedPromptsRef.current = [];
+    setQueuedCount(0);
+    const gateway = gwRef.current;
+    const sessionId = sessionIdRef.current;
+    const reconnect = () => setNonce((value) => value + 1);
+    if (!gateway || !sessionId) {
+      reconnect();
+      return;
+    }
+    void gateway
+      .request("session.close", { session_id: sessionId })
+      .catch(() => {})
+      .finally(reconnect);
+  }, [pane, scopedProfile]);
+
   const addDroppedFiles = useCallback((files: FileList | File[]) => {
     const incoming = Array.from(files).map<PendingAttachment>((file) =>
       file.size > MAX_BROWSER_ATTACHMENT_BYTES
@@ -877,7 +1017,7 @@ function ChatPane({
     return {
       id: slot.id,
       label: slot.label,
-      dashboard_url: record?.dashboard_url ?? "",
+      dashboard_url: record?.dashboard_url || slot.defaultUrl,
       status: record?.status ?? "awaiting Zeb",
       updated_at: record?.updated_at,
     };
@@ -890,6 +1030,33 @@ function ChatPane({
     }
     window.open(target, "_blank", "noopener,noreferrer");
   }, []);
+  const visibleTasks = useMemo<LiveTask[]>(
+    () => [
+      ...(busy
+        ? [
+            {
+              id: "current-response",
+              title: thinking ? "Reasoning through response" : "Building response",
+              detail: modelLabel || undefined,
+              startedAt: 0,
+            },
+          ]
+        : []),
+      ...activeTasks,
+    ],
+    [activeTasks, busy, modelLabel, thinking],
+  );
+  const selectedModelValue = useMemo(() => {
+    const provider = modelOpts?.provider || "";
+    const model = modelOpts?.model || "";
+    const providerModels =
+      modelOpts?.providers?.find((candidate) => candidate.slug === provider)?.models ?? [];
+    const optionModel =
+      providerModels.find((candidate) => candidate === model) ||
+      providerModels.find((candidate) => model.endsWith(`/${candidate}`)) ||
+      model;
+    return `${provider} ${optionModel}`;
+  }, [modelOpts]);
 
   return (
     <div
@@ -975,6 +1142,62 @@ function ChatPane({
         {brainStatus.label}
       </div> : null}
 
+      {showBrain ? (
+        <aside
+          aria-label="Active tasks"
+          aria-live="polite"
+          className={cn(
+            "pointer-events-none absolute right-5 top-[58%] z-10 hidden w-[min(26rem,38vw)] sm:block",
+            "max-h-[24%] overflow-hidden rounded-xl border border-white/10",
+            "bg-black/25 px-3 py-2.5 shadow-[0_16px_48px_rgba(0,0,0,.18)] backdrop-blur-md",
+          )}
+        >
+          <div className="mb-2 flex items-center justify-between gap-3 font-mono text-[0.62rem] uppercase tracking-[0.15em] text-text-tertiary">
+            <span>Active tasks</span>
+            <span>{visibleTasks.length}</span>
+          </div>
+          <div className="flex max-h-[calc(24dvh-2.5rem)] flex-col gap-2 overflow-hidden">
+            {visibleTasks.length ? (
+              visibleTasks.map((task) => (
+                <div key={task.id} className="rounded-lg border border-white/[0.07] bg-white/[0.025] px-2.5 py-2">
+                  <div className="flex items-center gap-2">
+                    <Spinner className="shrink-0 text-[0.55rem]" />
+                    <span className="min-w-0 flex-1 truncate text-xs text-text-secondary">
+                      {task.title}
+                    </span>
+                    {task.progress !== undefined ? (
+                      <span className="font-mono text-[0.62rem] text-text-tertiary">
+                        {Math.round(task.progress)}%
+                      </span>
+                    ) : null}
+                    {task.eta ? (
+                      <span className="font-mono text-[0.62rem] text-text-tertiary">
+                        {task.eta}
+                      </span>
+                    ) : null}
+                  </div>
+                  {task.detail ? (
+                    <div className="mt-1 truncate pl-5 text-[0.68rem] text-text-tertiary">
+                      {task.detail}
+                    </div>
+                  ) : null}
+                  {task.progress !== undefined ? (
+                    <div className="mt-1.5 ml-5 h-px overflow-hidden bg-white/10">
+                      <div
+                        className="h-full bg-white/55 transition-[width] duration-300"
+                        style={{ width: `${task.progress}%` }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <div className="py-1 text-xs text-text-tertiary">No active tasks</div>
+            )}
+          </div>
+        </aside>
+      ) : null}
+
       {/* Top bar — full width, floats above the brain */}
       <header className="zeb-chat-header relative z-20 flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-current/10 px-3 sm:px-5">
         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -1015,11 +1238,11 @@ function ChatPane({
           {/* In-chat model switcher — local model + every connected provider,
               one click to change who answers. */}
           {modelOpts?.providers?.length ? (
-            <div className="relative hidden items-center sm:flex">
+            <div className="relative mr-3 hidden items-center sm:flex">
               <select
-                value={`${modelOpts.providers.find((p) => p.is_current)?.slug ?? modelOpts.provider ?? ""} ${modelOpts.model ?? ""}`}
+                value={selectedModelValue}
                 onChange={(e) => void switchModel(e.target.value)}
-                disabled={switching}
+                disabled={switching || busy}
                 aria-label="Select model"
                 className={cn(
                   "max-w-52 appearance-none truncate rounded-[var(--radius)]",
@@ -1046,9 +1269,21 @@ function ChatPane({
               )}
             </div>
           ) : modelLabel ? (
-            <span className="hidden truncate font-mono text-xs text-text-tertiary sm:block">
+            <span className="mr-3 hidden truncate font-mono text-xs text-text-tertiary sm:block">
               {modelLabel}
             </span>
+          ) : null}
+          {pane === "primary" ? (
+            <Button
+              ghost
+              size="sm"
+              onClick={startNewChat}
+              aria-label="New chat"
+              title="Start a new chat"
+              className="whitespace-nowrap font-mono text-[0.68rem] uppercase tracking-[0.1em]"
+            >
+              New Chat
+            </Button>
           ) : null}
           {onOpenSplit ? (
             <Button
@@ -1146,7 +1381,17 @@ function ChatPane({
                   {m.content}
                 </div>
               ) : (
-                <Markdown content={m.content} streaming={m.streaming} size="chat" />
+                <>
+                  <Markdown content={m.content} streaming={m.streaming} size="chat" />
+                  {modelIdentityLabel(m) ? (
+                    <div className="mt-2 border-t border-white/[0.06] pt-1.5 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-text-tertiary">
+                      {m.streaming ? "Responding with" : "Answered by"}{" "}
+                      <span className="normal-case tracking-normal text-text-secondary">
+                        {modelIdentityLabel(m)}
+                      </span>
+                    </div>
+                  ) : null}
+                </>
               )}
             </div>
           ))}
@@ -1324,14 +1569,9 @@ function ChatPane({
 }
 
 function agentDashboardUrl(raw: string): string {
-  const value = String(raw || "").trim();
-  if (value.startsWith("/")) return value;
-  try {
-    const url = new URL(value, window.location.origin);
-    if (url.protocol === "https:") return url.href;
-    const localDevelopment = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-    return url.protocol === "http:" && localDevelopment ? url.href : "";
-  } catch {
-    return "";
-  }
+  return resolveAgentDashboardUrl(raw, {
+    origin: window.location.origin,
+    basePath: ZEB_BASE_PATH,
+    pageHostname: window.location.hostname,
+  });
 }

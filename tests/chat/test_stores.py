@@ -35,6 +35,26 @@ def test_api_key_store_roundtrip(monkeypatch, tmp_path):
     assert store.delete("nope") is False
 
 
+def test_repo_store_discovers_local_clone(monkeypatch, tmp_path):
+    _point_home(monkeypatch, tmp_path)
+    checkout = tmp_path / "workspace" / "quant-engine"
+    git_dir = checkout / ".git"
+    git_dir.mkdir(parents=True)
+    (git_dir / "config").write_text(
+        '[remote "origin"]\n\turl = https://github.com/acme/quant-engine.git\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ZEB_REPO_ROOTS", str(tmp_path / "workspace"))
+    RepoStore._last_discovery = 0
+
+    store = RepoStore()
+    assert store.sync_local_clones(force=True) == 1
+    repo = store.list()[0]
+    assert repo["full_name"] == "acme/quant-engine"
+    assert repo["local_path"] == str(checkout.resolve())
+    assert repo["source"] == "local-clone"
+
+
 def test_api_key_store_short_key_mask(monkeypatch, tmp_path):
     _point_home(monkeypatch, tmp_path)
     created = ApiKeyStore().add("abc", "short")

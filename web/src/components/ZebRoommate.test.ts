@@ -4,8 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ROOMMATE_ACTIVITY_CYCLE,
+  ROOMMATE_COLLAPSED_STORAGE_KEY,
   ROOMMATE_SCENES,
   ZebRoommate,
+  persistRoommateCollapsed,
+  readRoommateCollapsed,
   roommateTransition,
   selectNextRoommateScene,
   type RoommateScene,
@@ -100,6 +103,18 @@ function renderRoommate(sceneId?: RoommateSceneId): string {
       location: { search: `?roommateScene=${sceneId}` },
     });
   }
+  return renderToStaticMarkup(createElement(ZebRoommate));
+}
+
+function renderCollapsedRoommate(sceneId: RoommateSceneId = "idle"): string {
+  vi.stubGlobal("window", {
+    location: { search: `?roommateScene=${sceneId}` },
+    localStorage: {
+      getItem: vi.fn((key: string) =>
+        key === ROOMMATE_COLLAPSED_STORAGE_KEY ? "true" : null,
+      ),
+    },
+  });
   return renderToStaticMarkup(createElement(ZebRoommate));
 }
 
@@ -232,7 +247,7 @@ describe("ZebRoommate structure", () => {
   it("keeps the pose, eyelids, and effects inside the stage without a separate card shell", () => {
     const markup = renderRoommate("phone-vape");
 
-    expect(markup).toContain('<div class="zeb-roommate__stage">');
+    expect(markup).toContain('<div class="zeb-roommate__stage"');
     expect(markup).toContain(
       '<div class="zeb-roommate__ambient"><div class="zeb-roommate__pose"',
     );
@@ -254,6 +269,52 @@ describe("ZebRoommate structure", () => {
     expect(markup).toContain(
       'class="zeb-roommate__ambient is-ambient-locked"',
     );
+  });
+
+  it("renders accessible controls for minimizing and restoring the roommate", () => {
+    const expanded = renderRoommate("idle");
+    expect(expanded).toContain('data-roommate-state="expanded"');
+    expect(expanded).toContain('aria-label="Minimize Zeb roommate"');
+    expect(expanded).toContain('aria-expanded="true"');
+
+    const collapsed = renderCollapsedRoommate("phone");
+    expect(collapsed).toContain('data-roommate-state="collapsed"');
+    expect(collapsed).toContain('aria-label="Restore Zeb roommate. Zeb is checking his phone"');
+    expect(collapsed).toContain('aria-expanded="false"');
+    expect(collapsed).toContain('class="zeb-roommate__miniature-frame"');
+    expect(collapsed).toContain('id="zeb-roommate-stage" aria-hidden="true"');
+  });
+});
+
+describe("roommate collapse preference", () => {
+  it("reads and writes the dedicated local-storage preference", () => {
+    const storage = {
+      getItem: vi.fn(() => "true"),
+      setItem: vi.fn(),
+    };
+
+    expect(readRoommateCollapsed(storage)).toBe(true);
+    expect(storage.getItem).toHaveBeenCalledWith(ROOMMATE_COLLAPSED_STORAGE_KEY);
+
+    persistRoommateCollapsed(false, storage);
+    expect(storage.setItem).toHaveBeenCalledWith(
+      ROOMMATE_COLLAPSED_STORAGE_KEY,
+      "false",
+    );
+  });
+
+  it("falls back safely when storage access is denied", () => {
+    const blockedStorage = {
+      getItem: vi.fn(() => {
+        throw new Error("blocked");
+      }),
+      setItem: vi.fn(() => {
+        throw new Error("blocked");
+      }),
+    };
+
+    expect(readRoommateCollapsed(blockedStorage)).toBe(false);
+    expect(() => persistRoommateCollapsed(true, blockedStorage)).not.toThrow();
   });
 });
 
