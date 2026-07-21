@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveBrainEnergy,
   estimateTaskIntensity,
+  getBrainActivityTier,
   getBrainMotionProfile,
 } from "./brain-activity";
 
@@ -85,6 +86,59 @@ describe("getBrainMotionProfile", () => {
     expect(medium.firingRate).toBeGreaterThan(5);
     expect(hard.firingRate).toBeGreaterThan(medium.firingRate * 4);
     expect(hard.fanoutChance).toBeGreaterThan(medium.fanoutChance);
-    expect(hard.cascadeChance).toBeGreaterThan(0.7);
+    expect(hard.cascadeChance).toBeGreaterThan(0.6);
+    expect(hard.cascadeChance).toBeLessThanOrEqual(0.65);
+  });
+
+  it("keeps every energy profile inside explicit rendering budgets", () => {
+    const profiles = Array.from({ length: 101 }, (_, index) =>
+      getBrainMotionProfile(index / 100),
+    );
+
+    for (const profile of profiles) {
+      expect(profile.frameRate).toBeGreaterThanOrEqual(18);
+      expect(profile.frameRate).toBeLessThanOrEqual(42);
+      expect(profile.signalBudget).toBeGreaterThanOrEqual(14);
+      expect(profile.signalBudget).toBeLessThanOrEqual(186);
+      expect(profile.fanoutChance).toBeLessThanOrEqual(0.65);
+      expect(profile.cascadeChance).toBeLessThanOrEqual(0.65);
+    }
+  });
+
+  it("scales frame, signal, field, and motion energy monotonically", () => {
+    const energies = [0, 0.25, 0.55, 0.82, 1];
+    const profiles = energies.map(getBrainMotionProfile);
+    const keys = [
+      "rotationSpeed",
+      "driftSpeed",
+      "driftAmplitude",
+      "firingRate",
+      "signalSpeed",
+      "frameRate",
+      "signalBudget",
+      "edgeOpacity",
+      "fieldStrength",
+    ] as const;
+
+    for (const key of keys) {
+      for (let index = 1; index < profiles.length; index += 1) {
+        expect(profiles[index][key]).toBeGreaterThanOrEqual(profiles[index - 1][key]);
+      }
+    }
+  });
+});
+
+describe("getBrainActivityTier", () => {
+  it("maps normalized energy to idle, small, medium, and high tiers", () => {
+    expect(getBrainActivityTier(0)).toBe("idle");
+    expect(getBrainActivityTier(0.3)).toBe("small");
+    expect(getBrainActivityTier(0.6)).toBe("medium");
+    expect(getBrainActivityTier(0.9)).toBe("high");
+  });
+
+  it("clamps invalid and out-of-range energy", () => {
+    expect(getBrainActivityTier(Number.NaN)).toBe("idle");
+    expect(getBrainActivityTier(-2)).toBe("idle");
+    expect(getBrainActivityTier(4)).toBe("high");
   });
 });

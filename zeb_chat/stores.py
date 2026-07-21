@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -344,6 +345,9 @@ class RepoStore:
     ``full_name``.
     """
 
+    _discovery_lock = threading.Lock()
+    _last_discovery = 0.0
+
     def __init__(self, base_dir: Path | None = None) -> None:
         self._path = (Path(base_dir) if base_dir else _chat_dir()) / "repos.json"
 
@@ -363,6 +367,7 @@ class RepoStore:
             "stars": int(repo.get("stars") or 0),
             "language": str(repo.get("language") or ""),
             "source": str(repo.get("source") or "manual"),
+            "local_path": str(repo.get("local_path") or ""),
             # New repos are active by default: their extracted skills load.
             "enabled": bool(repo.get("enabled", True)),
             "added_at": time.time(),
@@ -371,16 +376,125 @@ class RepoStore:
             items = self._load()
             # De-dupe by full_name (case-insensitive).
             low = full_name.lower()
-            if any(str(e.get("full_name", "")).lower() == low for e in items):
-                return next(
-                    (e for e in items if str(e.get("full_name", "")).lower() == low),
-                    entry,
-                )
+            existing = next(
+                (e for e in items if str(e.get("full_name", "")).lower() == low),
+                None,
+            )
+            if existing is not None:
+                # Discovery enriches an existing scanned/manual entry instead of
+                # creating a duplicate when Zeb later clones the same repo.
+                local_path = str(repo.get("local_path") or "").strip()
+                if local_path and existing.get("local_path") != local_path:
+                    existing["local_path"] = local_path
+                    existing["source"] = "local-clone"
+                    _atomic_write(self._path, json.dumps(items, indent=2))
+                return existing
             items.append(entry)
             _atomic_write(self._path, json.dumps(items, indent=2))
         except Exception:
             pass
         return entry
+
+    @staticmethod
+    def _remote_identity(repo_dir: Path) -> tuple[str, str]:
+        """Return ``(full_name, url)`` from a checkout's origin config."""
+        config_path = repo_dir / ".git" / "config"
+        try:
+            text = config_path.read_text(encoding="utf-8", errors="replace")
+            match = re.search(
+                r'\[remote\s+"origin"\][^\[]*?\burl\s*=\s*(\S+)',
+                text,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            remote = match.group(1).strip() if match else ""
+        except Exception:
+            remote = ""
+        if remote:
+            cleaned = remote.removesuffix(".git").rstrip("/")
+            if cleaned.startswith("git@") and ":" in cleaned:
+                cleaned = cleaned.split(":", 1)[1]
+            elif "://" in cleaned:
+                cleaned = cleaned.split("://", 1)[1].split("/", 1)[-1]
+            full_name = "/".join(cleaned.split("/")[-2:])
+            if "/" in full_name:
+                return full_name, f"https://github.com/{full_name}"
+        return f"local/{repo_dir.name}", repo_dir.as_uri()
+
+    @staticmethod
+    def _clone_roots() -> list[Path]:
+        """Small, bounded roots where Zeb normally creates checkouts."""
+        raw = os.environ.get("ZEB_REPO_ROOTS", "").strip()
+        if raw:
+            candidates = [Path(value).expanduser() for value in raw.split(os.pathsep)]
+        else:
+            try:
+                import zeb_constants
+
+                zeb_home = Path(zeb_constants.get_zeb_home())
+            except Exception:
+                zeb_home = Path.home() / ".zeb"
+            candidates = [
+                Path("/opt"),
+                Path("/var/lib/zeb"),
+                zeb_home / "repos",
+                zeb_home / "workspace",
+                Path.home() / "repos",
+                Path.home() / "workspace",
+                Path(os.environ.get("ZEB_WORKSPACE_ROOT", "")).expanduser()
+                if os.environ.get("ZEB_WORKSPACE_ROOT")
+                else None,
+            ]
+        roots: list[Path] = []
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            try:
+                resolved = candidate.resolve()
+            except Exception:
+                continue
+            if resolved.is_dir() and resolved not in roots:
+                roots.append(resolved)
+        return roots
+
+    def sync_local_clones(self, *, force: bool = False) -> int:
+        """Discover local Git clones and persist them for dashboard navigation.
+
+        The scan is intentionally shallow and throttled. It catches the places
+        Zeb uses for checkouts without walking model caches or the whole VPS.
+        """
+        now = time.monotonic()
+        with self._discovery_lock:
+            if not force and now - type(self)._last_discovery < 30:
+                return 0
+            type(self)._last_discovery = now
+            added = 0
+            ignored = {"node_modules", ".venv", "venv", "models", "cache", ".cache"}
+            for root in self._clone_roots():
+                root_depth = len(root.parts)
+                for current, dirs, _files in os.walk(root):
+                    current_path = Path(current)
+                    depth = len(current_path.parts) - root_depth
+                    dirs[:] = [d for d in dirs if d not in ignored]
+                    if ".git" in dirs:
+                        dirs.remove(".git")
+                        full_name, url = self._remote_identity(current_path)
+                        before = len(self._load())
+                        self.add(
+                            {
+                                "full_name": full_name,
+                                "url": url,
+                                "description": f"Local checkout at {current_path}",
+                                "source": "local-clone",
+                                "local_path": str(current_path),
+                            }
+                        )
+                        if len(self._load()) > before:
+                            added += 1
+                        dirs[:] = []
+                        continue
+                    if depth >= 3:
+                        dirs[:] = []
+            return added
 
     def list(self, query: str = "") -> list:
         try:
@@ -488,7 +602,7 @@ class AgentStore:
     _ALLOWED = ("label", "dashboard_url", "status")
     # The three seed agents the top bar ships with. Zeb can register more ids.
     _SEED = {
-        "quant": "Quant Bot",
+        "quant": "Qompot",
         "socials": "Socials Agent",
         "jewelry": "Jew",
     }
@@ -511,6 +625,9 @@ class AgentStore:
             rec.setdefault("label", self._SEED.get(aid, aid.title()))
             rec.setdefault("dashboard_url", "")
             rec.setdefault("status", "not started")
+            if aid == "quant" and not str(rec.get("dashboard_url") or "").strip():
+                rec["dashboard_url"] = "/agent-dashboards/quant/"
+                rec["status"] = "starter dashboard ready"
             rec.setdefault("updated_at", 0)
             out.append(rec)
         return out

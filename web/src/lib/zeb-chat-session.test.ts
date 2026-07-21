@@ -42,4 +42,27 @@ describe("zeb chat session restoration", () => {
       chatSessionStorageKey("work", "primary"),
     );
   });
+
+  it("preserves response attribution when the gateway supplies it", () => {
+    expect(
+      restoreChatMessages({
+        session_id: "live-1",
+        messages: [
+          {
+            role: "assistant",
+            text: "Shipped it",
+            provider: "openai",
+            model: "gpt-5.6",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        role: "assistant",
+        content: "Shipped it",
+        provider: "openai",
+        model: "gpt-5.6",
+      },
+    ]);
+  });
 });

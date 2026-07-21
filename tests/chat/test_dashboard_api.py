@@ -616,11 +616,11 @@ def test_agents_seed_and_register(client):
     agents = {a["id"]: a for a in res.json()["agents"]}
     assert set(["quant", "jewelry", "socials"]).issubset(agents)
     assert [agents[key]["label"] for key in ("quant", "socials", "jewelry")] == [
-        "Quant Bot",
+        "Qompot",
         "Socials Agent",
         "Jew",
     ]
-    assert agents["quant"]["dashboard_url"] == ""
+    assert agents["quant"]["dashboard_url"] == "/agent-dashboards/quant/"
 
     # Zeb registers a dashboard for quant at runtime.
     res = client.post(

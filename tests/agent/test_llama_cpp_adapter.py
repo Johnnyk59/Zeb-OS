@@ -10,6 +10,7 @@ import pytest
 
 from agent.llama_cpp_adapter import (
     LlamaCppClient,
+    _bounded_threads,
     _translate_response,
     _translate_stream_chunk,
 )
@@ -60,6 +61,26 @@ class TestSingletonCacheKey:
         assert fake.Llama.call_count == 2
         _, kwargs = fake.Llama.call_args
         assert kwargs["n_ctx"] == 65536
+
+    def test_thread_change_reloads(self, monkeypatch):
+        import agent.llama_cpp_adapter as m
+
+        fake = _fake_llama_module(MagicMock())
+        monkeypatch.setattr(m, "_get_llama_cpp_sdk", lambda: fake)
+        monkeypatch.setattr(m.os, "cpu_count", lambda: 8)
+        m._load_model("/w.gguf", n_ctx=65536, n_gpu_layers=0, n_threads=3)
+        m._load_model("/w.gguf", n_ctx=65536, n_gpu_layers=0, n_threads=4)
+        assert fake.Llama.call_count == 2
+
+
+class TestCpuCapacityBand:
+    def test_default_uses_midpoint(self):
+        assert _bounded_threads(cpu_count=8) == 4
+
+    def test_requested_threads_are_clamped_to_band(self):
+        assert _bounded_threads(1, cpu_count=8) == 3
+        assert _bounded_threads(99, cpu_count=8) == 4
+        assert _bounded_threads(14, cpu_count=32) == 14
 
 
 class TestTranslateResponse:

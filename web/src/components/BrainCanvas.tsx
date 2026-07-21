@@ -1,19 +1,7 @@
 /**
- * BrainCanvas — Zeb's thinking brain as a 2.5D neuron network.
- *
- * A Fibonacci-sphere of neurons squashed into a brain-ish ellipsoid,
- * depth-sorted and perspective-projected onto a 2D canvas. Signals travel
- * along synapses and fire the neurons they reach; a transparent trail-fade
- * leaves comet smears without painting over whatever sits behind the
- * canvas (it's an overlay — the chat flows underneath).
- *
- * `energy` (0..1) drives firing rate, rotation, glow and motion so the
- * brain visibly "thinks harder" while the agent is working. The animation
- * pauses when the tab is hidden or the canvas leaves the viewport.
- *
- * Visual language: a still, readable cortex at rest that turns into a layered
- * signal storm under load. Motion, firing, trails and bloom all scale from the
- * same energy value so harder tasks visibly demand more of the brain.
+ * Zeb's cognitive observatory: a depth-sorted, activity-aware cortical network.
+ * Rendering is bounded by explicit frame and signal budgets so high activity
+ * increases information density without monopolizing the browser main thread.
  */
 import { useEffect, useRef } from "react";
 import { getBrainMotionProfile } from "@/lib/brain-activity";
@@ -33,10 +21,23 @@ interface Node {
   palette: number;
 }
 
+interface ProjectedNode {
+  i: number;
+  sx: number;
+  sy: number;
+  depth: number;
+  persp: number;
+  fire: number;
+  seed: number;
+  palette: number;
+}
+
 interface Signal {
   from: number;
   to: number;
   t: number;
+  bend: number;
+  palette: number;
 }
 
 interface Edge {
@@ -45,7 +46,8 @@ interface Edge {
   color: RGB;
 }
 
-const TILT = 0.34;
+const TAU = Math.PI * 2;
+const TILT = 0.32;
 const CT = Math.cos(TILT);
 const ST = Math.sin(TILT);
 
@@ -63,7 +65,7 @@ function mixColor(a: RGB, b: RGB): RGB {
 
 function createGlowSprite(color: RGB, whiteCore = false): HTMLCanvasElement {
   const sprite = document.createElement("canvas");
-  const size = 96;
+  const size = 88;
   sprite.width = size;
   sprite.height = size;
   const spriteContext = sprite.getContext("2d");
@@ -73,23 +75,77 @@ function createGlowSprite(color: RGB, whiteCore = false): HTMLCanvasElement {
   const gradient = spriteContext.createRadialGradient(center, center, 0, center, center, center);
   if (whiteCore) {
     gradient.addColorStop(0, "rgba(255,255,255,1)");
-    gradient.addColorStop(0.12, `rgba(${color[0]},${color[1]},${color[2]},0.98)`);
+    gradient.addColorStop(0.1, `rgba(${color[0]},${color[1]},${color[2]},1)`);
   } else {
     gradient.addColorStop(0, `rgba(${color[0]},${color[1]},${color[2]},1)`);
   }
-  gradient.addColorStop(0.38, `rgba(${color[0]},${color[1]},${color[2]},0.42)`);
-  gradient.addColorStop(0.72, `rgba(${color[0]},${color[1]},${color[2]},0.1)`);
+  gradient.addColorStop(0.34, `rgba(${color[0]},${color[1]},${color[2]},0.46)`);
+  gradient.addColorStop(0.7, `rgba(${color[0]},${color[1]},${color[2]},0.11)`);
   gradient.addColorStop(1, `rgba(${color[0]},${color[1]},${color[2]},0)`);
   spriteContext.fillStyle = gradient;
   spriteContext.fillRect(0, 0, size, size);
   return sprite;
 }
 
+function createBrainHull(): Path2D {
+  const path = new Path2D();
+  path.moveTo(0, -0.98);
+  path.bezierCurveTo(-0.12, -1.08, -0.28, -1.04, -0.39, -0.98);
+  path.bezierCurveTo(-0.76, -1.01, -1.04, -0.76, -1.08, -0.43);
+  path.bezierCurveTo(-1.2, -0.18, -1.13, 0.15, -0.94, 0.34);
+  path.bezierCurveTo(-0.91, 0.66, -0.62, 0.91, -0.23, 0.87);
+  path.bezierCurveTo(-0.08, 0.84, -0.04, 0.68, 0, 0.53);
+  path.bezierCurveTo(0.04, 0.68, 0.08, 0.84, 0.23, 0.87);
+  path.bezierCurveTo(0.62, 0.91, 0.91, 0.66, 0.94, 0.34);
+  path.bezierCurveTo(1.13, 0.15, 1.2, -0.18, 1.08, -0.43);
+  path.bezierCurveTo(1.04, -0.76, 0.76, -1.01, 0.39, -0.98);
+  path.bezierCurveTo(0.28, -1.04, 0.12, -1.08, 0, -0.98);
+  path.closePath();
+  return path;
+}
+
+function createCorticalContours(): readonly Path2D[] {
+  const paths: Path2D[] = [];
+  const add = (draw: (path: Path2D) => void) => {
+    const path = new Path2D();
+    draw(path);
+    paths.push(path);
+  };
+
+  add((path) => {
+    path.moveTo(-0.95, -0.35);
+    path.bezierCurveTo(-0.7, -0.55, -0.46, -0.46, -0.23, -0.64);
+  });
+  add((path) => {
+    path.moveTo(0.95, -0.35);
+    path.bezierCurveTo(0.7, -0.55, 0.46, -0.46, 0.23, -0.64);
+  });
+  add((path) => {
+    path.moveTo(-1.02, 0.06);
+    path.bezierCurveTo(-0.78, -0.06, -0.58, 0.08, -0.35, -0.11);
+    path.bezierCurveTo(-0.23, -0.2, -0.15, -0.15, -0.1, -0.28);
+  });
+  add((path) => {
+    path.moveTo(1.02, 0.06);
+    path.bezierCurveTo(0.78, -0.06, 0.58, 0.08, 0.35, -0.11);
+    path.bezierCurveTo(0.23, -0.2, 0.15, -0.15, 0.1, -0.28);
+  });
+  add((path) => {
+    path.moveTo(-0.85, 0.42);
+    path.bezierCurveTo(-0.63, 0.28, -0.45, 0.46, -0.2, 0.31);
+  });
+  add((path) => {
+    path.moveTo(0.85, 0.42);
+    path.bezierCurveTo(0.63, 0.28, 0.45, 0.46, 0.2, 0.31);
+  });
+  return paths;
+}
+
 export function BrainCanvas({
   energy = 0,
   className,
 }: {
-  /** Target activity level 0..1 — eased internally, safe to change often. */
+  /** Target activity level 0..1, eased internally and safe to update often. */
   energy?: number;
   className?: string;
 }) {
@@ -103,34 +159,46 @@ export function BrainCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
 
-    let W = 0;
-    let H = 0;
-    let CX = 0;
-    let CY = 0;
+    let width = 0;
+    let height = 0;
+    let centerX = 0;
+    let centerY = 0;
     let scale = 1;
-    let rot = 0;
-    let tGlobal = 0;
-    let last = 0;
-    let fireAcc = 0;
-    let cur = 0;
+    let rotation = 0;
+    let globalTime = 0;
+    let lastFrame = 0;
+    let fireAccumulator = 0;
+    let currentEnergy = 0;
     let raf = 0;
-    let running = true;
-    let visible = true;
+    let disposed = false;
+    let inViewport = true;
+    let adaptiveQuality = 1;
+    let averageFrameCost = 0;
+    let shellGradient: CanvasGradient | string = "rgba(28,72,118,0.08)";
     const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     let reducedMotion = reducedMotionQuery.matches;
 
+    // Cyan and blue carry the structure; violet, amber, and coral are accents.
     const palette: readonly RGB[] = [
-      [45, 230, 255], // cyan
-      [65, 126, 255], // electric blue
-      [157, 102, 255], // violet
-      [255, 103, 132], // coral
+      [70, 224, 246],
+      [77, 132, 255],
+      [156, 112, 255],
+      [255, 184, 80],
+      [255, 99, 128],
     ];
     const nodeSprites = palette.map((color) => createGlowSprite(color));
-    const signalSprite = createGlowSprite(palette[3], true);
-    const fieldSprites = [createGlowSprite(palette[0]), createGlowSprite(palette[2])];
+    const signalSprites = palette.map((color) => createGlowSprite(color, true));
+    const fieldSprites = [
+      createGlowSprite(palette[0]),
+      createGlowSprite(palette[2]),
+      createGlowSprite(palette[3]),
+    ];
+    const brainHull = createBrainHull();
+    const corticalContours = createCorticalContours();
+
     const drawSprite = (
       sprite: HTMLCanvasElement,
       x: number,
@@ -143,223 +211,298 @@ export function BrainCanvas({
       ctx.drawImage(sprite, x - radius, y - radius, radius * 2, radius * 2);
     };
 
-    // --- topology -----------------------------------------------------
-    // A dense two-hemisphere cortex. The centre cleft and lobe modulation make
-    // the silhouette read as a brain rather than a generic glowing sphere.
-    const N = 132;
+    // A lobed two-hemisphere surface with a readable longitudinal fissure.
+    const nodeCount = 148;
     const nodes: Node[] = [];
-    const GA = Math.PI * (3 - Math.sqrt(5));
-    for (let i = 0; i < N; i++) {
-      const y = 1 - (i / (N - 1)) * 2;
-      const r = Math.sqrt(Math.max(0, 1 - y * y));
-      const th = GA * i;
-      let x = Math.cos(th) * r;
-      let z = Math.sin(th) * r;
-      let yy = y;
-      const lobe = 0.92 + 0.08 * Math.cos(yy * Math.PI * 1.6);
-      const k = rnd(0.84, 1.0) * lobe;
-      x *= 1.22 * k;
-      yy *= 0.88 * k;
-      z *= 0.94 * k;
-      x += x >= 0 ? 0.055 : -0.055;
-      x += rnd(-0.045, 0.045);
-      yy += rnd(-0.045, 0.045);
-      z += rnd(-0.045, 0.045);
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    for (let index = 0; index < nodeCount; index += 1) {
+      const normalizedY = 1 - (index / (nodeCount - 1)) * 2;
+      const radial = Math.sqrt(Math.max(0, 1 - normalizedY * normalizedY));
+      const angle = goldenAngle * index;
+      let x = Math.cos(angle) * radial;
+      let z = Math.sin(angle) * radial;
+      let y = normalizedY;
+      const lobe = 0.91 + Math.cos(y * Math.PI * 1.55) * 0.09;
+      const variation = rnd(0.88, 1) * lobe;
+      x *= 1.24 * variation;
+      y *= 0.9 * variation;
+      z *= 0.98 * variation;
+      x += x >= 0 ? 0.064 : -0.064;
+      z += (1 - y * y) * 0.035;
+      x += rnd(-0.035, 0.035);
+      y += rnd(-0.035, 0.035);
+      z += rnd(-0.035, 0.035);
       const seed = Math.random();
       const paletteIndex =
-        seed < 0.075 ? 3 : x < 0 ? (z > 0 ? 0 : 1) : z > 0 ? 2 : 1;
+        seed < 0.04 ? 4 : seed < 0.1 ? 3 : seed < 0.22 ? 2 : x < 0 ? 0 : 1;
       nodes.push({
         bx: x,
-        by: yy,
+        by: y,
         bz: z,
         x,
-        y: yy,
+        y,
         z,
         seed,
-        drift: rnd(0, 6.28),
+        drift: rnd(0, TAU),
         fire: 0,
         palette: paletteIndex,
       });
     }
+
+    const distance3 = (a: Node, b: Node) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+    const edgeKeys = new Set<string>();
     const edgePairs: Array<[number, number]> = [];
-    const has = (i: number, j: number) =>
-      edgePairs.some((e) => (e[0] === i && e[1] === j) || (e[0] === j && e[1] === i));
-    const D3 = (a: Node, b: Node) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-    // Tighter threshold than before because neurons sit closer together at
-    // this density — this keeps each neuron wired to a handful of neighbours
-    // instead of the whole hemisphere.
-    for (let i = 0; i < N; i++)
-      for (let j = i + 1; j < N; j++) {
-        if (D3(nodes[i], nodes[j]) < 0.39) edgePairs.push([i, j]);
-      }
-    // Guarantee no orphan neurons: wire each to its two nearest peers.
-    for (let i = 0; i < N; i++) {
-      const dist = nodes
-        .map((n, j) => ({ j, d: j === i ? 9 : D3(nodes[i], n) }))
-        .sort((a, b) => a.d - b.d);
-      for (const { j } of dist.slice(0, 2)) {
-        if (!has(i, j)) edgePairs.push([Math.min(i, j), Math.max(i, j)]);
+    const addEdge = (a: number, b: number) => {
+      const from = Math.min(a, b);
+      const to = Math.max(a, b);
+      const key = `${from}:${to}`;
+      if (edgeKeys.has(key)) return;
+      edgeKeys.add(key);
+      edgePairs.push([from, to]);
+    };
+
+    for (let from = 0; from < nodeCount; from += 1) {
+      for (let to = from + 1; to < nodeCount; to += 1) {
+        if (distance3(nodes[from], nodes[to]) < 0.365) addEdge(from, to);
       }
     }
+    for (let index = 0; index < nodeCount; index += 1) {
+      const nearest = nodes
+        .map((node, peer) => ({ peer, distance: peer === index ? Infinity : distance3(nodes[index], node) }))
+        .sort((a, b) => a.distance - b.distance);
+      addEdge(index, nearest[0].peer);
+      addEdge(index, nearest[1].peer);
+    }
+
     const edges: Edge[] = edgePairs.map(([from, to]) => ({
       from,
       to,
       color: mixColor(palette[nodes[from].palette], palette[nodes[to].palette]),
     }));
-    const signals: Signal[] = [];
-    const SIGNAL_CAP = 480;
+    const adjacency: number[][] = Array.from({ length: nodeCount }, () => []);
+    for (const edge of edges) {
+      adjacency[edge.from].push(edge.to);
+      adjacency[edge.to].push(edge.from);
+    }
 
-    const emitFrom = (idx: number, fanoutChance: number) => {
-      nodes[idx].fire = 1;
-      for (const e of edges) {
-        let to = -1;
-        if (e.from === idx) to = e.to;
-        else if (e.to === idx) to = e.from;
-        else continue;
-        if (signals.length < SIGNAL_CAP && Math.random() < fanoutChance)
-          signals.push({ from: idx, to, t: 0 });
+    const projected: ProjectedNode[] = nodes.map((node, index) => ({
+      i: index,
+      sx: 0,
+      sy: 0,
+      depth: 0,
+      persp: 1,
+      fire: 0,
+      seed: node.seed,
+      palette: node.palette,
+    }));
+    const depthOrder = projected.slice();
+    const signals: Signal[] = [];
+
+    const projectNodes = () => {
+      const cosine = Math.cos(rotation);
+      const sine = Math.sin(rotation);
+      for (let index = 0; index < nodes.length; index += 1) {
+        const node = nodes[index];
+        const point = projected[index];
+        const x = node.x * cosine - node.z * sine;
+        const z = node.x * sine + node.z * cosine;
+        const tiltedY = node.y * CT - z * ST;
+        const depth = node.y * ST + z * CT;
+        const perspective = 1 / (2 - depth * 0.58);
+        point.sx = centerX + x * scale * perspective;
+        point.sy = centerY + tiltedY * scale * perspective;
+        point.depth = depth;
+        point.persp = perspective;
+        point.fire = node.fire;
+      }
+      depthOrder.sort((a, b) => a.depth - b.depth);
+    };
+
+    const emitFrom = (index: number, fanoutChance: number, signalLimit: number) => {
+      nodes[index].fire = 1;
+      const peers = adjacency[index];
+      for (let peerIndex = 0; peerIndex < peers.length; peerIndex += 1) {
+        if (signals.length >= signalLimit) break;
+        if (Math.random() < fanoutChance) {
+          signals.push({
+            from: index,
+            to: peers[peerIndex],
+            t: 0,
+            bend: rnd(-1, 1),
+            palette: nodes[index].palette,
+          });
+        }
       }
     };
 
-    // --- projection ----------------------------------------------------
-    const project = (n: Node) => {
-      const cr = Math.cos(rot);
-      const sr = Math.sin(rot);
-      const x = n.x * cr - n.z * sr;
-      const z = n.x * sr + n.z * cr;
-      const y2 = n.y * CT - z * ST;
-      const z2 = n.y * ST + z * CT;
-      const persp = 1 / (2.0 - z2 * 0.6);
-      return { sx: CX + x * scale * persp, sy: CY + y2 * scale * persp, depth: z2, persp };
-    };
-
-    const step = (dt: number) => {
-      const target = Math.max(0, Math.min(1, energyRef.current));
-      cur += (target - cur) * Math.min(1, dt * (target > cur ? 4.8 : 2.4));
-      const profile = getBrainMotionProfile(cur);
+    const step = (delta: number) => {
+      const rawTarget = energyRef.current;
+      const target = Number.isFinite(rawTarget) ? Math.max(0, Math.min(1, rawTarget)) : 0;
+      currentEnergy +=
+        (target - currentEnergy) * Math.min(1, delta * (target > currentEnergy ? 4.6 : 2.2));
+      const profile = getBrainMotionProfile(currentEnergy);
 
       if (reducedMotion) {
         signals.length = 0;
-        fireAcc = 0;
-        for (const n of nodes) {
-          n.x = n.bx;
-          n.y = n.by;
-          n.z = n.bz;
-          n.fire = 0;
+        fireAccumulator = 0;
+        for (const node of nodes) {
+          node.x = node.bx;
+          node.y = node.by;
+          node.z = node.bz;
+          node.fire = 0;
         }
-        return;
+        return profile;
       }
 
-      rot += dt * profile.rotationSpeed;
-      tGlobal += dt * profile.driftSpeed;
-      for (const n of nodes) {
-        const w = tGlobal + n.drift;
-        n.x = n.bx + Math.sin(w) * profile.driftAmplitude;
-        n.y = n.by + Math.cos(w * 0.9) * profile.driftAmplitude;
-        n.z = n.bz + Math.sin(w * 1.1) * profile.driftAmplitude;
-        n.fire = Math.max(0, n.fire - dt * profile.fireDecay);
+      rotation += delta * profile.rotationSpeed;
+      globalTime += delta * profile.driftSpeed;
+      for (const node of nodes) {
+        const phase = globalTime + node.drift;
+        node.x = node.bx + Math.sin(phase) * profile.driftAmplitude;
+        node.y = node.by + Math.cos(phase * 0.91) * profile.driftAmplitude;
+        node.z = node.bz + Math.sin(phase * 1.09) * profile.driftAmplitude;
+        node.fire = Math.max(0, node.fire - delta * profile.fireDecay);
       }
 
-      fireAcc += dt * profile.firingRate;
-      while (fireAcc >= 1) {
-        fireAcc -= 1;
-        emitFrom((Math.random() * nodes.length) | 0, profile.fanoutChance);
+      const signalLimit = Math.max(8, Math.round(profile.signalBudget * adaptiveQuality));
+      if (signals.length > signalLimit) signals.length = signalLimit;
+      fireAccumulator = Math.min(4, fireAccumulator + delta * profile.firingRate);
+      const rootBursts = Math.min(3, Math.floor(fireAccumulator));
+      fireAccumulator -= rootBursts;
+      for (let burst = 0; burst < rootBursts; burst += 1) {
+        emitFrom((Math.random() * nodes.length) | 0, profile.fanoutChance, signalLimit);
       }
 
-      for (let i = signals.length - 1; i >= 0; i--) {
-        const s = signals[i];
-        s.t += dt * profile.signalSpeed;
-        if (s.t >= 1) {
-          nodes[s.to].fire = Math.min(1, nodes[s.to].fire + 0.8);
-          if (Math.random() < profile.cascadeChance) {
-            emitFrom(s.to, profile.fanoutChance);
-          }
-          signals.splice(i, 1);
+      let cascadeBudget = 3 + Math.floor(currentEnergy * 5);
+      for (let index = signals.length - 1; index >= 0; index -= 1) {
+        const signal = signals[index];
+        signal.t += delta * profile.signalSpeed;
+        if (signal.t < 1) continue;
+        const destination = signal.to;
+        nodes[destination].fire = Math.min(1, nodes[destination].fire + 0.82);
+        signals[index] = signals[signals.length - 1];
+        signals.pop();
+        if (cascadeBudget > 0 && Math.random() < profile.cascadeChance) {
+          cascadeBudget -= 1;
+          emitFrom(destination, profile.fanoutChance, signalLimit);
         }
       }
+      return profile;
     };
 
-    const draw = () => {
+    const drawShell = (fieldStrength: number) => {
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.scale(scale * 0.59, scale * 0.49);
+      ctx.rotate(Math.sin(rotation * 0.45) * 0.018);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.58 + currentEnergy * 0.2;
+      ctx.fillStyle = shellGradient;
+      ctx.fill(brainHull);
+      ctx.globalAlpha = 0.25 + currentEnergy * 0.28;
+      ctx.strokeStyle = "rgba(111,210,255,0.42)";
+      ctx.lineWidth = 2.2 / Math.max(1, scale);
+      ctx.stroke(brainHull);
+
+      ctx.globalAlpha = 0.14 + fieldStrength * 1.8;
+      ctx.strokeStyle = "rgba(121,153,255,0.55)";
+      ctx.lineWidth = 1.25 / Math.max(1, scale);
+      for (const contour of corticalContours) ctx.stroke(contour);
+
+      ctx.globalAlpha = 0.22 + currentEnergy * 0.3;
+      ctx.strokeStyle = "rgba(208,223,255,0.58)";
+      ctx.lineWidth = 1.8 / Math.max(1, scale);
+      ctx.beginPath();
+      ctx.moveTo(0, -0.94);
+      ctx.bezierCurveTo(-0.055, -0.68, 0.045, -0.42, -0.025, -0.13);
+      ctx.bezierCurveTo(-0.06, 0.08, 0.015, 0.28, 0, 0.52);
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    const draw = (profile: ReturnType<typeof getBrainMotionProfile>) => {
       if (reducedMotion) {
         ctx.globalCompositeOperation = "source-over";
-        ctx.clearRect(0, 0, W, H);
+        ctx.clearRect(0, 0, width, height);
       } else {
-        // Fade old pixels without painting a dark rectangle over the chat.
         ctx.globalCompositeOperation = "destination-out";
-        ctx.fillStyle = `rgba(0,0,0,${0.22 + 0.16 * (1 - cur)})`;
-        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = `rgba(0,0,0,${0.25 + 0.13 * (1 - currentEnergy)})`;
+        ctx.fillRect(0, 0, width, height);
       }
       ctx.globalCompositeOperation = "lighter";
 
-      // These fields and every neuron/signal bloom reuse mount-time sprites;
-      // the animation loop allocates no CanvasGradient objects.
-      if (cur > 0.03) {
-        drawSprite(fieldSprites[0], CX - scale * 0.2, CY, scale * 1.18, cur * 0.075);
-        drawSprite(fieldSprites[1], CX + scale * 0.2, CY, scale * 1.18, cur * 0.065);
+      drawShell(profile.fieldStrength);
+      const fieldAlpha = profile.fieldStrength * (0.7 + currentEnergy * 0.3);
+      drawSprite(fieldSprites[0], centerX - scale * 0.23, centerY - scale * 0.05, scale, fieldAlpha);
+      drawSprite(fieldSprites[1], centerX + scale * 0.23, centerY - scale * 0.06, scale, fieldAlpha * 0.82);
+      if (currentEnergy > 0.36) {
+        drawSprite(fieldSprites[2], centerX, centerY + scale * 0.18, scale * 0.72, fieldAlpha * 0.42);
       }
 
-      const P = nodes.map((n, i) => {
-        const p = project(n) as ReturnType<typeof project> & {
-          i: number;
-          fire: number;
-          seed: number;
-          palette: number;
-        };
-        p.i = i;
-        p.fire = n.fire;
-        p.seed = n.seed;
-        p.palette = n.palette;
-        return p;
-      });
-      const order = P.slice().sort((a, b) => a.depth - b.depth);
-
-      ctx.globalAlpha = 1;
-      for (const e of edges) {
-        const a = P[e.from];
-        const b = P[e.to];
-        const dep = (a.depth + b.depth) / 2;
-        const heat = Math.max(a.fire, b.fire);
-        const al =
-          (0.045 + cur * 0.29 + heat * 0.32) *
-          (0.42 + 0.58 * ((dep + 1) / 2));
-        ctx.strokeStyle = `rgba(${e.color[0]},${e.color[1]},${e.color[2]},${al})`;
-        ctx.lineWidth = Math.max(0.4, scale * (0.006 + heat * 0.006) * a.persp);
+      projectNodes();
+      const edgeStride = adaptiveQuality < 0.68 ? 2 : 1;
+      for (let index = 0; index < edges.length; index += edgeStride) {
+        const edge = edges[index];
+        const from = projected[edge.from];
+        const to = projected[edge.to];
+        const depth = (from.depth + to.depth) * 0.5;
+        const heat = Math.max(from.fire, to.fire);
+        const depthAlpha = 0.3 + 0.7 * Math.max(0, Math.min(1, (depth + 1.15) / 2.3));
+        const alpha = (profile.edgeOpacity + heat * 0.31) * depthAlpha;
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = `rgba(${edge.color[0]},${edge.color[1]},${edge.color[2]},${alpha})`;
+        ctx.lineWidth = Math.max(0.38, scale * (0.0048 + heat * 0.006) * from.persp);
         ctx.beginPath();
-        ctx.moveTo(a.sx, a.sy);
-        ctx.lineTo(b.sx, b.sy);
+        ctx.moveTo(from.sx, from.sy);
+        ctx.lineTo(to.sx, to.sy);
         ctx.stroke();
       }
 
-      for (const s of signals) {
-        const a = P[s.from];
-        const b = P[s.to];
-        const te = s.t * s.t * (3 - 2 * s.t);
-        const x = a.sx + (b.sx - a.sx) * te;
-        const y = a.sy + (b.sy - a.sy) * te;
-        const persp = (a.persp + b.persp) / 2;
-        const r = (scale * 0.013 + cur * scale * 0.014) * persp;
-        drawSprite(signalSprite, x, y, r * 3.8, 0.78 + cur * 0.22);
+      for (const signal of signals) {
+        const from = projected[signal.from];
+        const to = projected[signal.to];
+        const eased = signal.t * signal.t * (3 - 2 * signal.t);
+        const dx = to.sx - from.sx;
+        const dy = to.sy - from.sy;
+        const length = Math.max(1, Math.hypot(dx, dy));
+        const bend = Math.sin(Math.PI * eased) * scale * 0.018 * signal.bend;
+        const x = from.sx + dx * eased - (dy / length) * bend;
+        const y = from.sy + dy * eased + (dx / length) * bend;
+        const trailT = Math.max(0, eased - 0.075);
+        const trailBend = Math.sin(Math.PI * trailT) * scale * 0.018 * signal.bend;
+        const trailX = from.sx + dx * trailT - (dy / length) * trailBend;
+        const trailY = from.sy + dy * trailT + (dx / length) * trailBend;
+        const perspective = (from.persp + to.persp) * 0.5;
+        const radius = scale * (0.011 + currentEnergy * 0.01) * perspective;
+        const sprite = signalSprites[signal.palette];
+        drawSprite(sprite, trailX, trailY, radius * 2.8, 0.23 + currentEnergy * 0.22);
+        drawSprite(sprite, x, y, radius * 4, 0.72 + currentEnergy * 0.2);
       }
 
-      for (const p of order) {
-        const pulse = cur * (0.5 + 0.5 * Math.sin(tGlobal * (0.8 + cur * 1.8) + p.seed * 6.28));
-        const depthN = (p.depth + 1) / 2;
-        const base = scale * (0.008 + 0.013 * depthN) * p.persp;
-        const visibleFire = p.fire * (0.35 + cur * 0.65);
-        const rr = base * (1 + pulse * 0.2 + visibleFire * 0.95 + cur * 0.3);
-        const bright = Math.min(
+      const renderWideGlow = adaptiveQuality >= 0.62;
+      for (const point of depthOrder) {
+        const pulse = reducedMotion
+          ? 0
+          : currentEnergy *
+            (0.5 + 0.5 * Math.sin(globalTime * (0.72 + currentEnergy * 1.65) + point.seed * TAU));
+        const normalizedDepth = Math.max(0, Math.min(1, (point.depth + 1.15) / 2.3));
+        const baseRadius = scale * (0.007 + 0.012 * normalizedDepth) * point.persp;
+        const visibleFire = point.fire * (0.32 + currentEnergy * 0.68);
+        const radius = baseRadius * (1 + pulse * 0.18 + visibleFire * 0.9 + currentEnergy * 0.2);
+        const brightness = Math.min(
           1,
-          0.28 + visibleFire * 0.58 + cur * 0.36 + depthN * 0.13,
+          0.24 + visibleFire * 0.61 + currentEnergy * 0.3 + normalizedDepth * 0.14,
         );
-        const sprite = nodeSprites[p.palette];
+        const sprite = nodeSprites[point.palette];
 
-        drawSprite(sprite, p.sx, p.sy, rr * 4.6, bright * (0.42 + cur * 0.12));
-        drawSprite(sprite, p.sx, p.sy, rr * 1.7, bright * 0.9);
-
+        if (renderWideGlow && (normalizedDepth > 0.22 || visibleFire > 0.2)) {
+          drawSprite(sprite, point.sx, point.sy, radius * 4.4, brightness * 0.42);
+        }
+        drawSprite(sprite, point.sx, point.sy, radius * 1.65, brightness * 0.9);
         ctx.globalAlpha = 1;
-        ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.24 + visibleFire * 0.7 + cur * 0.12)})`;
+        ctx.fillStyle = `rgba(255,255,255,${Math.min(1, 0.2 + visibleFire * 0.72 + currentEnergy * 0.11)})`;
         ctx.beginPath();
-        ctx.arc(p.sx, p.sy, Math.max(0.45, rr * (0.34 + visibleFire * 0.34)), 0, 7);
+        ctx.arc(point.sx, point.sy, Math.max(0.42, radius * (0.31 + visibleFire * 0.32)), 0, TAU);
         ctx.fill();
       }
 
@@ -368,65 +511,97 @@ export function BrainCanvas({
     };
 
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      W = canvas.clientWidth || 180;
-      H = canvas.clientHeight || 180;
-      canvas.width = Math.max(1, Math.round(W * dpr));
-      canvas.height = Math.max(1, Math.round(H * dpr));
+      width = canvas.clientWidth || 180;
+      height = canvas.clientHeight || 180;
+      const pixelBudget = 900_000;
+      const desiredDpr = Math.min(window.devicePixelRatio || 1, 1.75);
+      const budgetDpr = Math.sqrt(pixelBudget / Math.max(1, width * height));
+      const dpr = Math.max(1, Math.min(desiredDpr, budgetDpr));
+      canvas.width = Math.max(1, Math.round(width * dpr));
+      canvas.height = Math.max(1, Math.round(height * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      CX = W / 2;
-      CY = H / 2;
-      scale = Math.min(W, H) * 0.42;
-      ctx.clearRect(0, 0, W, H);
+      centerX = width * 0.5;
+      centerY = height * 0.5;
+      scale = Math.min(width, height) * 0.48;
+      shellGradient = ctx.createRadialGradient(
+        centerX - scale * 0.12,
+        centerY - scale * 0.2,
+        scale * 0.08,
+        centerX,
+        centerY,
+        scale * 0.74,
+      );
+      shellGradient.addColorStop(0, "rgba(65,154,232,0.17)");
+      shellGradient.addColorStop(0.54, "rgba(40,84,158,0.09)");
+      shellGradient.addColorStop(0.83, "rgba(118,92,220,0.055)");
+      shellGradient.addColorStop(1, "rgba(10,28,54,0.015)");
+      ctx.clearRect(0, 0, width, height);
     };
 
-    const frame = (ts: number) => {
-      if (!running) return;
-      if (!visible || document.hidden) {
-        // Skip work while off-screen; keep the loop alive cheaply.
-        last = ts;
-        raf = requestAnimationFrame(frame);
-        return;
-      }
-      // A reduced-motion canvas only needs enough frames to ease brightness
-      // when energy changes; rotation, drift and signals remain disabled.
-      if (reducedMotion && ts - last < 100) {
-        raf = requestAnimationFrame(frame);
-        return;
-      }
-      const dt = Math.min((ts - last) / 1000, reducedMotion ? 0.1 : 0.05);
-      last = ts;
-      step(dt);
-      draw();
-      raf = requestAnimationFrame(frame);
+    const shouldRun = () => !disposed && inViewport && !document.hidden;
+    const requestFrame = () => {
+      if (raf === 0 && shouldRun()) raf = requestAnimationFrame(frame);
     };
+    const syncAnimation = () => {
+      if (shouldRun()) {
+        lastFrame = performance.now();
+        requestFrame();
+      } else if (raf !== 0) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+    };
+
+    function frame(timestamp: number) {
+      raf = 0;
+      if (!shouldRun()) return;
+      const targetEnergy = Number.isFinite(energyRef.current) ? energyRef.current : 0;
+      const targetProfile = getBrainMotionProfile(targetEnergy);
+      const targetFrameRate = reducedMotion ? 8 : targetProfile.frameRate * (0.78 + adaptiveQuality * 0.22);
+      const interval = 1000 / targetFrameRate;
+      const elapsed = timestamp - lastFrame;
+      if (elapsed < interval) {
+        requestFrame();
+        return;
+      }
+
+      const frameStart = performance.now();
+      const delta = Math.min(elapsed / 1000, reducedMotion ? 0.125 : 0.065);
+      lastFrame = timestamp;
+      const profile = step(delta);
+      draw(profile);
+      const frameCost = performance.now() - frameStart;
+      averageFrameCost = averageFrameCost === 0 ? frameCost : averageFrameCost * 0.92 + frameCost * 0.08;
+      if (averageFrameCost > 8) adaptiveQuality = Math.max(0.52, adaptiveQuality - 0.035);
+      else if (averageFrameCost < 4.5) adaptiveQuality = Math.min(1, adaptiveQuality + 0.004);
+      requestFrame();
+    }
 
     resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
-    const io = new IntersectionObserver((entries) => {
-      visible = entries[0]?.isIntersecting ?? true;
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(canvas);
+    const intersectionObserver = new IntersectionObserver((entries) => {
+      inViewport = entries[0]?.isIntersecting ?? true;
+      syncAnimation();
     });
-    io.observe(canvas);
+    intersectionObserver.observe(canvas);
+    const onVisibilityChange = () => syncAnimation();
+    document.addEventListener("visibilitychange", onVisibilityChange);
     const onReducedMotionChange = (event: MediaQueryListEvent) => {
       reducedMotion = event.matches;
-      if (reducedMotion) {
-        signals.length = 0;
-        fireAcc = 0;
-      }
+      signals.length = 0;
+      fireAccumulator = 0;
+      syncAnimation();
     };
     reducedMotionQuery.addEventListener("change", onReducedMotionChange);
-
-    raf = requestAnimationFrame((ts) => {
-      last = ts;
-      frame(ts);
-    });
+    requestFrame();
 
     return () => {
-      running = false;
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-      io.disconnect();
+      disposed = true;
+      if (raf !== 0) cancelAnimationFrame(raf);
+      resizeObserver.disconnect();
+      intersectionObserver.disconnect();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       reducedMotionQuery.removeEventListener("change", onReducedMotionChange);
     };
   }, []);

@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import os
 import threading
 import time
 from types import SimpleNamespace
@@ -35,10 +37,8 @@ logger = logging.getLogger(__name__)
 _model_lock = threading.Lock()
 _loaded_model: Any = None
 _loaded_model_path: Optional[str] = None
-# The cache key is (path, n_ctx): a request for a DIFFERENT context window must
-# reload rather than silently reuse a model loaded at another n_ctx. Keying on
-# path alone is the "first writer wins" trap that let one caller pin n_ctx for
-# every other caller in the process.
+# The cache key is (path, n_ctx, threads): a different context window or CPU
+# capacity must reload rather than silently reuse the first caller's model.
 _loaded_model_key: Optional[tuple] = None
 
 
@@ -85,20 +85,22 @@ class LocalModelLoadError(RuntimeError):
     """Raised when llama-cpp-python or the GGUF weights can't be loaded."""
 
 
-def _default_threads() -> int:
-    """A CPU-thread count that leaves headroom instead of pegging every core.
+def _bounded_threads(requested: int | None = None, cpu_count: int | None = None) -> int:
+    """Clamp inference capacity to 30–60% of the VPS logical CPUs.
 
-    Zeb runs one *larger* model at "lower capacity" for efficiency: using
-    roughly half the cores (capped) keeps the box responsive for the rest of
-    the agent + background bots while still generating at a usable rate.
+    This is a capacity bound, not an artificial CPU burner: the model rests
+    when idle, but every real inference has enough parallelism to stay useful
+    while leaving at least 40% of the box for the dashboard and system work.
     """
-    try:
-        import os
+    cpus = max(1, int(cpu_count or os.cpu_count() or 4))
+    minimum = max(1, math.ceil(cpus * 0.30))
+    maximum = max(minimum, math.floor(cpus * 0.60))
+    target = int(requested or round(cpus * 0.45))
+    return max(minimum, min(maximum, target))
 
-        cpus = os.cpu_count() or 4
-    except Exception:
-        cpus = 4
-    return max(2, min(8, cpus // 2))
+
+def _default_threads() -> int:
+    return _bounded_threads()
 
 
 def _load_model(
@@ -122,7 +124,8 @@ def _load_model(
     the model runs at "lower capacity" without starving everything else.
     """
     global _loaded_model, _loaded_model_path, _loaded_model_key
-    key = (model_path, int(n_ctx))
+    threads = _bounded_threads(n_threads)
+    key = (model_path, int(n_ctx), threads)
     with _model_lock:
         if _loaded_model is not None and _loaded_model_key == key:
             return _loaded_model
@@ -144,7 +147,6 @@ def _load_model(
                 "`pip install llama-cpp-python`."
             )
 
-        threads = n_threads or _default_threads()
         logger.info(
             "Loading local GGUF model from %s (n_ctx=%d, n_threads=%d, mmap=%s)",
             model_path, n_ctx, threads, use_mmap,

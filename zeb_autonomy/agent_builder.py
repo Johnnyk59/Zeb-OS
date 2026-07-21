@@ -61,7 +61,7 @@ PERMISSION_PROFILES = {
 # Ready-made starting templates for the three seed agents plus a generic one.
 TEMPLATES = {
     "quant": {
-        "label": "Quant Bot",
+        "label": "Qompot",
         "purpose": "Quantitative market research, signals and backtests.",
         "suggested_skills": ["data-fetch", "backtest", "risk-report"],
         "model": "local",
@@ -124,7 +124,10 @@ def spec_from_template(agent_id: str, template: str | None = None, **overrides) 
         model=str(overrides.get("model") or tpl["model"]),
         permission_profile=str(overrides.get("permission_profile") or "inherit"),
         skills=list(overrides.get("skills") or tpl["suggested_skills"]),
-        dashboard_url=str(overrides.get("dashboard_url") or ""),
+        dashboard_url=str(
+            overrides.get("dashboard_url")
+            or ("/agent-dashboards/quant/" if agent_id == "quant" else "")
+        ),
     )
     return spec
 
